@@ -1,9 +1,5 @@
-import matplotlib
-from matplotlib import pyplot as plt
 import pandas as pd
-import numpy as np
-import seaborn as sns
-from matplotlib import colors
+from matplotlib import pyplot as plt
 
 
 def make_plot(full_df, name):
@@ -12,7 +8,7 @@ def make_plot(full_df, name):
     std_df = full_df.pivot(index='Size', columns='Name', values='Stdev')
     print(df)
     colors = ['mediumseagreen', 'mediumaquamarine', 'indianred', 'lightcoral']
-    labels = ['DaCeML', 'DaCeML + optimizations', 'PyG dense', 'PyG sparse']
+    labels = ['DaCeML', 'DaCeML + optimizations', 'PyG adjacency list', 'PyG CSR']
     ax = df.plot(figsize=(5, 5), kind='barh', ylabel='Runtime [ms]', xlabel='Hidden size', color=colors, xerr=std_df)
     ax.set_axisbelow(True)
     ax.yaxis.grid(color='lightgray', linestyle='--')
