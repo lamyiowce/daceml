@@ -3,6 +3,7 @@ import functools
 import logging
 import statistics
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -11,8 +12,10 @@ from torch_geometric.datasets import Planetoid
 from torch_geometric.transforms import GCNNorm
 from torch_sparse import SparseTensor
 
+import daceml
 from daceml import onnx as donnx
 from daceml.torch.module import dace_module
+from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.models import LinearModel, GCN, GAT
 from examples.gnn_benchmark.util import specialize_mem_onnx, \
     apply_dace_auto_optimize, make_maps_dynamic
@@ -62,7 +65,53 @@ def check_correctness(dace_model, torch_model, dace_args,
         return False
 
 
-if __name__ == '__main__':
+def do_benchmark(dace_model: daceml.torch.DaceModule,
+                 dace_args: Sequence[torch.Tensor],
+                 torch_model: torch.nn.Module,
+                 torch_csr_args: Sequence[torch.Tensor],
+                 torch_edge_list_args: Sequence[torch.Tensor],
+                 args,
+                 save_output: bool = True):
+    from daceml.testing.profiling import time_funcs, print_time_statistics
+
+    funcs = [
+        lambda: dace_model(*dace_args),
+        lambda: torch_model(*torch_csr_args),
+        lambda: torch_model(*torch_edge_list_args),
+    ]
+
+    name = args.name
+    if args.threadblock_dynamic:
+        name += "_tb-dynamic"
+    if args.opt:
+        name += "_autoopt"
+    if args.persistent_mem:
+        name += "_persistent_mem"
+    func_names = [name, 'torch_csr', 'torch_edge_list']
+    times = time_funcs(funcs,
+                       func_names=func_names,
+                       warmups=10,
+                       num_iters=100)
+    print()
+    print(f"\n------ {args.model.upper()} ------")
+    print_time_statistics(times, func_names)
+    print()
+
+    if args.outfile is not None and save_output:
+        add_header = not args.outfile.exists()
+        with open(args.outfile, 'a') as file:
+            if add_header:
+                headers = [
+                    'Name', 'Model', 'Size', 'Min', 'Mean', 'Median',
+                    'Stdev', 'Max'
+                ]
+                file.write(','.join(headers) + '\n')
+            file.write(
+                stats_as_string(times, func_names, args.model,
+                                args.hidden))
+
+
+def main():
     parser = argparse.ArgumentParser(description='benchmark')
     parser.add_argument('--small', action='store_true')
     parser.add_argument('--dry', action='store_true')
@@ -80,7 +129,7 @@ if __name__ == '__main__':
     model_class = models[args.model]
     num_hidden_features = args.hidden
     args.hidden = args.hidden or (8 if args.model == 'gat' else 512)
-    outfile = Path(args.outfile) if args.outfile is not None else None
+    args.outfile = Path(args.outfile) if args.outfile is not None else None
 
     log = logging.getLogger(__name__)
     log.setLevel(logging.INFO)
@@ -105,14 +154,7 @@ if __name__ == '__main__':
     normalize = args.normalize
     print("Normalize: ", normalize)
 
-    if args.model == 'gcn':
-        gcn_norm = GCNNorm(add_self_loops=True)
-        data = gcn_norm(data)
-    x = data.x
-    sparse_edge_index = SparseTensor.from_edge_index(
-        data.edge_index, edge_attr=data.edge_weight)
-    edge_rowptr, edge_col, edge_weights = sparse_edge_index.csr()
-
+    # Define models.
     torch_model = model_class(num_node_features, num_hidden_features,
                               num_classes, normalize).to(device)
     dace_model = dace_module(model_class)(num_node_features,
@@ -159,18 +201,30 @@ if __name__ == '__main__':
             "apply_threadblock_dynamic_maps",
             make_maps_dynamic_with_excluded_loops)
 
-    dace_args = (x, ) if args.model == 'linear' else (x, edge_rowptr, edge_col)
+    if args.model == 'gcn':
+        gcn_norm = GCNNorm(add_self_loops=True)
+        data = gcn_norm(data)
+    x = data.x
+    sparse_edge_index = SparseTensor.from_edge_index(
+        data.edge_index, edge_attr=data.edge_weight)
+    edge_rowptr, edge_col, edge_weights = sparse_edge_index.csr()
+
+    torch_model, dace_data = optimize_data(torch_model, data,
+                                           target_format='csr')
+
+    dace_args = (x,) if args.model == 'linear' else dace_data.to_input_list()
+
+    # Create args lists for torch models.
     # pyg requires the sparse tensor input to be transposed.
-    torch_csr_args = (x, ) if args.model == 'linear' else (
+    torch_csr_args = (x,) if args.model == 'linear' else (
         x, sparse_edge_index.t())
-    torch_edge_list_args = (x, ) if args.model == 'linear' else (
+
+    torch_edge_list_args = (x,) if args.model == 'linear' else (
         x, data.edge_index)
-
     if edge_weights is not None and args.model == 'gcn':
-        dace_args += (edge_weights, )
-        torch_edge_list_args += (data.edge_weight, )
+        torch_edge_list_args += (data.edge_weight,)
 
-    correct = check_correctness(dace_model, torch_model, dace_args,
+    results_correct = check_correctness(dace_model, torch_model, dace_args,
                                 torch_edge_list_args)
 
     if args.onlydace:
@@ -183,39 +237,9 @@ if __name__ == '__main__':
         print("PyG edge list: ", torch_model(*torch_edge_list_args))
     else:
         print("Benchmarking...")
-        from daceml.testing.profiling import time_funcs, print_time_statistics
+        do_benchmark(dace_model, dace_args, torch_model, torch_csr_args,
+                     torch_edge_list_args, args, save_output=results_correct)
 
-        funcs = [
-            lambda: dace_model(*dace_args),
-            lambda: torch_model(*torch_csr_args),
-            lambda: torch_model(*torch_edge_list_args),
-        ]
 
-        name = args.name
-        if args.threadblock_dynamic:
-            name += "_tb-dynamic"
-        if args.opt:
-            name += "_autoopt"
-        if args.persistent_mem:
-            name += "_persistent_mem"
-        func_names = [name, 'torch_csr', 'torch_edge_list']
-        times = time_funcs(funcs,
-                           func_names=func_names,
-                           warmups=10,
-                           num_iters=100)
-        print(f"\n------ {args.model.upper()} ------")
-        print_time_statistics(times, func_names)
-        print()
-
-        if outfile is not None and correct:
-            add_header = not outfile.exists()
-            with open(outfile, 'a') as file:
-                if add_header:
-                    headers = [
-                        'Name', 'Model', 'Size', 'Min', 'Mean', 'Median',
-                        'Stdev', 'Max'
-                    ]
-                    file.write(','.join(headers) + '\n')
-                file.write(
-                    stats_as_string(times, func_names, args.model,
-                                    args.hidden))
+if __name__ == '__main__':
+    main()
