@@ -2,8 +2,11 @@ import logging
 
 import dace
 import torch
-from dace.transformation.auto.auto_optimize import auto_optimize as dace_auto_optimize
 from dace.dtypes import ScheduleType
+from dace.transformation.auto.auto_optimize import \
+    auto_optimize as dace_auto_optimize
+
+import daceml
 
 
 def _specialize_memory(sdfg):
@@ -66,3 +69,12 @@ def make_maps_dynamic(module, exclude_loops=None):
         logging.warning(
             "Following loops were marked as excluded from thread-block dynamic "
             "scheduling but were not found in the SDFG: %s", not_excluded)
+
+
+def set_implementation(module: daceml.torch.module.DaceModule,
+                       implementation_name: str):
+    sdfg = module.sdfg
+    for node, _ in sdfg.all_nodes_recursive():
+        if isinstance(node,
+                      dace.sdfg.nodes.LibraryNode) and implementation_name in node.implementations:
+            node.implementation = implementation_name

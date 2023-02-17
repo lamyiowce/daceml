@@ -3,10 +3,11 @@ import functools
 import logging
 import statistics
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, Tuple
 
 import numpy as np
 import torch
+import torch_geometric
 from torch_geometric.data import Data
 from torch_geometric.datasets import Planetoid
 from torch_geometric.transforms import GCNNorm
@@ -15,6 +16,7 @@ from torch_sparse import SparseTensor
 import daceml
 from daceml import onnx as donnx
 from daceml.torch.module import dace_module
+from examples.gnn_benchmark import util
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.models import LinearModel, GCN, GAT
 from examples.gnn_benchmark.util import specialize_mem_onnx, \
@@ -111,11 +113,33 @@ def do_benchmark(dace_model: daceml.torch.DaceModule,
                                 args.hidden))
 
 
+def get_dataset(dataset_name: str) -> Tuple[
+    torch_geometric.data.Data, int, int]:
+    if dataset_name == 'cora':
+        dataset = Planetoid(root='/tmp/Cora', name='Cora')
+        data = dataset[0].to(device)
+        num_node_features = dataset.num_node_features
+        num_classes = dataset.num_classes
+    elif dataset_name == 'small':
+        _x = torch.tensor([[0., 1], [1, 1], [-1, 0]]).to(device)
+        _edge_index = torch.tensor([[0, 0, 0, 2, 2], [0, 1, 2, 0,
+                                                      2]]).to(device)
+        _edge_attr = torch.tensor([1, 1, 1, 1., 1]).to(device)
+        data = Data(x=_x, edge_index=_edge_index, edge_attr=_edge_attr)
+        num_node_features = _x.shape[1]
+        num_classes = 2
+    else:
+        raise NotImplementedError("No such dataset: ", dataset_name)
+    return data, num_node_features, num_classes
+
+
 def main():
     parser = argparse.ArgumentParser(description='benchmark')
-    parser.add_argument('--small', action='store_true')
-    parser.add_argument('--dry', action='store_true')
-    parser.add_argument('--onlydace', action='store_true')
+    parser.add_argument('--data', choices=['small', 'cora'], default='cora')
+    parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace'],
+                        required=True)
+    parser.add_argument('--impl', choices=['semester_thesis', 'vanilla_csr'],
+                        required=True)
     parser.add_argument('--normalize', action='store_true')
     parser.add_argument('--persistent-mem', action='store_true')
     parser.add_argument('--opt', action='store_true')
@@ -134,19 +158,7 @@ def main():
     log = logging.getLogger(__name__)
     log.setLevel(logging.INFO)
 
-    if not args.small:
-        dataset = Planetoid(root='/tmp/Cora', name='Cora')
-        data = dataset[0].to(device)
-        num_node_features = dataset.num_node_features
-        num_classes = dataset.num_classes
-    else:
-        _x = torch.tensor([[0., 1], [1, 1], [-1, 0]]).to(device)
-        _edge_index = torch.tensor([[0, 0, 0, 2, 2], [0, 1, 2, 0,
-                                                      2]]).to(device)
-        _edge_attr = torch.tensor([1, 1, 1, 1., 1]).to(device)
-        data = Data(x=_x, edge_index=_edge_index, edge_attr=_edge_attr)
-        num_node_features = _x.shape[1]
-        num_classes = 2
+    data, num_node_features, num_classes = get_dataset(args.data)
 
     print("Num node features: ", num_node_features)
     print("Num classes: ", num_classes)
@@ -201,6 +213,10 @@ def main():
             "apply_threadblock_dynamic_maps",
             make_maps_dynamic_with_excluded_loops)
 
+    set_implementation = functools.partial(util.set_implementation,
+                                           implementation_name=args.impl)
+    dace_model.prepend_post_onnx_hook("set_implementation", set_implementation)
+
     if args.model == 'gcn':
         gcn_norm = GCNNorm(add_self_loops=True)
         data = gcn_norm(data)
@@ -225,20 +241,22 @@ def main():
         torch_edge_list_args += (data.edge_weight,)
 
     results_correct = check_correctness(dace_model, torch_model, dace_args,
-                                torch_edge_list_args)
+                                        torch_edge_list_args)
 
-    if args.onlydace:
+    if args.mode == 'onlydace':
         print('Only dace model for profiling.')
         print("Dace: ", dace_model(*dace_args))
-    elif args.dry:
+    elif args.mode == 'dry':
         print("Single run of all models.")
         print("Dace: ", dace_model(*dace_args))
         print("PyG csr: ", torch_model(*torch_csr_args))
         print("PyG edge list: ", torch_model(*torch_edge_list_args))
-    else:
+    elif args.mode == 'benchmark':
         print("Benchmarking...")
         do_benchmark(dace_model, dace_args, torch_model, torch_csr_args,
                      torch_edge_list_args, args, save_output=results_correct)
+    else:
+        raise ValueError("Mode not supported " + args.mode)
 
 
 if __name__ == '__main__':

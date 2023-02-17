@@ -66,10 +66,14 @@ class GCNConv(ONNXForward):
             return program_for_node(prog_sparse, sdfg, state, node)
 
 
-@op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv", name="pure")
-class GATConv(ONNXForward):
+class GATConvBase(ONNXForward):
     @staticmethod
-    def forward(node: onnx_op.ONNXOp, state: SDFGState,
+    def make_gat_op(N: int, heads: int, num_out_features: int, num_entries: int,
+                    dtype: dace.dtypes.Typeclasses, negative_slope):
+        raise NotImplementedError
+
+    @classmethod
+    def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
                 sdfg: SDFG) -> typing.Union[nodes.Node, SDFG]:
         if node.module.add_self_loops:
             raise NotImplementedError("Adding self loops is not supported. "
@@ -87,14 +91,36 @@ class GATConv(ONNXForward):
         negative_slope = node.module.negative_slope
         assert negative_slope < 1.0
 
-        def prog_sparse(node_features, rowptrs, columns, lin_srcDOTweight,
-                        att_src, att_dst, output):
+        gat_op = cls.make_gat_op(N, heads, num_out_features, num_entries, dtype,
+                                 negative_slope)
+        if 'bias' in [inp.name for inp in node.schema.inputs]:
+            def bias_prog(node_features, rowptrs, columns, lin_srcDOTweight,
+                          att_src, att_dst, bias, output):
+                gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
+                       att_src, att_dst, output)
+                for i, j in dace.map[0:N, 0:num_out_features * heads]:
+                    output[i, j] += bias[j]
+
+            return program_for_node(bias_prog, sdfg, state, node)
+        else:
+            return program_for_node(gat_op, sdfg, state, node)
+
+
+@op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
+                   name="semester_thesis")
+class GATConv(GATConvBase):
+    @staticmethod
+    def make_gat_op(N, heads, num_out_features, num_entries, dtype,
+                    negative_slope):
+        def gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
+                   att_src, att_dst, output):
             """
             node_features: input features, N x F
             rowptrs: rowptr, N+1
             columns: col, num_entries
             lin_srcDOTweight: H * F' x F
-            att_srcDOT_weight: H x F
+            att_src: H x F
+            att_dst: H x F
             output: N x H * F'
             """
 
@@ -112,6 +138,8 @@ class GATConv(ONNXForward):
             # Calculate attention weights.
             e = np.zeros((num_entries, heads), dtype=dtype)
             softmax_sum = np.zeros((N, heads), dtype=dtype)
+
+            # TODO: Below loop can be flipped.
             for l in dace.map[0:N]:
                 for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
                     # Calculating e_l->colv
@@ -129,7 +157,7 @@ class GATConv(ONNXForward):
                 e[j] = e[j] / softmax_sum[colj]
 
             # Implementation with loop flattening.
-            helper_row = dace.define_local((num_entries, ), dtype=dace.int64)
+            helper_row = dace.define_local((num_entries,), dtype=dace.int64)
             for l in dace.map[0:N]:
                 for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
                     helper_row[v] = l
@@ -143,17 +171,6 @@ class GATConv(ONNXForward):
                 else:
                     output[colv] += np.reshape(
                         np.reshape(e[i], (heads, 1)) * features[b],
-                        (heads * num_out_features, ))
+                        (heads * num_out_features,))
 
-        if 'bias' in [inp.name for inp in node.schema.inputs]:
-
-            def bias_prog(node_features, rowptrs, columns, lin_srcDOTweight,
-                          att_src, att_dst, bias, output):
-                prog_sparse(node_features, rowptrs, columns, lin_srcDOTweight,
-                            att_src, att_dst, output)
-                for i, j in dace.map[0:N, 0:num_out_features * heads]:
-                    output[i, j] += bias[j]
-
-            return program_for_node(bias_prog, sdfg, state, node)
-        else:
-            return program_for_node(prog_sparse, sdfg, state, node)
+        return gat_op
