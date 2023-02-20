@@ -103,14 +103,6 @@ class GCNConvCOO(GCNConvBase):
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
 
             output[:] = 0
-            for i, k in dace.map[0:N, 0:num_out_features]:
-                for j in dace.map[rowptrs[i]:rowptrs[i + 1]]:
-                    # Below lines result in compile errors when enabling thread block dynamic scheduling.
-                    column = columns[j]
-                    mult = features[i, k] * edge_vals[j]
-                    output[column, k] += mult
-
-            output[:] = 0
             for i, k in dace.map[0:num_entries, 0:num_out_features]:
                 c = columns[i]
                 r = rows[i]
