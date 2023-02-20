@@ -138,7 +138,8 @@ def main():
     parser.add_argument('--data', choices=['small', 'cora'], default='cora')
     parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace'],
                         required=True)
-    parser.add_argument('--impl', choices=['semester_thesis', 'csr'],
+    parser.add_argument('--impl', type=str, required=True)
+    parser.add_argument('--target_format', choices=['csr', 'coo'],
                         required=True)
     parser.add_argument('--normalize', action='store_true')
     parser.add_argument('--persistent-mem', action='store_true')
@@ -165,6 +166,7 @@ def main():
     print("Num hidden features: ", num_hidden_features)
     normalize = args.normalize
     print("Normalize: ", normalize)
+    print("Target data format: ", args.target_format)
 
     # Define models.
     torch_model = model_class(num_node_features, num_hidden_features,
@@ -226,8 +228,8 @@ def main():
     edge_rowptr, edge_col, edge_weights = sparse_edge_index.csr()
 
     torch_model, dace_data = optimize_data(torch_model, data,
-                                           target_format='csr')
-
+                                           target_format=args.target_format)
+    print(dace_data)
     dace_args = (x,) if args.model == 'linear' else dace_data.to_input_list()
 
     # Create args lists for torch models.

@@ -3,7 +3,7 @@ from typing import Tuple, Optional
 import torch
 import torch_geometric
 
-from examples.gnn_benchmark.sparse import CsrGraph, GraphMatrix
+from examples.gnn_benchmark.sparse import CooGraph, CsrGraph, GraphMatrix
 
 
 def normalize(model: torch.nn.Module, data: torch_geometric.data.Data) -> \
@@ -21,8 +21,9 @@ def optimize_data(model: torch.nn.Module,
 
     format_converters = {
         "csr": CsrGraph.from_pyg_data,
+        "coo": CooGraph.from_pyg_data,
         "adjacency_list": lambda x: x,
     }
 
-    data_target_format = format_converters[target_format](data)
-    return model, data_target_format
+    data_in_target_format = format_converters[target_format](data)
+    return model, data_in_target_format

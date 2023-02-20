@@ -83,6 +83,40 @@ class GCNConvCSR(GCNConvBase):
         return gcn_op
 
 
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="coo")
+class GCNConvCOO(GCNConvBase):
+    @staticmethod
+    def make_gcn_op(N: int, num_out_features: int, num_entries: int,
+                    dtype: dace.dtypes.Typeclasses):
+        def gcn_op(node_features, rowptrs, columns, edge_vals,
+                   linDOTweight, output):
+            """
+            node_features: input features, N x M
+            row: row idxs (COO format), num_entries
+            columns: col, num_entries
+            edge_vals: values, num_entries
+            linDOTweight: F x M
+            output: N x F
+            """
+            rows = rowptrs
+            features = dace.define_local((N, num_out_features), dtype=dtype)
+            features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
+
+            output[:] = 0
+            for i, k in dace.map[0:N, 0:num_out_features]:
+                for j in dace.map[rowptrs[i]:rowptrs[i + 1]]:
+                    # Below lines result in compile errors when enabling thread block dynamic scheduling.
+                    column = columns[j]
+                    mult = features[i, k] * edge_vals[j]
+                    output[column, k] += mult
+
+            output[:] = 0
+            for i, k in dace.map[0:num_entries, 0:num_out_features]:
+                c = columns[i]
+                r = rows[i]
+                output[c, k] += edge_vals[i] * features[r, k]
+        return gcn_op
+
 class GATConvBase(ONNXForward):
     @staticmethod
     def make_gat_op(N: int, heads: int, num_out_features: int, num_entries: int,
