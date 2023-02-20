@@ -138,7 +138,7 @@ def main():
     parser.add_argument('--data', choices=['small', 'cora'], default='cora')
     parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace'],
                         required=True)
-    parser.add_argument('--impl', choices=['semester_thesis', 'vanilla_csr'],
+    parser.add_argument('--impl', choices=['semester_thesis', 'csr'],
                         required=True)
     parser.add_argument('--normalize', action='store_true')
     parser.add_argument('--persistent-mem', action='store_true')

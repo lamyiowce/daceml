@@ -11,10 +11,14 @@ from daceml.onnx.op_implementations.utils import program_for_node
 from daceml.util.utils import in_desc_with_name
 
 
-@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="pure")
-class GCNConv(ONNXForward):
+class GCNConvBase(ONNXForward):
     @staticmethod
-    def forward(node: onnx_op.ONNXOp, state: SDFGState,
+    def make_gcn_op(N: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses):
+        raise NotImplementedError
+
+    @classmethod
+    def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
                 sdfg: SDFG) -> typing.Union[nodes.Node, SDFG]:
         if node.module.add_self_loops:
             raise NotImplementedError("Adding self loops is not supported. "
@@ -31,7 +35,32 @@ class GCNConv(ONNXForward):
         weights_desc = in_desc_with_name(node, state, sdfg, "linDOTweight")
         num_out_features = weights_desc.shape[0]
 
-        def prog_sparse(node_features, rowptrs, columns, edge_vals,
+        col_desc = in_desc_with_name(node, state, sdfg, "columns")
+        num_entries, = col_desc.shape
+
+        gcn_op = cls.make_gcn_op(N, num_out_features, num_entries, dtype)
+
+        if 'bias' in [inp.name for inp in node.schema.inputs]:
+
+            def bias_prog(node_features, rowptrs, columns, edge_vals,
+                          linDOTweight, bias, output):
+                gcn_op(node_features, rowptrs, columns, edge_vals,
+                       linDOTweight, output)
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] += bias[j]
+
+            return program_for_node(bias_prog, sdfg, state, node)
+        else:
+            return program_for_node(gcn_op, sdfg, state, node)
+
+
+
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csr")
+class GCNConvCSR(GCNConvBase):
+    @staticmethod
+    def make_gcn_op(N: int, num_out_features: int, num_entries: int,
+                    dtype: dace.dtypes.Typeclasses):
+        def gcn_op(node_features, rowptrs, columns, edge_vals,
                         linDOTweight, output):
             """
             node_features: input features, N x M
@@ -51,19 +80,7 @@ class GCNConv(ONNXForward):
                     column = columns[j]
                     mult = features[i, k] * edge_vals[j]
                     output[column, k] += mult
-
-        if 'bias' in [inp.name for inp in node.schema.inputs]:
-
-            def bias_prog(node_features, rowptrs, columns, edge_vals,
-                          linDOTweight, bias, output):
-                prog_sparse(node_features, rowptrs, columns, edge_vals,
-                            linDOTweight, output)
-                for i, j in dace.map[0:N, 0:num_out_features]:
-                    output[i, j] += bias[j]
-
-            return program_for_node(bias_prog, sdfg, state, node)
-        else:
-            return program_for_node(prog_sparse, sdfg, state, node)
+        return gcn_op
 
 
 class GATConvBase(ONNXForward):
@@ -174,3 +191,70 @@ class GATConv(GATConvBase):
                         (heads * num_out_features,))
 
         return gat_op
+
+
+@op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
+                   name="csr")
+class GATConvCSR(GATConvBase):
+    @staticmethod
+    def make_gat_op(N, heads, num_out_features, num_entries, dtype,
+                    negative_slope):
+        def gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
+                   att_src, att_dst, output):
+            """
+            node_features: input features, N x F
+            rowptrs: rowptr, N+1
+            columns: col, num_entries
+            lin_srcDOTweight: H * F' x F
+            att_src: H x F
+            att_dst: H x F
+            output: N x H * F'
+            """
+
+            # Transform input features.
+            features = dace.define_local((N, heads, num_out_features),
+                                         dtype=dtype)
+            features_tmp = np.einsum('ij,kj->ik', node_features,
+                                     lin_srcDOTweight)
+            features[:] = np.reshape(features_tmp,
+                                     (N, heads, num_out_features))
+            # Compute node attention coefficients.
+            alpha_src = np.sum(features * att_src, axis=-1)  # shape: N x H
+            alpha_dst = np.sum(features * att_dst, axis=-1)  # N x H
+
+            # Calculate attention weights.
+            e = np.zeros((num_entries, heads), dtype=dtype)
+            softmax_sum = np.zeros((N, heads), dtype=dtype)
+
+            # TODO: Below loop can be flipped.
+            for l in dace.map[0:N]:
+                for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+                    # Calculating e_l->colv
+                    colv = columns[v]
+                    e_tmp = alpha_src[l] + alpha_dst[colv]
+                    # LeakyReLU
+                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                    e_tmp = np.exp(e_tmp)
+                    e[v] = e_tmp
+                    softmax_sum[colv] += e_tmp
+
+            # Softmax normalization.
+            for j in dace.map[0:num_entries]:
+                colj = columns[j]
+                e[j] = e[j] / softmax_sum[colj]
+
+
+            output[:] = 0
+            for l in dace.map[0:N]:
+                for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+                    colv = columns[v]
+                    if heads == 1:
+                        output[colv] += e[v] * features[l]
+                    else:
+                        output[colv] += np.reshape(
+                            np.reshape(e[v], (heads, 1)) * features[l],
+                            (heads * num_out_features,))
+
+        return gat_op
+
+
