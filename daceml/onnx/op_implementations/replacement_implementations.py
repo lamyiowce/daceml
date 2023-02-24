@@ -17,8 +17,8 @@ class GCNConvBase(ONNXForward):
         raise NotImplementedError
 
     @staticmethod
-    def make_gcn_op(N: int, num_out_features: int, num_entries: int,
-                    dtype: dace.dtypes.Typeclasses, do_bias: bool):
+    def make_op(N: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, do_bias: bool):
         raise NotImplementedError
 
     @classmethod
@@ -44,7 +44,7 @@ class GCNConvBase(ONNXForward):
 
         do_bias = 'bias' in [inp.name for inp in node.schema.inputs]
 
-        gcn_op = cls.make_gcn_op(N, num_out_features, num_entries, dtype, do_bias)
+        gcn_op = cls.make_op(N, num_out_features, num_entries, dtype, do_bias)
 
         return program_for_node(gcn_op, sdfg, state, node)
 
@@ -61,8 +61,8 @@ class GCNConvCSR(GCNConvBase):
         }
 
     @staticmethod
-    def make_gcn_op(N: int, num_out_features: int, num_entries: int,
-                    dtype: dace.dtypes.Typeclasses, do_bias: bool):
+    def make_op(N: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, do_bias: bool):
         def gcn_op(node_features, rowptrs, columns, edge_vals,
                    linDOTweight, output):
             """
@@ -108,8 +108,8 @@ class GCNConvCOO(GCNConvBase):
         }
 
     @staticmethod
-    def make_gcn_op(N: int, num_out_features: int, num_entries: int,
-                    dtype: dace.dtypes.Typeclasses, do_bias: bool):
+    def make_op(N: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, do_bias: bool):
         def gcn_op(node_features, rows, columns, edge_vals,
                    linDOTweight, output):
             """
@@ -143,8 +143,13 @@ class GCNConvCOO(GCNConvBase):
 
 class GATConvBase(ONNXForward):
     @staticmethod
-    def make_gat_op(N: int, heads: int, num_out_features: int, num_entries: int,
-                    dtype: dace.dtypes.Typeclasses, negative_slope):
+    def get_input_spec():
+        raise NotImplementedError
+
+    @staticmethod
+    def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, negative_slope: float,
+                do_bias: bool):
         raise NotImplementedError
 
     @classmethod
@@ -166,27 +171,29 @@ class GATConvBase(ONNXForward):
         negative_slope = node.module.negative_slope
         assert negative_slope < 1.0
 
-        gat_op = cls.make_gat_op(N, heads, num_out_features, num_entries, dtype,
-                                 negative_slope)
-        if 'bias' in [inp.name for inp in node.schema.inputs]:
-            def bias_prog(node_features, rowptrs, columns, lin_srcDOTweight,
-                          att_src, att_dst, bias, output):
-                gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
-                       att_src, att_dst, output)
-                for i, j in dace.map[0:N, 0:num_out_features * heads]:
-                    output[i, j] += bias[j]
+        do_bias = 'bias' in [inp.name for inp in node.schema.inputs]
 
-            return program_for_node(bias_prog, sdfg, state, node)
-        else:
-            return program_for_node(gat_op, sdfg, state, node)
+        op = cls.make_op(N, heads, num_out_features, num_entries, dtype,
+                             negative_slope, do_bias)
+
+        return program_for_node(op, sdfg, state, node)
 
 
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
                    name="semester_thesis")
-class GATConv(GATConvBase):
+class GATConvSemesterThesis(GATConvBase):
     @staticmethod
-    def make_gat_op(N, heads, num_out_features, num_entries, dtype,
-                    negative_slope):
+    def get_input_spec():
+        return {
+            'node_features': dace.float32,
+            'rowptrs': dace.int64,
+            'columns': dace.int64
+        }
+
+    @staticmethod
+    def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, negative_slope: float,
+                do_bias: bool):
         def gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
                    att_src, att_dst, output):
             """
@@ -248,6 +255,14 @@ class GATConv(GATConvBase):
                         np.reshape(e[i], (heads, 1)) * features[b],
                         (heads * num_out_features,))
 
+        if do_bias:
+            def bias_prog(node_features, rowptrs, columns, lin_srcDOTweight,
+                          att_src, att_dst, bias, output):
+                gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
+                       att_src, att_dst, output)
+                for i, j in dace.map[0:N, 0:num_out_features * heads]:
+                    output[i, j] += bias[j]
+            return bias_prog
         return gat_op
 
 
@@ -255,8 +270,17 @@ class GATConv(GATConvBase):
                    name="csr")
 class GATConvCSR(GATConvBase):
     @staticmethod
-    def make_gat_op(N, heads, num_out_features, num_entries, dtype,
-                    negative_slope):
+    def get_input_spec():
+        return {
+            'node_features': dace.float32,
+            'rowptrs': dace.int64,
+            'columns': dace.int64
+        }
+
+    @staticmethod
+    def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, negative_slope: float,
+                do_bias: bool):
         def gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
                    att_src, att_dst, output):
             """
@@ -311,5 +335,12 @@ class GATConvCSR(GATConvBase):
                         output[colv] += np.reshape(
                             np.reshape(e[v], (heads, 1)) * features[l],
                             (heads * num_out_features,))
-
+        if do_bias:
+            def bias_prog(node_features, rowptrs, columns, lin_srcDOTweight,
+                          att_src, att_dst, bias, output):
+                gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
+                       att_src, att_dst, output)
+                for i, j in dace.map[0:N, 0:num_out_features * heads]:
+                    output[i, j] += bias[j]
+            return bias_prog
         return gat_op

@@ -143,7 +143,8 @@ def register_replacement_overrides(implementation_name, layer_name):
     name_to_impl_class = {
         "gcn": {"csr": replacement_implementations.GCNConvCSR,
                 "coo": replacement_implementations.GCNConvCOO},
-        "gat": {"csr": replacement_implementations.GCNConvCSR}
+        "gat": {"csr": replacement_implementations.GATConvCSR,
+                "semester_thesis": replacement_implementations.GATConvSemesterThesis}
     }
     input_spec = name_to_impl_class[layer_name][
         implementation_name].get_input_spec()
