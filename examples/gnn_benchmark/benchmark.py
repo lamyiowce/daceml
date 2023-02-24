@@ -1,10 +1,12 @@
 import argparse
+import faulthandler
 import functools
 import logging
 import statistics
 from pathlib import Path
 from typing import Sequence, Tuple
 
+import dace
 import numpy as np
 import torch
 import torch_geometric
@@ -15,6 +17,9 @@ from torch_sparse import SparseTensor
 
 import daceml
 from daceml import onnx as donnx
+from daceml.onnx import register_replacement
+from daceml.onnx.nodes import replacement_entries
+from daceml.onnx.op_implementations import replacement_implementations
 from daceml.torch.module import dace_module
 from examples.gnn_benchmark import util
 from examples.gnn_benchmark.data_optimizer import optimize_data
@@ -22,6 +27,7 @@ from examples.gnn_benchmark.models import LinearModel, GCN, GAT
 from examples.gnn_benchmark.util import specialize_mem_onnx, \
     apply_dace_auto_optimize, make_maps_dynamic
 
+faulthandler.enable()
 donnx.default_implementation = "pure"
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
@@ -133,6 +139,28 @@ def get_dataset(dataset_name: str) -> Tuple[
     return data, num_node_features, num_classes
 
 
+def register_replacement_overrides(implementation_name, layer_name):
+    name_to_impl_class = {
+        "gcn": {"csr": replacement_implementations.GCNConvCSR,
+                "coo": replacement_implementations.GCNConvCOO},
+        "gat": {"csr": replacement_implementations.GCNConvCSR}
+    }
+    input_spec = name_to_impl_class[layer_name][
+        implementation_name].get_input_spec()
+    if layer_name == 'gcn':
+        register_replacement('torch_geometric.nn.conv.gcn_conv.GCNConv',
+                             inputs=input_spec,
+                             outputs={'output': dace.float32},
+                             shape_infer=replacement_entries.shape_infer_GCNConv,
+                             shape_fn_from_module=replacement_entries.make_GCNConv_shape_fn)
+    elif layer_name == 'gat':
+        register_replacement('torch_geometric.nn.conv.gat_conv.GATConv',
+                             inputs=input_spec,
+                             outputs={'output': dace.float32},
+                             shape_infer=replacement_entries.shape_infer_GATConv,
+                             shape_fn_from_module=replacement_entries.make_GATConv_shape_fn)
+
+
 def main():
     parser = argparse.ArgumentParser(description='benchmark')
     parser.add_argument('--data', choices=['small', 'cora'], default='cora')
@@ -167,6 +195,9 @@ def main():
     normalize = args.normalize
     print("Normalize: ", normalize)
     print("Target data format: ", args.target_format)
+
+    register_replacement_overrides(implementation_name=args.impl,
+                                   layer_name=args.model)
 
     # Define models.
     torch_model = model_class(num_node_features, num_hidden_features,

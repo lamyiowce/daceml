@@ -1,3 +1,4 @@
+import dace
 import numpy as np
 import pytest
 import torch
@@ -6,21 +7,36 @@ from torch_geometric.nn import GCNConv
 from torch_sparse import SparseTensor
 
 from daceml.torch.module import dace_module, DaceModule
+from examples.gnn_benchmark.benchmark import register_replacement_overrides
 
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
 
 
+def set_implementation(dace_module, implementation):
+    def hook(dace_module):
+        for node, _ in dace_module.sdfg.all_nodes_recursive():
+            if (isinstance(node, dace.sdfg.nodes.LibraryNode)
+                    and implementation in node.implementations):
+                node.implementation = implementation
+
+    dace_module.prepend_post_onnx_hook("set_implementation", hook)
+
+
 @pytest.mark.parametrize("bias", [False, True], ids=['', 'bias'])
-@pytest.mark.pure
-def test_gcnconv(bias):
+@pytest.mark.parametrize("implementation", ['csr'])
+def test_gcnconv(bias, implementation):
     self_loops = False
     normalize = False
 
     weights_values = torch.Tensor([[1, 1], [0, 0], [1, 0]])
     bias_values = torch.Tensor([0.21, 0.37, 0])
 
-    @dace_module(sdfg_name=f'GCN_{self_loops}_{normalize}_{bias}')
+    register_replacement_overrides(implementation, 'gcn')
+
+    sdfg_name = f'GCN_{implementation}_{self_loops}_{normalize}_{bias}'
+
+    @dace_module(sdfg_name=sdfg_name)
     class GCN(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -38,6 +54,7 @@ def test_gcnconv(bias):
             return x
 
     model = GCN()
+    set_implementation(model, implementation)
 
     edges = torch.tensor([[0, 0, 0, 2, 2], [0, 1, 2, 0, 2]])
     edge_values = torch.tensor([1., 2., 3., 4., 5.])
@@ -111,6 +128,7 @@ def test_gcnconv_full_model(seed):
 
     torch_model = GCN()
     dace_model = DaceModule(GCN(), sdfg_name=f'GCN_{seed}')
+    set_implementation(dace_model, implementation='csr')
 
     adj_matrix = SparseTensor.from_dense(edges)
     rowptr, col, edges = adj_matrix.csr()
