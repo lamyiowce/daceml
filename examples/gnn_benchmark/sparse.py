@@ -67,13 +67,14 @@ class EllpackGraph(GraphMatrix):
     def __init__(self, node_features: torch.Tensor, rowptrs: torch.Tensor,
                  columns: torch.Tensor, vals: Optional[torch.Tensor]):
         self.node_features = node_features
+        device = node_features.device
         num_rows = rowptrs.shape[0] - 1
         max_elems_in_row = torch.max(rowptrs[1:] - rowptrs[:-1]).item()
         if vals is not None:
             self.vals = torch.zeros(num_rows, max_elems_in_row,
-                                    dtype=torch.float32)
+                                    dtype=torch.float32).to(device)
         self.columns = torch.zeros(num_rows, max_elems_in_row,
-                                   dtype=torch.int64)
+                                   dtype=torch.int64).to(device)
 
         for i in range(num_rows):
             len = rowptrs[i + 1] - rowptrs[i]
