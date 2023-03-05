@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch_geometric
@@ -29,10 +29,10 @@ class CsrGraph(GraphMatrix, torch_sparse.SparseTensor):
         edge_index = data.edge_index
         edge_weight = data.edge_weight
         sparse_matrix = cls(node_features=data.x,
-                                 row=edge_index[0],
-                                 rowptr=None,
-                                 col=edge_index[1],
-                                 value=edge_weight)
+                            row=edge_index[0],
+                            rowptr=None,
+                            col=edge_index[1],
+                            value=edge_weight)
 
         return sparse_matrix
 
@@ -56,8 +56,43 @@ class CooGraph(GraphMatrix, torch_sparse.SparseTensor):
         edge_index = data.edge_index
         edge_weight = data.edge_weight
         sparse_matrix = cls(node_features=data.x,
-                                 row=edge_index[0],
-                                 rowptr=None,
-                                 col=edge_index[1],
-                                 value=edge_weight)
+                            row=edge_index[0],
+                            rowptr=None,
+                            col=edge_index[1],
+                            value=edge_weight)
         return sparse_matrix
+
+
+class EllpackGraph(GraphMatrix):
+    def __init__(self, node_features: torch.Tensor, rowptrs: torch.Tensor,
+                 columns: torch.Tensor, vals: Optional[torch.Tensor]):
+        self.node_features = node_features
+        num_rows = rowptrs.shape[0] - 1
+        max_elems_in_row = torch.max(rowptrs[1:] - rowptrs[:-1]).item()
+        if vals is not None:
+            self.vals = torch.zeros(num_rows, max_elems_in_row,
+                                    dtype=torch.float32)
+        self.columns = torch.zeros(num_rows, max_elems_in_row,
+                                   dtype=torch.int64)
+
+        for i in range(num_rows):
+            len = rowptrs[i + 1] - rowptrs[i]
+            self.columns[i, :len] = columns[rowptrs[i]:rowptrs[i + 1]]
+            if vals is not None:
+                self.vals[i, :len] = vals[rowptrs[i]:rowptrs[i + 1]]
+
+    def to_input_list(self):
+        return self.node_features, self.columns, self.vals
+
+    @classmethod
+    def from_pyg_data(cls, data: torch_geometric.data.Data):
+        edge_index = data.edge_index
+        edge_weight = data.edge_weight
+
+        sparse_matrix = torch_sparse.SparseTensor(
+            row=edge_index[0],
+            rowptr=None,
+            col=edge_index[1],
+            value=edge_weight)
+        rowptr, col, val = sparse_matrix.csr()
+        return cls(data.x, rowptr, col, val)

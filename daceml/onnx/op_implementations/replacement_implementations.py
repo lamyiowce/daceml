@@ -40,7 +40,7 @@ class GCNConvBase(ONNXForward):
         num_out_features = weights_desc.shape[0]
 
         col_desc = in_desc_with_name(node, state, sdfg, "columns")
-        num_entries, = col_desc.shape
+        num_entries = col_desc.shape[-1]
 
         do_bias = 'bias' in [inp.name for inp in node.schema.inputs]
 
@@ -141,6 +141,54 @@ class GCNConvCOO(GCNConvBase):
         return gcn_op
 
 
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
+                   name="ellpack")
+class GCNConvEllpack(GCNConvBase):
+    @staticmethod
+    def get_input_spec():
+        return {
+            'node_features': dace.float32,
+            'columns': dace.int64,
+            'edge_vals': dace.float32,
+        }
+
+    @staticmethod
+    def make_op(N: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, do_bias: bool):
+        # num_entries is the maximal number of values in a row.
+        def gcn_op(node_features, columns, edge_vals,
+                   linDOTweight, output):
+            """
+            node_features: input features, N x M
+            columns: col, N x max_row_entries
+            edge_vals: N x max_row_entries
+            linDOTweight: F x M
+            output: N x F
+            """
+            features = dace.define_local((N, num_out_features), dtype=dtype)
+            features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
+
+            output[:] = 0
+
+            for i, k in dace.map[0:N, 0:num_out_features]:
+                for j in dace.map[0:num_entries]:
+                    # i: row idx.
+                    column = columns[i, j]
+                    mult = edge_vals[i, j] * features[i, k]
+                    output[column, k] += mult
+
+        if do_bias:
+            def bias_prog(node_features, columns, edge_vals,
+                          linDOTweight, bias, output):
+                gcn_op(node_features, columns, edge_vals,
+                       linDOTweight, output)
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] += bias[j]
+
+            return bias_prog
+        return gcn_op
+
+
 class GATConvBase(ONNXForward):
     @staticmethod
     def get_input_spec():
@@ -174,7 +222,7 @@ class GATConvBase(ONNXForward):
         do_bias = 'bias' in [inp.name for inp in node.schema.inputs]
 
         op = cls.make_op(N, heads, num_out_features, num_entries, dtype,
-                             negative_slope, do_bias)
+                         negative_slope, do_bias)
 
         return program_for_node(op, sdfg, state, node)
 
@@ -262,6 +310,7 @@ class GATConvSemesterThesis(GATConvBase):
                        att_src, att_dst, output)
                 for i, j in dace.map[0:N, 0:num_out_features * heads]:
                     output[i, j] += bias[j]
+
             return bias_prog
         return gat_op
 
@@ -335,6 +384,7 @@ class GATConvCSR(GATConvBase):
                         output[colv] += np.reshape(
                             np.reshape(e[v], (heads, 1)) * features[l],
                             (heads * num_out_features,))
+
         if do_bias:
             def bias_prog(node_features, rowptrs, columns, lin_srcDOTweight,
                           att_src, att_dst, bias, output):
@@ -342,5 +392,6 @@ class GATConvCSR(GATConvBase):
                        att_src, att_dst, output)
                 for i, j in dace.map[0:N, 0:num_out_features * heads]:
                     output[i, j] += bias[j]
+
             return bias_prog
         return gat_op

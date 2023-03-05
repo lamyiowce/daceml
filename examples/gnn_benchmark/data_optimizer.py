@@ -3,7 +3,7 @@ from typing import Tuple, Optional
 import torch
 import torch_geometric
 
-from examples.gnn_benchmark.sparse import CooGraph, CsrGraph, GraphMatrix
+from examples.gnn_benchmark import sparse
 
 
 def normalize(model: torch.nn.Module, data: torch_geometric.data.Data) -> \
@@ -15,13 +15,14 @@ def normalize(model: torch.nn.Module, data: torch_geometric.data.Data) -> \
 def optimize_data(model: torch.nn.Module,
                   data: torch_geometric.data.Data,
                   target_format: Optional[str] = None) -> Tuple[
-    torch.nn.Module, GraphMatrix]:
+    torch.nn.Module, sparse.GraphMatrix]:
     # Assuming data is in the adjacency list format.
     model, data = normalize(model, data)
 
     format_converters = {
-        "csr": CsrGraph.from_pyg_data,
-        "coo": CooGraph.from_pyg_data,
+        "csr": sparse.CsrGraph.from_pyg_data,
+        "coo": sparse.CooGraph.from_pyg_data,
+        "ellpack": sparse.EllpackGraph.from_pyg_data,
         "adjacency_list": lambda x: x,
     }
 

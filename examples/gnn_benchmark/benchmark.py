@@ -142,7 +142,8 @@ def get_dataset(dataset_name: str) -> Tuple[
 def register_replacement_overrides(implementation_name, layer_name):
     name_to_impl_class = {
         "gcn": {"csr": replacement_implementations.GCNConvCSR,
-                "coo": replacement_implementations.GCNConvCOO},
+                "coo": replacement_implementations.GCNConvCOO,
+                "ellpack": replacement_implementations.GCNConvEllpack},
         "gat": {"csr": replacement_implementations.GATConvCSR,
                 "semester_thesis": replacement_implementations.GATConvSemesterThesis}
     }
@@ -168,8 +169,7 @@ def main():
     parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace'],
                         required=True)
     parser.add_argument('--impl', type=str, required=True)
-    parser.add_argument('--target_format', choices=['csr', 'coo'],
-                        required=True)
+    parser.add_argument('--target_format', type=str, required=True)
     parser.add_argument('--normalize', action='store_true')
     parser.add_argument('--persistent-mem', action='store_true')
     parser.add_argument('--opt', action='store_true')
