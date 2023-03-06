@@ -39,8 +39,14 @@ class GCNConvBase(ONNXForward):
         weights_desc = in_desc_with_name(node, state, sdfg, "linDOTweight")
         num_out_features = weights_desc.shape[0]
 
-        col_desc = in_desc_with_name(node, state, sdfg, "columns")
-        num_entries = col_desc.shape[-1]
+        try:
+            col_desc = in_desc_with_name(node, state, sdfg, "columns")
+            num_entries = col_desc.shape[-1]
+        except ValueError:
+            # In the CSC format there is no `columns` array, but the `rows`
+            # array.
+            row_desc = in_desc_with_name(node, state, sdfg, "rows")
+            num_entries = row_desc.shape[-1]
 
         do_bias = 'bias' in [inp.name for inp in node.schema.inputs]
 
@@ -88,6 +94,53 @@ class GCNConvCSR(GCNConvBase):
             def bias_prog(node_features, rowptrs, columns, edge_vals,
                           linDOTweight, bias, output):
                 gcn_op(node_features, rowptrs, columns, edge_vals,
+                       linDOTweight, output)
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] += bias[j]
+
+            return bias_prog
+        return gcn_op
+
+
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csc")
+class GCNConvCSC(GCNConvBase):
+    @staticmethod
+    def get_input_spec():
+        return {
+            'node_features': dace.float32,
+            'colptrs': dace.int64,
+            'rows': dace.int64,
+            'edge_vals': dace.float32,
+        }
+
+    @staticmethod
+    def make_op(N: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, do_bias: bool):
+        def gcn_op(node_features, colptrs, rows, edge_vals,
+                   linDOTweight, output):
+            """
+            node_features: input features, N x M
+            colptrs: row pointers (CSR format), N+1
+            rows: col, num_entries
+            edge_vals: values, num_entries
+            linDOTweight: F x M
+            output: N x F
+            """
+            features = dace.define_local((N, num_out_features), dtype=dtype)
+            features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
+
+            output[:] = 0
+            for i, k in dace.map[0:N, 0:num_out_features]:
+                for j in dace.map[colptrs[i]:colptrs[i + 1]]:
+                    # Below lines result in compile errors when enabling thread block dynamic scheduling.
+                    row = rows[j]
+                    mult = features[row, k] * edge_vals[j]
+                    output[i, k] += mult
+
+        if do_bias:
+            def bias_prog(node_features, colptrs, rows, edge_vals,
+                          linDOTweight, bias, output):
+                gcn_op(node_features, colptrs, rows, edge_vals,
                        linDOTweight, output)
                 for i, j in dace.map[0:N, 0:num_out_features]:
                     output[i, j] += bias[j]

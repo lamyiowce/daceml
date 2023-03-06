@@ -143,6 +143,7 @@ def register_replacement_overrides(implementation_name, layer_name):
     name_to_impl_class = {
         "gcn": {"csr": replacement_implementations.GCNConvCSR,
                 "coo": replacement_implementations.GCNConvCOO,
+                "csc": replacement_implementations.GCNConvCSC,
                 "ellpack": replacement_implementations.GCNConvEllpack},
         "gat": {"csr": replacement_implementations.GATConvCSR,
                 "semester_thesis": replacement_implementations.GATConvSemesterThesis}
