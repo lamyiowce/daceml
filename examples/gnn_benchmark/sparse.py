@@ -29,32 +29,23 @@ class TorchSparseGraph(GraphMatrix, torch_sparse.SparseTensor):
 
         return sparse_matrix
 
+    def to_input_list(self):
+        input_list = (self.node_features,) + self.data_list()
+        if input_list[-1] is None:
+            return input_list[:-1]
+        return input_list
+
 
 class CsrGraph(TorchSparseGraph):
-    def to_input_list(self):
-        edge_rowptr, edge_col, edge_weights = self.csr()
-        if edge_weights is not None:
-            return self.node_features, edge_rowptr, edge_col, edge_weights
-        else:
-            return self.node_features, edge_rowptr, edge_col
+    data_list = TorchSparseGraph.csr
 
 
 class CooGraph(TorchSparseGraph):
-    def to_input_list(self):
-        edge_row, edge_col, edge_weights = self.coo()
-        if edge_weights is not None:
-            return self.node_features, edge_row, edge_col, edge_weights
-        else:
-            return self.node_features, edge_row, edge_col
+    data_list = TorchSparseGraph.coo
 
 
 class CscGraph(TorchSparseGraph):
-    def to_input_list(self):
-        edge_colptr, edge_row, edge_weights = self.csc()
-        if edge_weights is not None:
-            return self.node_features, edge_colptr, edge_row, edge_weights
-        else:
-            return self.node_features, edge_colptr, edge_row
+    data_list = TorchSparseGraph.csc
 
 
 class EllpackGraph(GraphMatrix):
