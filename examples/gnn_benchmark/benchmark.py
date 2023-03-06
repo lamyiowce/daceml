@@ -95,6 +95,10 @@ def do_benchmark(dace_model: daceml.torch.DaceModule,
         name += "_autoopt"
     if args.persistent_mem:
         name += "_persistent_mem"
+    if args.impl == args.target_format:
+        name += f"_{args.impl}"
+    else:
+        name += f"_{args.impl}_{args.target_format}"
     func_names = [name, 'torch_csr', 'torch_edge_list']
     times = time_funcs(funcs,
                        func_names=func_names,
@@ -144,6 +148,7 @@ def register_replacement_overrides(implementation_name, layer_name):
         "gcn": {"csr": replacement_implementations.GCNConvCSR,
                 "coo": replacement_implementations.GCNConvCOO,
                 "csc": replacement_implementations.GCNConvCSC,
+                "ellpack_t": replacement_implementations.GCNConvEllpackTransposed,
                 "ellpack": replacement_implementations.GCNConvEllpack},
         "gat": {"csr": replacement_implementations.GATConvCSR,
                 "semester_thesis": replacement_implementations.GATConvSemesterThesis}

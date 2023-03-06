@@ -24,6 +24,7 @@ def optimize_data(model: torch.nn.Module,
         "coo": sparse.CooGraph.from_pyg_data,
         "csc": sparse.CscGraph.from_pyg_data,
         "ellpack": sparse.EllpackGraph.from_pyg_data,
+        "ellpack_t": sparse.EllpackTransposedGraph.from_pyg_data,
         "adjacency_list": lambda x: x,
     }
 

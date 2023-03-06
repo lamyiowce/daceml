@@ -82,3 +82,28 @@ class EllpackGraph(GraphMatrix):
             value=edge_weight)
         rowptr, col, val = sparse_matrix.csr()
         return cls(data.x, rowptr, col, val)
+
+
+class EllpackTransposedGraph(GraphMatrix):
+    def __init__(self, node_features: torch.Tensor, colptrs: torch.Tensor,
+                    rows: torch.Tensor, vals: Optional[torch.Tensor]):
+        self.node_features = node_features
+        ellpack = EllpackGraph(node_features, colptrs, rows, vals)
+        _, self.rows, self.vals = ellpack.to_input_list()
+
+    def to_input_list(self):
+        return self.node_features, self.rows, self.vals
+
+    @classmethod
+    def from_pyg_data(cls, data: torch_geometric.data.Data):
+        edge_index = data.edge_index
+        edge_weight = data.edge_weight
+
+        sparse_matrix = torch_sparse.SparseTensor(
+            row=edge_index[0],
+            rowptr=None,
+            col=edge_index[1],
+            value=edge_weight)
+
+        colptr, rows, val = sparse_matrix.csc()
+        return cls(data.x, colptr, rows, val)
