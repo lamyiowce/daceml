@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Tuple, Dict
 
 import torch
 import torch_geometric
@@ -13,9 +13,9 @@ def normalize(model: torch.nn.Module, data: torch_geometric.data.Data) -> \
 
 
 def optimize_data(model: torch.nn.Module,
-                  data: torch_geometric.data.Data,
-                  target_format: Optional[str] = None) -> Tuple[
-    torch.nn.Module, sparse.GraphMatrix]:
+                  dace_models: Dict,
+                  data: torch_geometric.data.Data) -> Tuple[
+    torch.nn.Module, Dict]:
     # Assuming data is in the adjacency list format.
     model, data = normalize(model, data)
 
@@ -28,5 +28,7 @@ def optimize_data(model: torch.nn.Module,
         "adjacency_list": lambda x: x,
     }
 
-    data_in_target_format = format_converters[target_format](data)
-    return model, data_in_target_format
+    for impl_name, model_info in dace_models.items():
+        data_in_target_format = model_info.data_format.from_pyg_data(data)
+        model_info.data = data_in_target_format
+    return model, dace_models
