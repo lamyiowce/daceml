@@ -1,12 +1,11 @@
 import argparse
-import copy
 import dataclasses
 import faulthandler
 import functools
 import logging
 import statistics
 from pathlib import Path
-from typing import Sequence, Tuple, Dict, Optional
+from typing import Sequence, Tuple, Dict, Optional, Type
 
 import dace
 import numpy as np
@@ -22,10 +21,9 @@ from daceml import onnx as donnx
 from daceml.onnx import register_replacement
 from daceml.onnx.nodes import replacement_entries
 from daceml.onnx.op_implementations import replacement_implementations
-from daceml.torch.module import dace_module
-from examples.gnn_benchmark import util, sparse
+from daceml.torch.module import dace_module, DaceModule
+from examples.gnn_benchmark import util, sparse, models
 from examples.gnn_benchmark.data_optimizer import optimize_data
-from examples.gnn_benchmark.models import LinearModel, GCN, GAT
 from examples.gnn_benchmark.util import specialize_mem_onnx, \
     apply_dace_auto_optimize, make_maps_dynamic
 
@@ -96,10 +94,11 @@ def check_correctness(dace_models: Dict[str, dace.DaceModule],
             experiment_info.correct = False
             all_correct = False
 
-    if all_correct:
+    if all_correct and len(dace_models) > 1:
         print(f"\n☆ ============================================== ☆")
-        print(f"\n==== Results correct for ALL. ☆ ╰(o＾◡＾o)╯ ☆ ====")
-        print(f"\n☆ ============================================== ☆")
+        print(
+            f"==== Results correct for {', '.join(dace_models.keys())}. ☆ ╰(o＾◡＾o)╯ ☆ ====")
+        print(f"☆ ============================================== ☆")
 
     return all_correct
 
@@ -110,7 +109,9 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  torch_edge_list_args: Sequence[torch.Tensor],
                  args,
                  save_output: bool = True):
-    from daceml.testing.profiling import time_funcs, print_time_statistics
+    from daceml.testing.profiling import print_time_statistics
+    from examples.gnn_benchmark.performance_measurement import \
+        measure_performance
 
     funcs = [
         lambda: torch_model(*torch_csr_args),
@@ -118,19 +119,14 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
     ]
     func_names = ['torch_csr', 'torch_edge_list']
 
+    def run_with_inputs(model, inputs):
+        model(*inputs)
+
     for experiment_info in experiment_infos.values():
         model = experiment_info.model
-        inputs = experiment_info.data.to_input_args()
+        inputs = experiment_info.data.to_input_list()
 
-        def workaround():
-            register_replacement('torch_geometric.nn.conv.gcn_conv.GCNConv',
-                                 inputs=experiment_info.implementation.get_input_spec(),
-                                 outputs={'output': dace.float32},
-                                 shape_infer=replacement_entries.shape_infer_GCNConv,
-                                 shape_fn_from_module=replacement_entries.make_GCNConv_shape_fn)
-            model(*inputs)
-
-        funcs.append(workaround)
+        funcs.append(functools.partial(run_with_inputs, model, inputs))
         name = "dace"
         if args.threadblock_dynamic:
             name += "_tb-dynamic"
@@ -141,12 +137,12 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
         name += f"_{experiment_info.impl_name}"
         func_names.append(name)
 
-    times = time_funcs(funcs,
-                       func_names=func_names,
-                       warmups=10,
-                       num_iters=100)
+    times = measure_performance(funcs,
+                                func_names=func_names,
+                                warmups=50,
+                                num_iters=500)
     print()
-    print(f"\n------ {args.model.upper()} ------")
+    print(f"\n------ fixed timing {args.model.upper()} ------")
     print_time_statistics(times, func_names)
     print()
 
@@ -182,6 +178,67 @@ def get_dataset(dataset_name: str) -> Tuple[
     else:
         raise NotImplementedError("No such dataset: ", dataset_name)
     return data, num_node_features, num_classes
+
+
+def create_dace_model(model_class: Type[torch.nn.Module],
+                      num_node_features: int, num_hidden_features: int,
+                      num_classes: int, normalize: bool,
+                      state_dict: Dict[str, torch.Tensor],
+                      gnn_implementation_name: str,
+                      do_opt: bool,
+                      persistent_mem: bool,
+                      threadblock_dynamic: bool) -> dace.DaceModule:
+    sdfg_name = f"{model_class.__name__}_{gnn_implementation_name}"
+    dace_model = DaceModule(model_class(
+        num_node_features,
+        num_hidden_features, num_classes,
+        normalize), sdfg_name=sdfg_name).to(device)
+
+    dace_model.model.load_state_dict(state_dict)
+
+    dace_model.eval()
+
+    if do_opt:
+        print("---> Adding auto-opt hook.")
+        dace_model.append_post_onnx_hook("dace_auto_optimize",
+                                         apply_dace_auto_optimize)
+
+    if persistent_mem:
+        print("---> Adding persistent memory hook.")
+        specialize_mem_onnx(dace_model)
+
+    if threadblock_dynamic:
+        print("---> Adding threadblock dynamic maps hook.")
+        exclude_loops = []
+        if model_class == models.GCN:
+            # Has to be skipped, otherwise the computation results are incorrect.
+            exclude_loops = [
+                'daceml_onnx_op_implementations_replacement_implementations_prog_sparse_45_4_46'
+            ]
+        elif model_class == models.GAT:
+            exclude_loops = [
+                # Below two have to be excluded because only one-dimensional
+                # maps are supported in DaCe for dynamic block map schedule
+                # (got 2).
+                '_Div__map',
+                '_Mult__map',
+                # Below two have to be excluded, otherwise compile errors
+                # occur (the generated code is incorrect).
+                'assign_137_12_map',
+                'outer_fused',
+            ]
+        make_maps_dynamic_with_excluded_loops = functools.partial(
+            make_maps_dynamic, exclude_loops=exclude_loops)
+        dace_model.append_post_onnx_hook(
+            "apply_threadblock_dynamic_maps",
+            make_maps_dynamic_with_excluded_loops)
+
+    set_implementation = functools.partial(
+        util.set_implementation, implementation_name=gnn_implementation_name)
+    dace_model.prepend_post_onnx_hook("set_implementation",
+                                      set_implementation)
+
+    return dace_model
 
 
 name_to_impl_class = {
@@ -221,7 +278,7 @@ def main():
     parser.add_argument('--data', choices=['small', 'cora'], default='cora')
     parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace'],
                         required=True)
-    parser.add_argument('--impl', type=str, required=True)
+    parser.add_argument('--impl', type=str, nargs='+', required=True)
     parser.add_argument('--normalize', action='store_true')
     parser.add_argument('--persistent-mem', action='store_true')
     parser.add_argument('--opt', action='store_true')
@@ -231,8 +288,9 @@ def main():
     parser.add_argument('--outfile', type=str, default=None)
     parser.add_argument('--name', type=str, default='dace')
     args = parser.parse_args()
-    models = {'gcn': GCN, 'linear': LinearModel, 'gat': GAT}
-    model_class = models[args.model]
+    model_dict = {'gcn': models.GCN, 'linear': models.LinearModel,
+                  'gat': models.GAT}
+    model_class = model_dict[args.model]
     num_hidden_features = args.hidden
     args.hidden = args.hidden or (8 if args.model == 'gat' else 512)
     args.outfile = Path(args.outfile) if args.outfile is not None else None
@@ -249,77 +307,31 @@ def main():
     print("Normalize: ", normalize)
     print("Implementation: ", args.impl)
 
-    # register_replacement_overrides(implementation_name=args.impl,
-    #                                layer_name=args.model)
-
     # Define models.
     torch_model = model_class(num_node_features, num_hidden_features,
                               num_classes, normalize).to(device)
-    dace_model = dace_module(model_class)(num_node_features,
-                                          num_hidden_features, num_classes,
-                                          normalize).to(device)
-
-    dace_model.model.load_state_dict(torch_model.state_dict())
-
-    dace_model.eval()
     torch_model.eval()
-
-    if args.opt:
-        print("---> Adding auto-opt hook.")
-        dace_model.append_post_onnx_hook("dace_auto_optimize",
-                                         apply_dace_auto_optimize)
-
-    if args.persistent_mem:
-        print("---> Adding persistent memory hook.")
-        specialize_mem_onnx(dace_model)
-
-    if args.threadblock_dynamic:
-        print("---> Adding threadblock dynamic maps hook.")
-        exclude_loops = []
-        if args.model == 'gcn':
-            # Has to be skipped, otherwise the computation results are incorrect.
-            exclude_loops = [
-                'daceml_onnx_op_implementations_replacement_implementations_prog_sparse_45_4_46'
-            ]
-        elif args.model == 'gat':
-            exclude_loops = [
-                # Below two have to be excluded because only one-dimensional
-                # maps are supported in DaCe for dynamic block map schedule
-                # (got 2).
-                '_Div__map',
-                '_Mult__map',
-                # Below two have to be excluded, otherwise compile errors
-                # occur (the generated code is incorrect).
-                'assign_137_12_map',
-                'outer_fused',
-            ]
-        make_maps_dynamic_with_excluded_loops = functools.partial(
-            make_maps_dynamic, exclude_loops=exclude_loops)
-        dace_model.append_post_onnx_hook(
-            "apply_threadblock_dynamic_maps",
-            make_maps_dynamic_with_excluded_loops)
 
     dace_models = {}
     available_implementations = name_to_impl_class[args.model]
-    if args.impl == 'all':
-        for impl_name, (implementation_class, data_format) in available_implementations.items():
-            dace_model_copy = copy.deepcopy(dace_model)
-            dace_model_copy.sdfg_name = f"{args.model}_{impl_name}"
-            set_implementation = functools.partial(
-                util.set_implementation, implementation_name=impl_name)
-            dace_model_copy.prepend_post_onnx_hook("set_implementation",
-                                                   set_implementation)
-            dace_models[impl_name] = ExperimentInfo(impl_name=impl_name,
-                                                    implementation=implementation_class,
-                                                    model=dace_model_copy,
-                                                    data_format=data_format)
-    else:
-        implementation_class, data_format = available_implementations[args.impl]
-        set_implementation = functools.partial(
-            util.set_implementation, implementation_name=args.impl)
-        dace_model.prepend_post_onnx_hook("set_implementation",
-                                          set_implementation)
-        dace_models[args.impl] = ExperimentInfo(impl_name=args.impl,
+    if args.impl != ['all']:
+        available_implementations = {
+            impl: available_implementations[impl]
+            for impl in args.impl
+        }
+
+    for impl_name, (
+            implementation_class,
+            data_format) in available_implementations.items():
+        dace_model = create_dace_model(model_class, num_node_features,
+                                       num_hidden_features, num_classes,
+                                       normalize=normalize,
+                                       state_dict=torch_model.state_dict(),
+                                       gnn_implementation_name=impl_name,
+                                       threadblock_dynamic=args.threadblock_dynamic,
+                                       persistent_mem=args.persistent_mem,
+                                       do_opt=args.opt)
+        dace_models[impl_name] = ExperimentInfo(impl_name=impl_name,
                                                 implementation=implementation_class,
                                                 model=dace_model,
                                                 data_format=data_format)
@@ -351,7 +363,7 @@ def main():
         print('Only dace models for profiling.')
         for dace_model_name, dace_model_info in dace_models.items():
             model = dace_model_info.dace_model
-            inputs = dace_model_info.data.to_input_args()
+            inputs = dace_model_info.data.to_input_list()
             print(f"Dace {dace_model_name}: ", model(*inputs))
     elif args.mode == 'dry':
         print("Single run of all models.")
