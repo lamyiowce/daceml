@@ -18,10 +18,11 @@ from torch_sparse import SparseTensor
 
 import daceml
 from daceml import onnx as donnx
-from daceml.onnx import register_replacement
+from daceml.onnx import register_replacement, ONNXForward
 from daceml.onnx.nodes import replacement_entries
-from daceml.onnx.op_implementations import replacement_implementations
 from daceml.torch.module import dace_module, DaceModule
+from examples.gnn_benchmark import gat_implementations
+from examples.gnn_benchmark import gcn_implementations
 from examples.gnn_benchmark import util, sparse, models
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.util import specialize_mem_onnx, \
@@ -34,13 +35,14 @@ torch.backends.cudnn.allow_tf32 = False
 
 torch.manual_seed(42)
 np.random.seed(42)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = 'cpu'  # torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 @dataclasses.dataclass
 class ExperimentInfo:
     impl_name: str
-    implementation: replacement_implementations.ONNXForward
+    gnn_type: str
+    implementation: ONNXForward
     data_format: str
     model: daceml.torch.DaceModule
     correct: Optional[bool] = None
@@ -67,7 +69,7 @@ def stats_as_string(times, func_names, model, hidden_size):
     return out
 
 
-def check_correctness(dace_models: Dict[str, dace.DaceModule],
+def check_correctness(dace_models: Dict[str, ExperimentInfo],
                       torch_model: torch.nn.Module,
                       torch_edge_list_args):
     torch_pred = torch_model(*torch_edge_list_args)
@@ -76,11 +78,8 @@ def check_correctness(dace_models: Dict[str, dace.DaceModule],
     for name, experiment_info in dace_models.items():
         model = experiment_info.model
         args = experiment_info.data.to_input_list()
-        register_replacement('torch_geometric.nn.conv.gcn_conv.GCNConv',
-                             inputs=experiment_info.implementation.get_input_spec(),
-                             outputs={'output': dace.float32},
-                             shape_infer=replacement_entries.shape_infer_GCNConv,
-                             shape_fn_from_module=replacement_entries.make_GCNConv_shape_fn)
+        register_replacement_overrides(experiment_info.impl_name,
+                                       experiment_info.gnn_type)
         dace_pred = model(*args)
         dace_pred_cpu = dace_pred.detach().cpu()
         if np.allclose(dace_pred_cpu, torch_pred_cpu, atol=1.0e-5):
@@ -242,16 +241,16 @@ def create_dace_model(model_class: Type[torch.nn.Module],
 
 
 name_to_impl_class = {
-    "gcn": {"csr": (replacement_implementations.GCNConvCSR, sparse.CsrGraph),
-            "coo": (replacement_implementations.GCNConvCOO, sparse.CooGraph),
-            "csc": (replacement_implementations.GCNConvCSC, sparse.CscGraph),
-            "ellpack_t": (replacement_implementations.GCNConvEllpackTransposed,
+    "gcn": {"csr": (gcn_implementations.GCNConvCSR, sparse.CsrGraph),
+            "coo": (gcn_implementations.GCNConvCOO, sparse.CooGraph),
+            "csc": (gcn_implementations.GCNConvCSC, sparse.CscGraph),
+            "ellpack_t": (gcn_implementations.GCNConvEllpackTransposed,
                           sparse.EllpackTransposedGraph),
-            "ellpack": (replacement_implementations.GCNConvEllpack,
+            "ellpack": (gcn_implementations.GCNConvEllpack,
                         sparse.EllpackGraph)},
-    "gat": {"csr": (replacement_implementations.GATConvCSR, sparse.CsrGraph),
+    "gat": {"csr": (gat_implementations.GATConvCSR, sparse.CsrGraph),
             "semester_thesis": (
-                replacement_implementations.GATConvSemesterThesis,
+                gat_implementations.GATConvSemesterThesis,
                 sparse.CsrGraph)}
 }
 
@@ -334,7 +333,8 @@ def main():
         dace_models[impl_name] = ExperimentInfo(impl_name=impl_name,
                                                 implementation=implementation_class,
                                                 model=dace_model,
-                                                data_format=data_format)
+                                                data_format=data_format,
+                                                gnn_type=args.model)
 
     if args.model == 'gcn':
         gcn_norm = GCNNorm(add_self_loops=True)
