@@ -32,8 +32,6 @@ def test_gcnconv(bias, implementation):
     weights_values = torch.Tensor([[1, 1], [0, 0], [1, 0]])
     bias_values = torch.Tensor([0.21, 0.37, 0])
 
-    register_replacement_overrides(implementation, 'gcn')
-
     sdfg_name = f'GCN_{implementation}_{self_loops}_{normalize}_{bias}'
 
     @dace_module(sdfg_name=sdfg_name)
