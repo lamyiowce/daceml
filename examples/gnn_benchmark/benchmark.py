@@ -35,7 +35,7 @@ torch.backends.cudnn.allow_tf32 = False
 
 torch.manual_seed(42)
 np.random.seed(42)
-device = 'cpu'  # torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 @dataclasses.dataclass

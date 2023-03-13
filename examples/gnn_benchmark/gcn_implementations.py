@@ -9,7 +9,8 @@ from daceml.onnx.nodes import onnx_op
 from daceml.onnx.op_implementations.utils import op_implementation
 from daceml.onnx.op_implementations.utils import program_for_node
 from daceml.util.utils import in_desc_with_name
-
+from examples.gnn_benchmark.backported.csrmm import CSRMM
+from examples.gnn_benchmark import csrmm_libnode
 
 class GCNConvBase(ONNXForward):
     @staticmethod
@@ -54,6 +55,20 @@ class GCNConvBase(ONNXForward):
 
         return program_for_node(gcn_op, sdfg, state, node)
 
+# def csrmm(A_rowptrs,#: dace.int64[N+1],
+#           A_columns, #: dace.int64[M],
+#           A_values, #: dace.float32[M],
+#           B,#,: dace.float32[N, K],
+#           C,#: dace.float32[N, K]
+# ):
+#     pass
+#     # C[:] = 0
+    # for i, k in dace.map[0:N, 0:K]:
+    #     for j in dace.map[A_rowptrs[i]:A_rowptrs[i + 1]]:
+    #         # Below lines result in compile errors when enabling thread block dynamic scheduling.
+    #         column = A_columns[j]
+    #         mult = B[i, k] * A_values[j]
+    #         C[column, k] += mult
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csr")
 class GCNConvCSR(GCNConvBase):
@@ -82,14 +97,7 @@ class GCNConvCSR(GCNConvBase):
             features = dace.define_local((N, num_out_features), dtype=dtype)
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
 
-            output[:] = 0
-            for i, k in dace.map[0:N, 0:num_out_features]:
-                for j in dace.map[rowptrs[i]:rowptrs[i + 1]]:
-                    # Below lines result in compile errors when enabling thread block dynamic scheduling.
-                    column = columns[j]
-                    mult = features[i, k] * edge_vals[j]
-                    output[column, k] += mult
-
+            csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output)
         if do_bias:
             def bias_prog(node_features, rowptrs, columns, edge_vals,
                           linDOTweight, bias, output):
@@ -129,13 +137,15 @@ class GCNConvCSC(GCNConvBase):
             features = dace.define_local((N, num_out_features), dtype=dtype)
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
 
-            output[:] = 0
-            for i, k in dace.map[0:N, 0:num_out_features]:
-                for j in dace.map[colptrs[i]:colptrs[i + 1]]:
-                    # Below lines result in compile errors when enabling thread block dynamic scheduling.
-                    row = rows[j]
-                    mult = features[row, k] * edge_vals[j]
-                    output[i, k] += mult
+            # output[:] = 0
+            # for i, k in dace.map[0:N, 0:num_out_features]:
+            #     for j in dace.map[colptrs[i]:colptrs[i + 1]]:
+            #         # Below lines result in compile errors when enabling thread block dynamic scheduling.
+            #         row = rows[j]
+            #         mult = features[row, k] * edge_vals[j]
+            #         output[i, k] += mult
+
+            csrmm_libnode.csrmm(colptrs, rows, edge_vals, features, output)
 
         if do_bias:
             def bias_prog(node_features, colptrs, rows, edge_vals,
