@@ -21,7 +21,8 @@ cuda_device = torch.device('cuda:0')
 def measure_performance(funcs,
                name='',
                func_names=None,
-               num_iters=100,
+               num_iters=10,
+               timing_iters=100,
                warmups=5,
                launch_wait=False):
     """ Run and time funcs.
@@ -36,26 +37,28 @@ def measure_performance(funcs,
     """
     times = [list() for _ in range(len(funcs))]
     binary_utils.start_cuda_profiling()
+    torch.cuda.init()
     for i, (f, fname) in enumerate(zip(funcs, func_names)):
         torch.cuda.nvtx.range_push(fname + ' Warmup')
         for _ in range(warmups):
             f()
+            torch.cuda.synchronize()
         torch.cuda.nvtx.range_pop()
 
         timer = CudaTimer(num_iters)
-        if launch_wait:
-            binary_utils.gpu_wait(_DEFAULT_WAIT_TIME)
 
-        torch.cuda.nvtx.range_push(name + ' Iter')
+        torch.cuda.nvtx.range_push(fname + ' Iter')
         timer.start()
         for _ in range(num_iters):
-            f()
+            for _ in range(timing_iters):
+                f()
+            torch._C._cuda_synchronize()
             timer.next()
         timer.end()
         torch.cuda.nvtx.range_pop()
 
         iter_times = timer.get_times()
         for t in iter_times:
-            times[i].append(t)
+            times[i].append(t / timing_iters)
     binary_utils.stop_cuda_profiling()
     return times

@@ -3,6 +3,23 @@ from torch import nn
 from torch_geometric.nn import GCNConv, GATConv
 
 
+class GCNSingleLayer(torch.nn.Module):
+    def __init__(self, num_node_features, num_hidden_features, num_classes,
+                 normalize):
+        del num_classes
+        del normalize
+        super().__init__()
+        self.conv = GCNConv(num_node_features,
+                            num_hidden_features,
+                            normalize=False,
+                            add_self_loops=False)
+
+    def forward(self, x, *edge_info):
+        x = self.conv(x, *edge_info)
+
+        return x
+
+
 class GCN(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes,
                  normalize):

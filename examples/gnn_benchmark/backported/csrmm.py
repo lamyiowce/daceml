@@ -354,11 +354,11 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
 
         opt['annz'] = avals.shape[0]
 
+        opt['algo'] = 'CUSPARSE_SPMM_CSR_ALG2'
+
         call = """
             cusparseSpMatDescr_t matA;
             cusparseDnMatDescr_t matB, matC;
-            void*                dBuffer    = NULL;
-            size_t               bufferSize = 0;
             // Create sparse matrix A in CSR format
             dace::sparse::CheckCusparseError( cusparseCreateCsr(&matA, {arows}, {acols}, {annz},
                                                 {arr_prefix}_a_rows, {arr_prefix}_a_cols, {arr_prefix}_a_vals,
@@ -370,25 +370,16 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
             // Create dense matrix C
             dace::sparse::CheckCusparseError( cusparseCreateDnMat(&matC, {nrows}, {ncols}, {ldc}, {arr_prefix}_c,
                                                 {compute}, {layout}) );
-            // allocate an external buffer if needed
-            dace::sparse::CheckCusparseError( cusparseSpMM_bufferSize(
-                                            {handle},
-                                            {opA},
-                                            {opB},
-                                            {alpha}, matA, matB, {beta}, matC, {compute},
-                                            CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize) );
-            cudaMalloc(&dBuffer, bufferSize);
             // execute SpMM
             dace::sparse::CheckCusparseError( cusparseSpMM({handle},
                                             {opA},
                                             {opB},
                                             {alpha}, matA, matB, {beta}, matC, {compute},
-                                            CUSPARSE_SPMM_ALG_DEFAULT, dBuffer) );
+                                            {algo}, dBuffer) );
             // destroy matrix/vector descriptors
             dace::sparse::CheckCusparseError( cusparseDestroySpMat(matA) );
             dace::sparse::CheckCusparseError( cusparseDestroyDnMat(matB) );
             dace::sparse::CheckCusparseError( cusparseDestroyDnMat(matC) );
-            cudaFree(dBuffer);
         """.format_map(opt)
 
         code = (call_prefix + call + call_suffix)

@@ -9,8 +9,8 @@ from daceml.onnx.nodes import onnx_op
 from daceml.onnx.op_implementations.utils import op_implementation
 from daceml.onnx.op_implementations.utils import program_for_node
 from daceml.util.utils import in_desc_with_name
-from examples.gnn_benchmark.backported.csrmm import CSRMM
 from examples.gnn_benchmark import csrmm_libnode
+
 
 class GCNConvBase(ONNXForward):
     @staticmethod
@@ -55,23 +55,8 @@ class GCNConvBase(ONNXForward):
 
         return program_for_node(gcn_op, sdfg, state, node)
 
-# def csrmm(A_rowptrs,#: dace.int64[N+1],
-#           A_columns, #: dace.int64[M],
-#           A_values, #: dace.float32[M],
-#           B,#,: dace.float32[N, K],
-#           C,#: dace.float32[N, K]
-# ):
-#     pass
-#     # C[:] = 0
-    # for i, k in dace.map[0:N, 0:K]:
-    #     for j in dace.map[A_rowptrs[i]:A_rowptrs[i + 1]]:
-    #         # Below lines result in compile errors when enabling thread block dynamic scheduling.
-    #         column = A_columns[j]
-    #         mult = B[i, k] * A_values[j]
-    #         C[column, k] += mult
-
-@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csr")
-class GCNConvCSR(GCNConvBase):
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="semester_thesis")
+class GCNConvSemesterThesis(GCNConvBase):
     @staticmethod
     def get_input_spec():
         return {
@@ -97,7 +82,14 @@ class GCNConvCSR(GCNConvBase):
             features = dace.define_local((N, num_out_features), dtype=dtype)
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
 
-            csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output)
+            output[:] = 0
+            for i, k in dace.map[0:N, 0:num_out_features]:
+                for j in dace.map[rowptrs[i]:rowptrs[i + 1]]:
+                    # Below lines result in compile errors when enabling thread block dynamic scheduling.
+                    column = columns[j]
+                    mult = features[i, k] * edge_vals[j]
+                    output[column, k] += mult
+
         if do_bias:
             def bias_prog(node_features, rowptrs, columns, edge_vals,
                           linDOTweight, bias, output):
@@ -107,6 +99,53 @@ class GCNConvCSR(GCNConvBase):
                     output[i, j] += bias[j]
 
             return bias_prog
+        return gcn_op
+
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csr")
+class GCNConvCSR(GCNConvBase):
+    @staticmethod
+    def get_input_spec():
+        return {
+            'node_features': dace.float32,
+            'rowptrs': dace.int64,
+            'columns': dace.int64,
+            'edge_vals': dace.float32,
+        }
+
+    @staticmethod
+    def make_op(N: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, do_bias: bool):
+        if do_bias:
+            def gcn_op(node_features, rowptrs, columns, edge_vals,
+                          linDOTweight, bias, output):
+                """
+                node_features: input features, N x M
+                rowptrs: row pointers (CSR format), N+1
+                columns: col, num_entries
+                edge_vals: values, num_entries
+                linDOTweight: F x M
+                output: N x F
+                """
+                features = dace.define_local((N, num_out_features), dtype=dtype)
+                features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] = bias[j]
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output)
+        else:
+            def gcn_op(node_features, rowptrs, columns, edge_vals,
+                       linDOTweight, output):
+                """
+                node_features: input features, N x M
+                rowptrs: row pointers (CSR format), N+1
+                columns: col, num_entries
+                edge_vals: values, num_entries
+                linDOTweight: F x M
+                output: N x F
+                """
+                features = dace.define_local((N, num_out_features), dtype=dtype)
+                features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output)
+
         return gcn_op
 
 
@@ -145,6 +184,7 @@ class GCNConvCSC(GCNConvBase):
             #         mult = features[row, k] * edge_vals[j]
             #         output[i, k] += mult
 
+            # TODO: there is some transposition issue. seems like the pure CSRMM executes as if A was transposed?
             csrmm_libnode.csrmm(colptrs, rows, edge_vals, features, output)
 
         if do_bias:

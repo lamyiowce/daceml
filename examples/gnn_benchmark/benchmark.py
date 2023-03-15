@@ -138,8 +138,9 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
     times = measure_performance(funcs,
                                 func_names=func_names,
-                                warmups=50,
-                                num_iters=500)
+                                warmups=10,
+                                num_iters=10,
+                                timing_iters=100)
     print()
     print(f"\n------ fixed timing {args.model.upper()} ------")
     print_time_statistics(times, func_names)
@@ -247,18 +248,21 @@ name_to_impl_class = {
             "ellpack_t": (gcn_implementations.GCNConvEllpackTransposed,
                           sparse.EllpackTransposedGraph),
             "ellpack": (gcn_implementations.GCNConvEllpack,
-                        sparse.EllpackGraph)},
+                        sparse.EllpackGraph),
+            "semester_thesis": (
+                gcn_implementations.GCNConvSemesterThesis,
+                sparse.CsrGraph)},
     "gat": {"csr": (gat_implementations.GATConvCSR, sparse.CsrGraph),
             "semester_thesis": (
                 gat_implementations.GATConvSemesterThesis,
                 sparse.CsrGraph)}
 }
-
+name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
 
 def register_replacement_overrides(implementation_name, layer_name):
     impl_class, _ = name_to_impl_class[layer_name][implementation_name]
     input_spec = impl_class.get_input_spec()
-    if layer_name == 'gcn':
+    if 'gcn' in layer_name:
         register_replacement('torch_geometric.nn.conv.gcn_conv.GCNConv',
                              inputs=input_spec,
                              outputs={'output': dace.float32},
@@ -273,6 +277,9 @@ def register_replacement_overrides(implementation_name, layer_name):
 
 
 def main():
+    model_dict = {'gcn': models.GCN, 'linear': models.LinearModel,
+                  'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer}
+
     parser = argparse.ArgumentParser(description='benchmark')
     parser.add_argument('--data', choices=['small', 'cora'], default='cora')
     parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace'],
@@ -282,13 +289,12 @@ def main():
     parser.add_argument('--persistent-mem', action='store_true')
     parser.add_argument('--opt', action='store_true')
     parser.add_argument('--threadblock-dynamic', action='store_true')
-    parser.add_argument('--model', choices=['gcn', 'gat', 'linear'])
+    parser.add_argument('--model', choices=model_dict.keys())
     parser.add_argument('--hidden', type=int, default=None, required=True)
     parser.add_argument('--outfile', type=str, default=None)
     parser.add_argument('--name', type=str, default='dace')
     args = parser.parse_args()
-    model_dict = {'gcn': models.GCN, 'linear': models.LinearModel,
-                  'gat': models.GAT}
+
     model_class = model_dict[args.model]
     num_hidden_features = args.hidden
     args.hidden = args.hidden or (8 if args.model == 'gat' else 512)
@@ -336,7 +342,7 @@ def main():
                                                 data_format=data_format,
                                                 gnn_type=args.model)
 
-    if args.model == 'gcn':
+    if 'gcn' in args.model:
         gcn_norm = GCNNorm(add_self_loops=True)
         data = gcn_norm(data)
 
@@ -344,6 +350,7 @@ def main():
     sparse_edge_index = SparseTensor.from_edge_index(
         data.edge_index, edge_attr=data.edge_weight)
     edge_rowptr, edge_col, edge_weights = sparse_edge_index.csr()
+    print("Num non zero:", edge_weights.shape[0])
 
     torch_model, dace_models = optimize_data(torch_model, dace_models, data)
     print(dace_models)
@@ -353,7 +360,7 @@ def main():
     torch_csr_args = x, sparse_edge_index.t()
 
     torch_edge_list_args = x, data.edge_index
-    if edge_weights is not None and args.model == 'gcn':
+    if edge_weights is not None and 'gcn' in args.model:
         torch_edge_list_args += (data.edge_weight,)
 
     results_correct = check_correctness(dace_models, torch_model,
