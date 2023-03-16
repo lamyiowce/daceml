@@ -1,4 +1,5 @@
 import argparse
+import copy
 import dataclasses
 import faulthandler
 import functools
@@ -21,10 +22,11 @@ from daceml import onnx as donnx
 from daceml.onnx import register_replacement, ONNXForward
 from daceml.onnx.nodes import replacement_entries
 from daceml.torch.module import dace_module, DaceModule
-from examples.gnn_benchmark import gat_implementations
-from examples.gnn_benchmark import gcn_implementations
 from examples.gnn_benchmark import util, sparse, models
 from examples.gnn_benchmark.data_optimizer import optimize_data
+from examples.gnn_benchmark.implementations import gat_implementations
+from examples.gnn_benchmark.implementations import gcn_implementations
+from examples.gnn_benchmark.implementations.common import SparseLayerBase
 from examples.gnn_benchmark.util import specialize_mem_onnx, \
     apply_dace_auto_optimize, make_maps_dynamic
 
@@ -43,7 +45,7 @@ class ExperimentInfo:
     impl_name: str
     gnn_type: str
     implementation: ONNXForward
-    data_format: str
+    data_format: Type[sparse.GraphMatrix]
     model: daceml.torch.DaceModule
     correct: Optional[bool] = None
     data: Optional[sparse.GraphMatrix] = None
@@ -180,19 +182,14 @@ def get_dataset(dataset_name: str) -> Tuple[
     return data, num_node_features, num_classes
 
 
-def create_dace_model(model_class: Type[torch.nn.Module],
-                      num_node_features: int, num_hidden_features: int,
-                      num_classes: int, normalize: bool,
+def create_dace_model(model: torch.nn.Module,
                       state_dict: Dict[str, torch.Tensor],
                       gnn_implementation_name: str,
                       do_opt: bool,
                       persistent_mem: bool,
                       threadblock_dynamic: bool) -> dace.DaceModule:
-    sdfg_name = f"{model_class.__name__}_{gnn_implementation_name}"
-    dace_model = DaceModule(model_class(
-        num_node_features,
-        num_hidden_features, num_classes,
-        normalize), sdfg_name=sdfg_name).to(device)
+    sdfg_name = f"{model.__class__.__name__}_{gnn_implementation_name}"
+    dace_model = DaceModule(copy.deepcopy(model), sdfg_name=sdfg_name).to(device)
 
     dace_model.model.load_state_dict(state_dict)
 
@@ -210,12 +207,12 @@ def create_dace_model(model_class: Type[torch.nn.Module],
     if threadblock_dynamic:
         print("---> Adding threadblock dynamic maps hook.")
         exclude_loops = []
-        if model_class == models.GCN:
+        if isinstance(model, models.GCN):
             # Has to be skipped, otherwise the computation results are incorrect.
             exclude_loops = [
                 'daceml_onnx_op_implementations_replacement_implementations_prog_sparse_45_4_46'
             ]
-        elif model_class == models.GAT:
+        elif isinstance(model, models.GAT):
             exclude_loops = [
                 # Below two have to be excluded because only one-dimensional
                 # maps are supported in DaCe for dynamic block map schedule
@@ -241,27 +238,22 @@ def create_dace_model(model_class: Type[torch.nn.Module],
     return dace_model
 
 
-name_to_impl_class = {
-    "gcn": {"csr": (gcn_implementations.GCNConvCSR, sparse.CsrGraph),
-            "coo": (gcn_implementations.GCNConvCOO, sparse.CooGraph),
-            "csc": (gcn_implementations.GCNConvCSC, sparse.CscGraph),
-            "ellpack_t": (gcn_implementations.GCNConvEllpackTransposed,
-                          sparse.EllpackTransposedGraph),
-            "ellpack": (gcn_implementations.GCNConvEllpack,
-                        sparse.EllpackGraph),
-            "semester_thesis": (
-                gcn_implementations.GCNConvSemesterThesis,
-                sparse.CsrGraph)},
-    "gat": {"csr": (gat_implementations.GATConvCSR, sparse.CsrGraph),
-            "semester_thesis": (
-                gat_implementations.GATConvSemesterThesis,
-                sparse.CsrGraph)}
+name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
+    "gcn": {"csr": gcn_implementations.GCNConvCSR,
+            "coo": gcn_implementations.GCNConvCOO,
+            "csc": gcn_implementations.GCNConvCSC,
+            "ellpack_t": gcn_implementations.GCNConvEllpackTransposed,
+            "ellpack": gcn_implementations.GCNConvEllpack,
+            "semester_thesis": gcn_implementations.GCNConvSemesterThesis},
+    "gat": {"csr": gat_implementations.GATConvCSR,
+            "semester_thesis":gat_implementations.GATConvSemesterThesis}
 }
 name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
 
+
 def register_replacement_overrides(implementation_name, layer_name):
-    impl_class, _ = name_to_impl_class[layer_name][implementation_name]
-    input_spec = impl_class.get_input_spec()
+    impl_class = name_to_impl_class[layer_name][implementation_name]
+    input_spec = impl_class.input_spec
     if 'gcn' in layer_name:
         register_replacement('torch_geometric.nn.conv.gcn_conv.GCNConv',
                              inputs=input_spec,
@@ -313,8 +305,9 @@ def main():
     print("Implementation: ", args.impl)
 
     # Define models.
-    torch_model = model_class(num_node_features, num_hidden_features,
-                              num_classes, normalize).to(device)
+    model_args = (num_node_features, num_hidden_features, num_classes,
+                  normalize)
+    torch_model = model_class(*model_args).to(device)
     torch_model.eval()
 
     dace_models = {}
@@ -325,12 +318,8 @@ def main():
             for impl in args.impl
         }
 
-    for impl_name, (
-            implementation_class,
-            data_format) in available_implementations.items():
-        dace_model = create_dace_model(model_class, num_node_features,
-                                       num_hidden_features, num_classes,
-                                       normalize=normalize,
+    for impl_name, implementation_class in available_implementations.items():
+        dace_model = create_dace_model(torch_model,
                                        state_dict=torch_model.state_dict(),
                                        gnn_implementation_name=impl_name,
                                        threadblock_dynamic=args.threadblock_dynamic,
@@ -339,7 +328,7 @@ def main():
         dace_models[impl_name] = ExperimentInfo(impl_name=impl_name,
                                                 implementation=implementation_class,
                                                 model=dace_model,
-                                                data_format=data_format,
+                                                data_format=implementation_class.graph_format,
                                                 gnn_type=args.model)
 
     if 'gcn' in args.model:
@@ -350,7 +339,7 @@ def main():
     sparse_edge_index = SparseTensor.from_edge_index(
         data.edge_index, edge_attr=data.edge_weight)
     edge_rowptr, edge_col, edge_weights = sparse_edge_index.csr()
-    print("Num non zero:", edge_weights.shape[0])
+    print("Num non zero:", edge_col.shape[0])
 
     torch_model, dace_models = optimize_data(torch_model, dace_models, data)
     print(dace_models)

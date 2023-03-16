@@ -1,30 +1,22 @@
-import typing
+import abc
+from typing import Type, Dict, Union
 
 import dace
 import numpy as np
 from dace import nodes, SDFG, SDFGState
 
-from daceml.onnx.forward_implementation_abc import ONNXForward
 from daceml.onnx.nodes import onnx_op
 from daceml.onnx.op_implementations.utils import op_implementation
 from daceml.onnx.op_implementations.utils import program_for_node
 from daceml.util.utils import in_desc_with_name
-from examples.gnn_benchmark import csrmm_libnode
+from examples.gnn_benchmark import csrmm_libnode, sparse
+from examples.gnn_benchmark.implementations.common import SparseLayerBase
 
 
-class GCNConvBase(ONNXForward):
-    @staticmethod
-    def get_input_spec():
-        raise NotImplementedError
-
-    @staticmethod
-    def make_op(N: int, num_out_features: int, num_entries: int,
-                dtype: dace.dtypes.Typeclasses, do_bias: bool):
-        raise NotImplementedError
-
+class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
     @classmethod
     def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
-                sdfg: SDFG) -> typing.Union[nodes.Node, SDFG]:
+                sdfg: SDFG) -> Union[nodes.Node, SDFG]:
         if node.module.add_self_loops:
             raise NotImplementedError("Adding self loops is not supported. "
                                       "Add self-loops in preprocessing.")
@@ -57,14 +49,13 @@ class GCNConvBase(ONNXForward):
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="semester_thesis")
 class GCNConvSemesterThesis(GCNConvBase):
-    @staticmethod
-    def get_input_spec():
-        return {
-            'node_features': dace.float32,
-            'rowptrs': dace.int64,
-            'columns': dace.int64,
-            'edge_vals': dace.float32,
-        }
+    graph_format: sparse.GraphMatrix = sparse.CsrGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': dace.float32,
+        'rowptrs': dace.int64,
+        'columns': dace.int64,
+        'edge_vals': dace.float32,
+    }
 
     @staticmethod
     def make_op(N: int, num_out_features: int, num_entries: int,
@@ -103,14 +94,13 @@ class GCNConvSemesterThesis(GCNConvBase):
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csr")
 class GCNConvCSR(GCNConvBase):
-    @staticmethod
-    def get_input_spec():
-        return {
-            'node_features': dace.float32,
-            'rowptrs': dace.int64,
-            'columns': dace.int64,
-            'edge_vals': dace.float32,
-        }
+    graph_format: sparse.GraphMatrix = sparse.CsrGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': dace.float32,
+        'rowptrs': dace.int64,
+        'columns': dace.int64,
+        'edge_vals': dace.float32,
+    }
 
     @staticmethod
     def make_op(N: int, num_out_features: int, num_entries: int,
@@ -130,7 +120,7 @@ class GCNConvCSR(GCNConvBase):
                 features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
                 for i, j in dace.map[0:N, 0:num_out_features]:
                     output[i, j] = bias[j]
-                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output, beta=1.0)
         else:
             def gcn_op(node_features, rowptrs, columns, edge_vals,
                        linDOTweight, output):
@@ -151,14 +141,13 @@ class GCNConvCSR(GCNConvBase):
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csc")
 class GCNConvCSC(GCNConvBase):
-    @staticmethod
-    def get_input_spec():
-        return {
-            'node_features': dace.float32,
-            'colptrs': dace.int64,
-            'rows': dace.int64,
-            'edge_vals': dace.float32,
-        }
+    graph_format: sparse.GraphMatrix = sparse.CscGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': dace.float32,
+        'colptrs': dace.int64,
+        'rows': dace.int64,
+        'edge_vals': dace.float32,
+    }
 
     @staticmethod
     def make_op(N: int, num_out_features: int, num_entries: int,
@@ -201,14 +190,13 @@ class GCNConvCSC(GCNConvBase):
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="coo")
 class GCNConvCOO(GCNConvBase):
-    @staticmethod
-    def get_input_spec():
-        return {
-            'node_features': dace.float32,
-            'rows': dace.int64,
-            'columns': dace.int64,
-            'edge_vals': dace.float32,
-        }
+    graph_format: sparse.GraphMatrix = sparse.CooGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': dace.float32,
+        'rows': dace.int64,
+        'columns': dace.int64,
+        'edge_vals': dace.float32,
+    }
 
     @staticmethod
     def make_op(N: int, num_out_features: int, num_entries: int,
@@ -247,13 +235,12 @@ class GCNConvCOO(GCNConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="ellpack_t")
 class GCNConvEllpackTransposed(GCNConvBase):
-    @staticmethod
-    def get_input_spec():
-        return {
-            'node_features': dace.float32,
-            'rows': dace.int64,
-            'edge_vals': dace.float32,
-        }
+    graph_format: sparse.GraphMatrix = sparse.EllpackTransposedGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': dace.float32,
+        'rows': dace.int64,
+        'edge_vals': dace.float32,
+    }
 
     @staticmethod
     def make_op(N: int, num_out_features: int, num_entries: int,
@@ -294,13 +281,12 @@ class GCNConvEllpackTransposed(GCNConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="ellpack")
 class GCNConvEllpack(GCNConvBase):
-    @staticmethod
-    def get_input_spec():
-        return {
-            'node_features': dace.float32,
-            'columns': dace.int64,
-            'edge_vals': dace.float32,
-        }
+    graph_format: sparse.GraphMatrix = sparse.EllpackGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': dace.float32,
+        'columns': dace.int64,
+        'edge_vals': dace.float32,
+    }
 
     @staticmethod
     def make_op(N: int, num_out_features: int, num_entries: int,

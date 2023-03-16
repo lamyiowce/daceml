@@ -1,3 +1,4 @@
+import abc
 import typing
 
 import dace
@@ -9,19 +10,11 @@ from daceml.onnx.nodes import onnx_op
 from daceml.onnx.op_implementations.utils import op_implementation
 from daceml.onnx.op_implementations.utils import program_for_node
 from daceml.util.utils import in_desc_with_name
+from examples.gnn_benchmark import sparse
+from examples.gnn_benchmark.implementations.common import SparseLayerBase
 
 
-class GATConvBase(ONNXForward):
-    @staticmethod
-    def get_input_spec():
-        raise NotImplementedError
-
-    @staticmethod
-    def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
-                dtype: dace.dtypes.Typeclasses, negative_slope: float,
-                do_bias: bool):
-        raise NotImplementedError
-
+class GATConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
     @classmethod
     def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
                 sdfg: SDFG) -> typing.Union[nodes.Node, SDFG]:
@@ -52,13 +45,12 @@ class GATConvBase(ONNXForward):
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
                    name="semester_thesis")
 class GATConvSemesterThesis(GATConvBase):
-    @staticmethod
-    def get_input_spec():
-        return {
-            'node_features': dace.float32,
-            'rowptrs': dace.int64,
-            'columns': dace.int64
-        }
+    graph_format = sparse.CsrGraph
+    input_spec = {
+        "node_features": dace.float32,
+        "rowptrs": dace.int64,
+        "columns": dace.int64,
+    }
 
     @staticmethod
     def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
@@ -140,13 +132,12 @@ class GATConvSemesterThesis(GATConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
                    name="csr")
 class GATConvCSR(GATConvBase):
-    @staticmethod
-    def get_input_spec():
-        return {
-            'node_features': dace.float32,
-            'rowptrs': dace.int64,
-            'columns': dace.int64
-        }
+    graph_format = sparse.CsrGraph
+    input_spec = {
+        "node_features": dace.float32,
+        "rowptrs": dace.int64,
+        "columns": dace.int64,
+    }
 
     @staticmethod
     def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
