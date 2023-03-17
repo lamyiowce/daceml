@@ -20,7 +20,8 @@ def csrmm(A_rowptrs: dace.int64[N + 1],
           B: dace.float32[N, K],
           C: dace.float32[N, K],
           alpha: float = 1.0,
-          beta: float = 0.):
+          beta: float = 0.,
+          transA: bool = False):
     pass
 
 
@@ -32,7 +33,7 @@ def csrmm_libnode(pv: 'ProgramVisitor',
                   A_columns,
                   A_values,
                   B,
-                  C, alpha=1., beta=0.):
+                  C, alpha=1., beta=0., transA=False):
     # Add nodes
     A_rowptrs_in, A_columns_in, A_values_in, B_in = (state.add_read(name) for
                                                      name in (
@@ -40,7 +41,7 @@ def csrmm_libnode(pv: 'ProgramVisitor',
                                                          A_values, B))
     C_out = state.add_write(C)
 
-    libnode = CSRMM('csrmm', alpha=alpha, beta=beta)
+    libnode = CSRMM('csrmm', transA=transA.item(), alpha=alpha, beta=beta)
     libnode.implementation = 'cuSPARSE' if torch.cuda.is_available() else 'pure'
     state.add_node(libnode)
 

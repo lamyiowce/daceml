@@ -83,8 +83,8 @@ class GCNConvSemesterThesis(GCNConvBase):
                 for j in dace.map[rowptrs[i]:rowptrs[i + 1]]:
                     # Below lines result in compile errors when enabling thread block dynamic scheduling.
                     column = columns[j]
-                    mult = features[column, k] * edge_vals[j]
-                    output[i, k] += mult
+                    mult = features[i, k] * edge_vals[j]
+                    output[column, k] += mult
 
         if do_bias:
             def bias_prog(node_features, rowptrs, columns, edge_vals,
@@ -125,7 +125,7 @@ class GCNConvCSR(GCNConvBase):
                 features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
                 for i, j in dace.map[0:N, 0:num_out_features]:
                     output[i, j] = bias[j]
-                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output, beta=1.0)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output, beta=1.0, transA=True)
         else:
             def gcn_op(node_features, rowptrs, columns, edge_vals,
                        linDOTweight, output):
@@ -139,7 +139,7 @@ class GCNConvCSR(GCNConvBase):
                 """
                 features = dace.define_local((N, num_out_features), dtype=dtype)
                 features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
-                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output, transA=True)
 
         return gcn_op
 
@@ -170,16 +170,8 @@ class GCNConvCSC(GCNConvBase):
             features = dace.define_local((N, num_out_features), dtype=dtype)
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
 
-            # output[:] = 0
-            # for i, k in dace.map[0:N, 0:num_out_features]:
-            #     for j in dace.map[colptrs[i]:colptrs[i + 1]]:
-            #         # Below lines result in compile errors when enabling thread block dynamic scheduling.
-            #         row = rows[j]
-            #         mult = features[row, k] * edge_vals[j]
-            #         output[i, k] += mult
-
             # A is in CSC format, so in order to compute A.t @ B, we call CSR matmul. This is because CSC(A) = CSR(A.t).
-            csrmm_libnode.csrmm(colptrs, rows, edge_vals, features, output)
+            csrmm_libnode.csrmm(colptrs, rows, edge_vals, features, output, transA=False)
 
         if do_bias:
             def bias_prog(node_features, colptrs, rows, edge_vals,

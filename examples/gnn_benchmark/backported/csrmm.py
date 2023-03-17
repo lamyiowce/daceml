@@ -323,7 +323,10 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
 
         opt['func'] = func
 
-        opt['opA'] = 'CUSPARSE_OPERATION_NON_TRANSPOSE'
+        if node.transA:
+            opt['opA'] = 'CUSPARSE_OPERATION_TRANSPOSE'
+        else:
+            opt['opA'] = 'CUSPARSE_OPERATION_NON_TRANSPOSE'
 
         if node.transB:
             opt['opB'] = 'CUSPARSE_OPERATION_TRANSPOSE'
@@ -457,10 +460,11 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
 
     # Global properties
-    implementations = {"pure": ExpandCSRMMPure, "cuSPARSE": ExpandCSRMMCuSPARSE}
-    default_implementation = "fast"
+    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE}
+    default_implementation = "cuSPARSE"
 
     # Object fields
+    transA = properties.Property(dtype=bool, desc="Whether to transpose A before multiplying")
     transB = properties.Property(dtype=bool, desc="Whether to transpose B before multiplying")
     alpha = properties.Property(allow_none=False,
                                 default=1,
@@ -469,12 +473,13 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
                                default=0,
                                desc="A scalar which will be multiplied with C before adding C")
 
-    def __init__(self, name, location=None, transB=False, alpha=1, beta=0):
+    def __init__(self, name, location=None, transA=False, transB=False, alpha=1, beta=0):
         super().__init__(name,
                          location=location,
                          inputs=({"_a_rows", "_a_cols", "_a_vals", "_b", "_cin"}
                                  if beta != 0 and beta != 1.0 else {"_a_rows", "_a_cols", "_a_vals", "_b"}),
                          outputs={"_c"})
+        self.transA = transA
         self.transB = transB
         self.alpha = alpha
         self.beta = beta

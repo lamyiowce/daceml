@@ -83,6 +83,7 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
 
     all_correct = True
     for name, experiment_info in dace_models.items():
+        print(f"---> Checking correctness for {name}...")
         model = experiment_info.model
         args = experiment_info.data.to_input_list()
         register_replacement_overrides(experiment_info.impl_name,
@@ -114,7 +115,8 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  torch_csr_args: Sequence[torch.Tensor],
                  torch_edge_list_args: Sequence[torch.Tensor],
                  args,
-                 save_output: bool = True):
+                 save_output: bool = True,
+                 small: bool = False):
     from daceml.testing.profiling import print_time_statistics
     from examples.gnn_benchmark.performance_measurement import \
         measure_performance
@@ -145,9 +147,9 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
     times = measure_performance(funcs,
                                 func_names=func_names,
-                                warmups=10,
-                                num_iters=10,
-                                timing_iters=100)
+                                warmups=10 if not small else 2,
+                                num_iters=10 if not small else 2,
+                                timing_iters=100 if not small else 3)
     print()
     print(f"\n------ fixed timing {args.model.upper()} ------")
     print_time_statistics(times, func_names)
@@ -374,10 +376,10 @@ def main():
             print(f"Dace {dace_model_name}: ", model(*inputs))
         print("PyG csr: ", torch_model(*torch_csr_args))
         print("PyG edge list: ", torch_model(*torch_edge_list_args))
-    elif args.mode == 'benchmark':
+    elif args.mode == 'benchmark' or args.mode == 'benchmark_small':
         print("Benchmarking...")
         do_benchmark(dace_models, torch_model, torch_csr_args,
-                     torch_edge_list_args, args, save_output=results_correct)
+                     torch_edge_list_args, args, save_output=results_correct, small=args.mode == 'benchmark_small')
     else:
         raise ValueError("Mode not supported " + args.mode)
 
