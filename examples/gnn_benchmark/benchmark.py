@@ -73,9 +73,14 @@ def stats_as_string(times, func_names, model, hidden_size):
 
 def check_correctness(dace_models: Dict[str, ExperimentInfo],
                       torch_model: torch.nn.Module,
-                      torch_edge_list_args):
-    torch_pred = torch_model(*torch_edge_list_args)
-    torch_pred_cpu = torch_pred.detach().cpu()
+                      torch_edge_list_args,
+                      torch_csr_args):
+    torch_edge_list_pred = torch_model(*torch_edge_list_args)
+    torch_csr_pred = torch_model(*torch_csr_args)
+    torch_edge_list_pred = torch_edge_list_pred.detach().cpu()
+    torch_csr_pred = torch_csr_pred.detach().cpu()
+    assert torch.allclose(torch_edge_list_pred, torch_csr_pred, atol=1.0e-5)
+
     all_correct = True
     for name, experiment_info in dace_models.items():
         model = experiment_info.model
@@ -84,14 +89,14 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
                                        experiment_info.gnn_type)
         dace_pred = model(*args)
         dace_pred_cpu = dace_pred.detach().cpu()
-        if np.allclose(dace_pred_cpu, torch_pred_cpu, atol=1.0e-5):
+        if np.allclose(dace_pred_cpu, torch_edge_list_pred, atol=1.0e-5):
             print(f"\n==== Results correct for {name}.  ☆ ╰(o＾◡＾o)╯ ☆ ====")
             experiment_info.correct = True
         else:
             print(f"\n****** INCORRECT RESULTS FOR {name}! (ノಥ﹏ಥ)ノ彡┻━┻ ******")
             print("Max abs error: ",
-                  abs((dace_pred_cpu - torch_pred_cpu)).max())
-            print(dace_pred_cpu - torch_pred_cpu)
+                  abs((dace_pred_cpu - torch_edge_list_pred)).max())
+            print(dace_pred_cpu - torch_edge_list_pred)
             experiment_info.correct = False
             all_correct = False
 
@@ -353,7 +358,7 @@ def main():
         torch_edge_list_args += (data.edge_weight,)
 
     results_correct = check_correctness(dace_models, torch_model,
-                                        torch_edge_list_args)
+                                        torch_edge_list_args, torch_csr_args)
 
     if args.mode == 'onlydace':
         print('Only dace models for profiling.')
