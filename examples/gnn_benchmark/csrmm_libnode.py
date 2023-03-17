@@ -1,4 +1,5 @@
 import dace
+import torch
 from dace import memlet
 from dace.frontend.common import op_repository as oprepo
 from dace.sdfg import SDFG, SDFGState
@@ -13,12 +14,15 @@ M = dace.symbol('M')
 K = dace.symbol('K')
 
 
-def csrmm(A_rowptrs: dace.int64[N+1],
+def csrmm(A_rowptrs: dace.int64[N + 1],
           A_columns: dace.int64[M],
           A_values: dace.float32[M],
           B: dace.float32[N, K],
-          C: dace.float32[N, K]):
+          C: dace.float32[N, K],
+          alpha: float = 1.0,
+          beta: float = 0.):
     pass
+
 
 @oprepo.replaces('examples.gnn_benchmark.csrmm_libnode.csrmm')
 def csrmm_libnode(pv: 'ProgramVisitor',
@@ -28,7 +32,7 @@ def csrmm_libnode(pv: 'ProgramVisitor',
                   A_columns,
                   A_values,
                   B,
-                  C):
+                  C, alpha=1., beta=0.):
     # Add nodes
     A_rowptrs_in, A_columns_in, A_values_in, B_in = (state.add_read(name) for
                                                      name in (
@@ -36,7 +40,8 @@ def csrmm_libnode(pv: 'ProgramVisitor',
                                                          A_values, B))
     C_out = state.add_write(C)
 
-    libnode = CSRMM('csrmm', alpha=1., beta=0.)
+    libnode = CSRMM('csrmm', alpha=alpha, beta=beta)
+    libnode.implementation = 'cuSPARSE' if torch.cuda.is_available() else 'pure'
     state.add_node(libnode)
 
     # Connect nodes

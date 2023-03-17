@@ -14,6 +14,11 @@ from examples.gnn_benchmark.implementations.common import SparseLayerBase
 
 
 class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
+    """
+    A GCN node, given node features X, weights W and adjacency matrix A, computes:
+    X' = A.t @ (X @ W.t)
+    """
+
     @classmethod
     def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
                 sdfg: SDFG) -> Union[nodes.Node, SDFG]:
@@ -78,8 +83,8 @@ class GCNConvSemesterThesis(GCNConvBase):
                 for j in dace.map[rowptrs[i]:rowptrs[i + 1]]:
                     # Below lines result in compile errors when enabling thread block dynamic scheduling.
                     column = columns[j]
-                    mult = features[i, k] * edge_vals[j]
-                    output[column, k] += mult
+                    mult = features[column, k] * edge_vals[j]
+                    output[i, k] += mult
 
         if do_bias:
             def bias_prog(node_features, rowptrs, columns, edge_vals,
@@ -173,7 +178,7 @@ class GCNConvCSC(GCNConvBase):
             #         mult = features[row, k] * edge_vals[j]
             #         output[i, k] += mult
 
-            # TODO: there is some transposition issue. seems like the pure CSRMM executes as if A was transposed?
+            # A is in CSC format, so in order to compute A.t @ B, we call CSR matmul. This is because CSC(A) = CSR(A.t).
             csrmm_libnode.csrmm(colptrs, rows, edge_vals, features, output)
 
         if do_bias:

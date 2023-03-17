@@ -457,8 +457,8 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
 
     # Global properties
-    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE}
-    default_implementation = "cuSPARSE"
+    implementations = {"pure": ExpandCSRMMPure, "cuSPARSE": ExpandCSRMMCuSPARSE}
+    default_implementation = "fast"
 
     # Object fields
     transB = properties.Property(dtype=bool, desc="Whether to transpose B before multiplying")
@@ -473,7 +473,7 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
         super().__init__(name,
                          location=location,
                          inputs=({"_a_rows", "_a_cols", "_a_vals", "_b", "_cin"}
-                                 if beta != 0 else {"_a_rows", "_a_cols", "_a_vals", "_b"}),
+                                 if beta != 0 and beta != 1.0 else {"_a_rows", "_a_cols", "_a_vals", "_b"}),
                          outputs={"_c"})
         self.transB = transB
         self.alpha = alpha
