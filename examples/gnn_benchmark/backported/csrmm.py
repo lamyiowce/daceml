@@ -373,6 +373,18 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
             // Create dense matrix C
             dace::sparse::CheckCusparseError( cusparseCreateDnMat(&matC, {nrows}, {ncols}, {ldc}, {arr_prefix}_c,
                                                 {compute}, {layout}) );
+                                                
+            // Get the size of the additional buffer that's needed.
+            size_t bufferSize;
+            dace::sparse::CheckCusparseError( cusparseSpMM_bufferSize(
+                                            {handle},
+                                            {opA},
+                                            {opB},
+                                            {alpha}, matA, matB, {beta}, matC, {compute},
+                                            {algo}, &bufferSize) );
+            printf("bufferSize: %d\\n", bufferSize);
+            void* dBuffer = __state->cusparse_handle.Buffer(__dace_cuda_device, __dace_current_stream_id, bufferSize);
+
             // execute SpMM
             dace::sparse::CheckCusparseError( cusparseSpMM({handle},
                                             {opA},
