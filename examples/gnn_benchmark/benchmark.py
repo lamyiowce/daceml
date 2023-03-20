@@ -95,17 +95,28 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
             experiment_info.correct = True
         else:
             print(f"\n****** INCORRECT RESULTS FOR {name}! (ノಥ﹏ಥ)ノ彡┻━┻ ******")
-            print("Max abs error: ",
+            print("** Max abs error: ",
                   abs((dace_pred_cpu - torch_edge_list_pred)).max())
-            print(dace_pred_cpu - torch_edge_list_pred)
+            print("** Avg abs error: ",
+                  abs((dace_pred_cpu - torch_edge_list_pred)).mean())
+            print("** Max rel error: ",
+                  (abs((dace_pred_cpu - torch_edge_list_pred)) / abs(torch_edge_list_pred)).max())
+            print(dace_pred_cpu)
+            print(torch_edge_list_pred)
             experiment_info.correct = False
             all_correct = False
 
-    if all_correct and len(dace_models) > 1:
-        print(f"\n☆ ============================================== ☆")
-        print(
-            f"==== Results correct for {', '.join(dace_models.keys())}. ☆ ╰(o＾◡＾o)╯ ☆ ====")
+    correct_keys = [key for key, value in dace_models.items() if value.correct]
+    incorrect_keys = [key for key, value in dace_models.items() if not value.correct]
+
+    print(f"\n☆ =================== SUMMARY ================== ☆")
+    if len(correct_keys) > 0:
         print(f"☆ ============================================== ☆")
+        print(f"==== Results correct for {', '.join(correct_keys)}. ☆ ╰(o＾◡＾o)╯ ☆ ====")
+        print(f"☆ ============================================== ☆")
+    if len(incorrect_keys) > 0:
+        print(f"****** INCORRECT RESULTS FOR {', '.join(incorrect_keys)}! (ノಥ﹏ಥ)ノ彡┻━┻ ******")
+        print(f"****************************************************\n")
 
     return all_correct
 
@@ -359,6 +370,8 @@ def main():
     if edge_weights is not None and 'gcn' in args.model:
         torch_edge_list_args += (data.edge_weight,)
 
+    results_correct = check_correctness(dace_models, torch_model,
+                                        torch_edge_list_args, torch_csr_args)
     results_correct = check_correctness(dace_models, torch_model,
                                         torch_edge_list_args, torch_csr_args)
 
