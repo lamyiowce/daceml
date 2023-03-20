@@ -20,25 +20,26 @@ def set_implementation(dace_module, implementation):
 
     dace_module.prepend_post_onnx_hook("set_implementation", hook)
 
+
 @pytest.mark.parametrize("beta", [0.0, 1.0])
 def test_spmm_libnode(beta):
     A = torch.tensor([[1, 0, 3], [0, 2, 0], [0, 2., 4.5]])
     B = torch.tensor([[1., 1], [0, 0], [1, 0]])
-    C = np.zeros((3, 2)) if beta == 0.0 else np.random.rand(3, 2)
+    C = torch.zeros((3, 2)) if beta == 0.0 else torch.rand(3, 2)
     A_sparse = SparseTensor.from_dense(A)
     A_rowptrs, A_columns, A_vals = A_sparse.csr()
     expected_C = A @ B + beta * C
 
-
     @dace.program
     def spmm(A_rowptrs, A_columns, A_vals, B, C):
-        csrmm(A_rowptrs, A_columns, A_vals, B, C, beta=beta)
+        csrmm(A_rowptrs, A_columns, A_vals, B, C, beta=beta, transA=False)
 
     spmm(A_rowptrs, A_columns, A_vals, B, C)
 
     print('\nCalculated: \n', C)
     print('Expected: \n', expected_C)
     assert np.allclose(C, expected_C)
+
 
 def test_spmm_pure():
     A = torch.tensor([[1, 0, 3], [0, 2, 0], [0, 2., 4.5]])
@@ -52,3 +53,46 @@ def test_spmm_pure():
     print('\nCalculated: \n', C)
     print('Expected: \n', expected_C)
     assert np.allclose(C, expected_C)
+
+
+def test_many_stream_spmm():
+    N = 4
+    M = 2
+    device = 'cuda'
+    B = torch.rand((N, M), dtype=torch.float32, device=device)
+    A = torch.tensor([[1., 0, 1, 0],
+                      [1., 1, 1, 0],
+                      [0., 1, 1, 1],
+                      [0., 0, 1, 0]], device=device, dtype=torch.float32)
+    A_sparse = SparseTensor.from_dense(A).to(device)
+    A_rowptrs, A_columns, A_values = A_sparse.csr()
+
+    C1 = torch.zeros((N, M), dtype=torch.float32).to(device)
+    C2 = torch.zeros((N, M), dtype=torch.float32).to(device)
+    C3 = torch.zeros((N, M), dtype=torch.float32).to(device)
+    C_sum = torch.zeros((N, M), dtype=torch.float32).to(device)
+
+    @dace.program
+    def compute_spmms(A_rowptrs, A_cols, A_vals, B, C1, C2, C3, C_sum):
+        # runs three SPMMS.
+        # C1 = A * B
+        csrmm(A_rowptrs, A_cols, A_vals, B, C1, transA=False)
+        csrmm(A_rowptrs, A_cols, A_vals, B, C2, transA=False)
+        csrmm(A_rowptrs, A_cols, A_vals, B, C3, transA=False)
+        C_sum[:] = C1 + C2 + C3
+
+    sdfg = compute_spmms.to_sdfg(A_rowptrs, A_columns, A_values, B, C1, C2, C3, C_sum)
+    sdfg.apply_gpu_transformations()
+    sdfg(A_rowptrs, A_columns, A_values, B, C1, C2, C3, C_sum)
+
+    expected_single = (A @ B).cpu().numpy()
+    print("Calculated C1: ", C1)
+    print("Calculated C2: ", C2)
+    print("Calculated C3: ", C3)
+    print("Expected: ", expected_single)
+    print("Calculated Csum: ", C_sum)
+    print("Expected: ", 3 * expected_single)
+    assert np.allclose(C2.cpu().numpy(), expected_single)
+    assert np.allclose(C3.cpu().numpy(), expected_single)
+    assert np.allclose(C1.cpu().numpy(), expected_single)
+    assert np.allclose(C_sum.cpu().numpy(), 3*expected_single)
