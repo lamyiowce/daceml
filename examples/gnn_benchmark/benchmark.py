@@ -89,6 +89,7 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
         register_replacement_overrides(experiment_info.impl_name,
                                        experiment_info.gnn_type)
         dace_pred = model(*args)
+        torch.cuda.synchronize()
         dace_pred_cpu = dace_pred.detach().cpu()
         if np.allclose(dace_pred_cpu, torch_edge_list_pred, atol=1.0e-5):
             print(f"\n==== Results correct for {name}.  ☆ ╰(o＾◡＾o)╯ ☆ ====")
@@ -372,21 +373,23 @@ def main():
 
     results_correct = check_correctness(dace_models, torch_model,
                                         torch_edge_list_args, torch_csr_args)
-    results_correct = check_correctness(dace_models, torch_model,
-                                        torch_edge_list_args, torch_csr_args)
 
     if args.mode == 'onlydace':
         print('Only dace models for profiling.')
         for dace_model_name, dace_model_info in dace_models.items():
             model = dace_model_info.dace_model
             inputs = dace_model_info.data.to_input_list()
-            print(f"Dace {dace_model_name}: ", model(*inputs))
+            result = model(*inputs)
+            torch.cuda.synchronize()
+            print(f"Dace {dace_model_name}: ", result)
     elif args.mode == 'dry':
         print("Single run of all models.")
         for dace_model_name, dace_model_info in dace_models.items():
             model = dace_model_info.model
             inputs = dace_model_info.data.to_input_list()
-            print(f"Dace {dace_model_name}: ", model(*inputs))
+            result = model(*inputs)
+            torch.cuda.synchronize()
+            print(f"Dace {dace_model_name}: ", result)
         print("PyG csr: ", torch_model(*torch_csr_args))
         print("PyG edge list: ", torch_model(*torch_edge_list_args))
     elif args.mode == 'benchmark' or args.mode == 'benchmark_small':
