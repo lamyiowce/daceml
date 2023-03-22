@@ -24,6 +24,7 @@ from daceml.onnx.nodes import replacement_entries
 from daceml.torch.module import dace_module, DaceModule
 from examples.gnn_benchmark import util, sparse, models
 from examples.gnn_benchmark.data_optimizer import optimize_data
+from examples.gnn_benchmark.datasets import get_dataset
 from examples.gnn_benchmark.implementations import gat_implementations
 from examples.gnn_benchmark.implementations import gcn_implementations
 from examples.gnn_benchmark.implementations.common import SparseLayerBase
@@ -89,7 +90,8 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
         register_replacement_overrides(experiment_info.impl_name,
                                        experiment_info.gnn_type)
         dace_pred = model(*args)
-        torch.cuda.synchronize()
+        if device == 'cuda':
+            torch.cuda.synchronize()
         dace_pred_cpu = dace_pred.detach().cpu()
         if np.allclose(dace_pred_cpu, torch_edge_list_pred, atol=1.0e-5):
             print(f"\n==== Results correct for {name}.  ☆ ╰(o＾◡＾o)╯ ☆ ====")
@@ -181,26 +183,6 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                                 args.hidden))
 
 
-def get_dataset(dataset_name: str) -> Tuple[
-    torch_geometric.data.Data, int, int]:
-    if dataset_name == 'cora':
-        dataset = Planetoid(root='/tmp/Cora', name='Cora')
-        data = dataset[0].to(device)
-        num_node_features = dataset.num_node_features
-        num_classes = dataset.num_classes
-    elif dataset_name == 'small':
-        _x = torch.tensor([[0., 1], [1, 1], [-1, 0]]).to(device)
-        _edge_index = torch.tensor([[0, 0, 0, 2, 2], [0, 1, 2, 0,
-                                                      2]]).to(device)
-        _edge_attr = torch.tensor([1, 1, 1, 1., 1]).to(device)
-        data = Data(x=_x, edge_index=_edge_index, edge_attr=_edge_attr)
-        num_node_features = _x.shape[1]
-        num_classes = 2
-    else:
-        raise NotImplementedError("No such dataset: ", dataset_name)
-    return data, num_node_features, num_classes
-
-
 def create_dace_model(model: torch.nn.Module,
                       state_dict: Dict[str, torch.Tensor],
                       gnn_implementation_name: str,
@@ -265,7 +247,7 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
             "ellpack": gcn_implementations.GCNConvEllpack,
             "semester_thesis": gcn_implementations.GCNConvSemesterThesis},
     "gat": {"csr": gat_implementations.GATConvCSR,
-            "semester_thesis":gat_implementations.GATConvSemesterThesis}
+            "semester_thesis": gat_implementations.GATConvSemesterThesis}
 }
 name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
 
@@ -314,7 +296,7 @@ def main():
     log = logging.getLogger(__name__)
     log.setLevel(logging.INFO)
 
-    data, num_node_features, num_classes = get_dataset(args.data)
+    data, num_node_features, num_classes = get_dataset(args.data, device)
 
     print("Num node features: ", num_node_features)
     print("Num classes: ", num_classes)
@@ -380,7 +362,8 @@ def main():
             model = dace_model_info.dace_model
             inputs = dace_model_info.data.to_input_list()
             result = model(*inputs)
-            torch.cuda.synchronize()
+            if device == 'cuda':
+                torch.cuda.synchronize()
             print(f"Dace {dace_model_name}: ", result)
     elif args.mode == 'dry':
         print("Single run of all models.")
@@ -388,7 +371,8 @@ def main():
             model = dace_model_info.model
             inputs = dace_model_info.data.to_input_list()
             result = model(*inputs)
-            torch.cuda.synchronize()
+            if device == 'cuda':
+                torch.cuda.synchronize()
             print(f"Dace {dace_model_name}: ", result)
         print("PyG csr: ", torch_model(*torch_csr_args))
         print("PyG edge list: ", torch_model(*torch_edge_list_args))
