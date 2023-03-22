@@ -22,7 +22,7 @@ from daceml import onnx as donnx
 from daceml.onnx import register_replacement, ONNXForward
 from daceml.onnx.nodes import replacement_entries
 from daceml.torch.module import dace_module, DaceModule
-from examples.gnn_benchmark import util, sparse, models
+from examples.gnn_benchmark import util, sparse, models, datasets
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
 from examples.gnn_benchmark.implementations import gat_implementations
@@ -274,7 +274,7 @@ def main():
                   'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer}
 
     parser = argparse.ArgumentParser(description='benchmark')
-    parser.add_argument('--data', choices=['small', 'cora'], default='cora')
+    parser.add_argument('--data', choices=datasets.dataset_classes.keys(), default='cora')
     parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace'],
                         required=True)
     parser.add_argument('--impl', type=str, nargs='+', required=True)
