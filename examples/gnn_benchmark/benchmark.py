@@ -35,7 +35,8 @@ torch.backends.cudnn.allow_tf32 = False
 
 torch.manual_seed(42)
 np.random.seed(42)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+use_gpu = torch.cuda.is_available()
+device = torch.device('cuda' if use_gpu else 'cpu')
 
 
 @dataclasses.dataclass
@@ -86,9 +87,12 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
         args = experiment_info.data.to_input_list()
         register_replacement_overrides(experiment_info.impl_name,
                                        experiment_info.gnn_type)
+        if use_gpu:
+            torch.cuda.nvtx.range_push(name + ' Correctness')
         dace_pred = model(*args)
-        if device == 'cuda':
+        if use_gpu:
             torch.cuda.synchronize()
+            torch.cuda.nvtx.range_pop()
         dace_pred_cpu = dace_pred.detach().cpu()
         if np.allclose(dace_pred_cpu, torch_edge_list_pred, atol=1.0e-5):
             print(f"\n==== Results correct for {name}.  ☆ ╰(o＾◡＾o)╯ ☆ ====")
@@ -359,7 +363,7 @@ def main():
             model = dace_model_info.dace_model
             inputs = dace_model_info.data.to_input_list()
             result = model(*inputs)
-            if device == 'cuda':
+            if use_gpu:
                 torch.cuda.synchronize()
             print(f"Dace {dace_model_name}: ", result)
     elif args.mode == 'dry':
@@ -368,7 +372,7 @@ def main():
             model = dace_model_info.model
             inputs = dace_model_info.data.to_input_list()
             result = model(*inputs)
-            if device == 'cuda':
+            if use_gpu:
                 torch.cuda.synchronize()
             print(f"Dace {dace_model_name}: ", result)
         print("PyG csr: ", torch_model(*torch_csr_args))

@@ -19,12 +19,10 @@ torch.cuda.init()
 cuda_device = torch.device('cuda:0')
 
 def measure_performance(funcs,
-               name='',
                func_names=None,
                num_iters=10,
                timing_iters=100,
-               warmups=5,
-               launch_wait=False):
+               warmups=5):
     """ Run and time funcs.
 
         :param funcs: a list of functions that do GPU work.
