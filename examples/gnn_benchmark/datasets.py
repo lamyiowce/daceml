@@ -3,6 +3,7 @@ from typing import Tuple
 
 import torch
 import torch_geometric
+from ogb import nodeproppred
 
 dataset_classes = {
     'cora': functools.partial(torch_geometric.datasets.Planetoid, name='Cora'),
@@ -10,12 +11,6 @@ dataset_classes = {
     'citeseer': functools.partial(torch_geometric.datasets.Planetoid, name='CiteSeer'),
     'flickr': torch_geometric.datasets.Flickr,
     'reddit': torch_geometric.datasets.Reddit,
-    'ppi': torch_geometric.datasets.PPI,
-    'amazon': torch_geometric.datasets.Amazon,
-    'yelp': torch_geometric.datasets.Yelp,
-    'coauthor': torch_geometric.datasets.Coauthor,
-    'coauthor_cs': functools.partial(torch_geometric.datasets.Coauthor, name='CS'),
-    'coauthor_phy': functools.partial(torch_geometric.datasets.Coauthor, name='Physics'),
 }
 
 
@@ -33,6 +28,11 @@ def get_dataset(dataset_name: str, device) -> Tuple[
     elif dataset_name in dataset_classes:
         dataset_class = dataset_classes[dataset_name]
         dataset = dataset_class(root=data_path)
+        data = dataset[0].to(device)
+        num_node_features = dataset.num_node_features
+        num_classes = dataset.num_classes
+    elif 'ogb' in dataset_name:
+        dataset = nodeproppred.PygNodePropPredDataset(name=dataset_name, root='/tmp/datasets/ogb')
         data = dataset[0].to(device)
         num_node_features = dataset.num_node_features
         num_classes = dataset.num_classes

@@ -382,7 +382,6 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
                                             {opB},
                                             {alpha}, matA, matB, {beta}, matC, {compute},
                                             {algo}, &bufferSize) );
-            printf("bufferSize: %d\\n", bufferSize);
             void* dBuffer = __state->cusparse_handle.Buffer(__dace_cuda_device, __dace_current_stream_id, bufferSize);
 
             // execute SpMM

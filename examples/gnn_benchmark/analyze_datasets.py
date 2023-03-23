@@ -1,5 +1,6 @@
 import statistics
 
+import click
 import matplotlib.pyplot as plt
 import numpy as np
 import tabulate
@@ -44,9 +45,9 @@ def visualize_single_dataset(ax, data):
     ax.set_ylabel('Count')
     return get_info(data, dataset, degree)
 
-
-def visualize_datasets():
-    datasets = ['flickr', 'cora', 'pubmed', 'citeseer']
+@click.command()
+@click.argument('datasets', nargs=-1)
+def visualize_datasets(datasets):
     # Crete a figure with margins
     fig, axes = plt.subplots(len(datasets) // 2 + len(datasets) % 2, 2, figsize=(10, 10))
     rows = []

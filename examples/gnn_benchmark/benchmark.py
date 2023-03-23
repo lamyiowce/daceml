@@ -6,14 +6,11 @@ import functools
 import logging
 import statistics
 from pathlib import Path
-from typing import Sequence, Tuple, Dict, Optional, Type
+from typing import Sequence, Dict, Optional, Type
 
 import dace
 import numpy as np
 import torch
-import torch_geometric
-from torch_geometric.data import Data
-from torch_geometric.datasets import Planetoid
 from torch_geometric.transforms import GCNNorm
 from torch_sparse import SparseTensor
 
@@ -275,7 +272,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='benchmark')
     parser.add_argument('--data', choices=datasets.dataset_classes.keys(), default='cora')
-    parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace'],
+    parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace', 'benchmark_small'],
                         required=True)
     parser.add_argument('--impl', type=str, nargs='+', required=True)
     parser.add_argument('--normalize', action='store_true')
