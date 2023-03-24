@@ -132,9 +132,13 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  args,
                  save_output: bool = True,
                  small: bool = False):
-    from daceml.testing.profiling import print_time_statistics
-    from examples.gnn_benchmark.performance_measurement import \
+    from examples.gnn_benchmark.performance_measurement import print_time_statistics
+    if use_gpu:
+        from examples.gnn_benchmark.performance_measurement import \
         measure_performance
+    else:
+        from examples.gnn_benchmark.performance_measurement import \
+            measure_performance_cpu as measure_performance
 
     funcs = [
         lambda: torch_model(*torch_csr_args),
@@ -166,7 +170,7 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                                 num_iters=10 if not small else 2,
                                 timing_iters=100 if not small else 3)
     print()
-    print(f"\n------ fixed timing {args.model.upper()} ------")
+    print(f"\n------ {args.model.upper()} RUNTIME [ms] ------")
     print_time_statistics(times, func_names)
     print()
 
@@ -275,7 +279,7 @@ def main():
                   'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer}
 
     parser = argparse.ArgumentParser(description='benchmark')
-    parser.add_argument('--data', choices=datasets.dataset_classes.keys(), default='cora')
+    parser.add_argument('--data', choices=list(datasets.dataset_classes.keys()) + ['small'], default='cora')
     parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace', 'benchmark_small'],
                         required=True)
     parser.add_argument('--impl', type=str, nargs='+', required=True)
@@ -314,7 +318,9 @@ def main():
 
     dace_models = {}
     available_implementations = name_to_impl_class[args.model]
-    if args.impl != ['all']:
+    if args.impl == ['none']:
+        available_implementations = {}
+    elif args.impl != ['all']:
         available_implementations = {
             impl: available_implementations[impl]
             for impl in args.impl
