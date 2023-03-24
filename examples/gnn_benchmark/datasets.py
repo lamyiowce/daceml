@@ -14,6 +14,14 @@ dataset_classes = {
 }
 
 
+def get_dataset_class(dataset_name: str):
+    if dataset_name in dataset_classes:
+        return dataset_classes[dataset_name]
+    elif 'ogb' in dataset_name:
+        return functools.partial(nodeproppred.PygNodePropPredDataset, name=dataset_name)
+    raise NotImplementedError("No such dataset: ", dataset_name)
+
+
 def get_dataset(dataset_name: str, device) -> Tuple[
     torch_geometric.data.Data, int, int]:
     data_path = f'/tmp/datasets/{dataset_name}'
@@ -25,17 +33,13 @@ def get_dataset(dataset_name: str, device) -> Tuple[
         data = torch_geometric.data.Data(x=_x, edge_index=_edge_index, edge_attr=_edge_attr)
         num_node_features = _x.shape[1]
         num_classes = 2
-    elif dataset_name in dataset_classes:
-        dataset_class = dataset_classes[dataset_name]
-        dataset = dataset_class(root=data_path)
-        data = dataset[0].to(device)
-        num_node_features = dataset.num_node_features
-        num_classes = dataset.num_classes
-    elif 'ogb' in dataset_name:
-        dataset = nodeproppred.PygNodePropPredDataset(name=dataset_name, root='/tmp/datasets/ogb')
-        data = dataset[0].to(device)
-        num_node_features = dataset.num_node_features
-        num_classes = dataset.num_classes
     else:
-        raise NotImplementedError("No such dataset: ", dataset_name)
+        dataset_class = get_dataset_class(dataset_name)
+        dataset = dataset_class(root=data_path)
+        data = dataset[0]
+        if device == torch.device('cuda'):
+            data = data.pin_memory()
+        data = data.to(device)
+        num_node_features = dataset.num_node_features
+        num_classes = dataset.num_classes
     return data, num_node_features, num_classes
