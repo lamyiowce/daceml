@@ -19,13 +19,13 @@ from daceml import onnx as donnx
 from daceml.onnx import register_replacement, ONNXForward
 from daceml.onnx.nodes import replacement_entries
 from daceml.torch.module import dace_module, DaceModule
-from examples.gnn_benchmark import util, sparse, models, datasets
+from examples.gnn_benchmark import sdfg_util, sparse, models, datasets
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
 from examples.gnn_benchmark.implementations import gat_implementations
 from examples.gnn_benchmark.implementations import gcn_implementations
 from examples.gnn_benchmark.implementations.common import SparseLayerBase
-from examples.gnn_benchmark.util import specialize_mem_onnx, \
+from examples.gnn_benchmark.sdfg_util import specialize_mem_onnx, \
     apply_dace_auto_optimize, make_maps_dynamic
 
 faulthandler.enable()
@@ -237,7 +237,7 @@ def create_dace_model(model: torch.nn.Module,
             make_maps_dynamic_with_excluded_loops)
 
     set_implementation = functools.partial(
-        util.set_implementation, implementation_name=gnn_implementation_name)
+        sdfg_util.set_implementation, implementation_name=gnn_implementation_name)
     dace_model.prepend_post_onnx_hook("set_implementation",
                                       set_implementation)
 
