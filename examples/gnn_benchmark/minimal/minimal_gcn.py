@@ -13,27 +13,6 @@ num_in_features = 6
 np.random.seed(2137)
 
 
-def dynamic_schedule(sdfg, exclude_loops):
-    exclude_loops = {name: 0 for name in exclude_loops} or {}
-    for node in sdfg.all_nodes_recursive():
-        if isinstance(node[0], dace.sdfg.nodes.MapEntry) \
-                and node[0].schedule == dace.dtypes.ScheduleType.Sequential \
-                and len(node[0].map.params):
-            if node[0].label not in exclude_loops:
-                print("Changing schedule to TB dynamic: ", node[0].map)
-                node[0].schedule = dace.ScheduleType.GPU_ThreadBlock_Dynamic
-            else:
-                exclude_loops[node[0].label] += 1
-                print("Keeping schedule sequential for ", node[0].map)
-
-    not_excluded = [
-        name for name, count in exclude_loops.items() if count == 0
-    ]
-    if not_excluded:
-        print(
-            "Following loops were marked as excluded from thread-block dynamic "
-            "scheduling but were not found in the SDFG: %s", not_excluded)
-
 
 @dace.program
 def prog(node_features, rowptrs, columns, edge_vals, linDOTweight,
@@ -92,7 +71,7 @@ def main():
            linDOTweight=weights,
            edge_vals=edge_vals,
            bias=bias,
-           output=output)
+           output=expected_output)
 
     if np.allclose(output, expected_output):
         print("\n==== Results correct.  ☆ ╰(o＾◡＾o)╯ ☆ ====")
