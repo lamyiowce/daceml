@@ -14,15 +14,23 @@ M = dace.symbol('M')
 K = dace.symbol('K')
 
 
-def csrmm(A_rowptrs: dace.int64[N + 1],
-          A_columns: dace.int64[M],
-          A_values: dace.float32[M],
-          B: dace.float32[N, K],
-          C: dace.float32[N, K],
+def csrmm(A_rowptrs,
+          A_columns,
+          A_values,
+          B,
+          C,
           alpha: float = 1.0,
           beta: float = 0.,
           transA: bool = False):
-    pass
+    C[:] = beta * C
+    N = A_rowptrs.shape[0] - 1
+    K = B.shape[1]
+    for i, k in dace.map[0:N, 0:K]:
+        for j in dace.map[A_rowptrs[i]:A_rowptrs[i + 1]]:
+            # Below lines result in compile errors when enabling thread block dynamic scheduling.
+            column = A_columns[j]
+            mult = B[i, k] * A_values[j]
+            C[column, k] += mult
 
 
 @oprepo.replaces('examples.gnn_benchmark.csrmm_libnode.csrmm')
