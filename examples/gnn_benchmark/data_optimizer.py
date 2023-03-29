@@ -19,6 +19,8 @@ def optimize_data(model: torch.nn.Module,
     # Assuming data is in the adjacency list format.
     model, data = normalize(model, data)
 
+    # TODO: This converts data for every model, we should only do it once per
+    #  type.
     for impl_name, model_info in dace_models.items():
         data_in_target_format = model_info.data_format.from_pyg_data(data)
         model_info.data = data_in_target_format

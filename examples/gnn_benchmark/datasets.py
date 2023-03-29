@@ -22,8 +22,7 @@ def get_dataset_class(dataset_name: str):
     raise NotImplementedError("No such dataset: ", dataset_name)
 
 
-def get_dataset(dataset_name: str, device) -> Tuple[
-    torch_geometric.data.Data, int, int]:
+def get_dataset(dataset_name: str, device) -> torch_geometric.data.Data:
     data_path = f'/tmp/datasets/{dataset_name}'
     if dataset_name == 'small':
         _x = torch.tensor([[0., 1], [1, 1], [-1, 0]]).to(device)
@@ -42,4 +41,4 @@ def get_dataset(dataset_name: str, device) -> Tuple[
         data = data.to(device)
         num_node_features = dataset.num_node_features
         num_classes = dataset.num_classes
-    return data, num_node_features, num_classes
+    return data

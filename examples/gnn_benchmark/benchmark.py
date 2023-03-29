@@ -196,15 +196,12 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
 
 def create_dace_model(model: torch.nn.Module,
-                      state_dict: Dict[str, torch.Tensor],
                       gnn_implementation_name: str,
                       do_opt: bool,
                       persistent_mem: bool,
                       threadblock_dynamic: bool) -> dace.DaceModule:
     sdfg_name = f"{model.__class__.__name__}_{gnn_implementation_name}"
     dace_model = DaceModule(copy.deepcopy(model), sdfg_name=sdfg_name).to(device)
-
-    dace_model.model.load_state_dict(state_dict)
 
     dace_model.eval()
 
@@ -309,17 +306,20 @@ def main():
     log = logging.getLogger(__name__)
     log.setLevel(logging.INFO)
 
-    data, num_node_features, num_classes = get_dataset(args.data, device)
+    data = get_dataset(args.data, device)
 
-    print("Num node features: ", num_node_features)
+    print("Num node features: ", data.num_node_features)
+    num_classes = data.y.max().item() + 1
     print("Num classes: ", num_classes)
     print("Num hidden features: ", num_hidden_features)
+    print("Num nodes:", data.num_nodes)
+    print("Num non zero:", data.num_edges)
     normalize = args.normalize
     print("Normalize: ", normalize)
     print("Implementation: ", args.impl)
 
     # Define models.
-    model_args = (num_node_features, num_hidden_features, num_classes,
+    model_args = (data.num_node_features, num_hidden_features, num_classes,
                   normalize)
     torch_model = model_class(*model_args).to(device)
     torch_model.eval()
@@ -336,7 +336,6 @@ def main():
 
     for impl_name, implementation_class in available_implementations.items():
         dace_model = create_dace_model(torch_model,
-                                       state_dict=torch_model.state_dict(),
                                        gnn_implementation_name=impl_name,
                                        threadblock_dynamic=args.threadblock_dynamic,
                                        persistent_mem=args.persistent_mem,
@@ -351,11 +350,7 @@ def main():
         gcn_norm = GCNNorm(add_self_loops=True)
         data = gcn_norm(data)
 
-    x = data.x
-    sparse_edge_index = SparseTensor.from_edge_index(
-        data.edge_index, edge_attr=data.edge_weight)
-    edge_rowptr, edge_col, edge_weights = sparse_edge_index.csr()
-    print("Num non zero:", edge_col.shape[0])
+
 
     torch_model, dace_models = optimize_data(torch_model, dace_models, data)
     print(dace_models)
@@ -363,12 +358,16 @@ def main():
     # Create args lists for torch models.
     # pyg requires the sparse tensor input to be transposed.
     if not args.skip_check or args.mode != 'onlydace':
+        x = data.x
+        sparse_edge_index = SparseTensor.from_edge_index(
+            data.edge_index, edge_attr=data.edge_weight)
         torch_csr_args = x, sparse_edge_index.t()
 
         torch_edge_list_args = x, data.edge_index
-        if edge_weights is not None and 'gcn' in args.model:
+        if hasattr(data, 'edge_weight') and 'gcn' in args.model:
             torch_edge_list_args += (data.edge_weight,)
 
+    results_correct = True
     if not args.skip_check:
         results_correct = check_correctness(dace_models, torch_model,
                                             torch_edge_list_args, torch_csr_args)
