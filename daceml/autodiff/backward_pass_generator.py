@@ -562,9 +562,11 @@ class BackwardPassGenerator:
             if edge.data.data:
                 edge_type = parent_sdfg.arrays[edge.data.data].dtype
                 if edge_type not in [dace.float16, dace.float32, dace.float64]:
-                    raise AutoDiffException(
-                        f"Expected Subgraph to differentiate to only contain float edges, but data {edge.data}"
-                        f" on edge {edge} has type {edge_type}")
+                    # raise AutoDiffException(
+                    #     f"Expected Subgraph to differentiate to only contain float edges, but data {edge.data}"
+                    #     f" on edge {edge} has type {edge_type}")
+                    logging.warning(f"Expected Subgraph to differentiate to only contain float edges, but data {edge.data}"
+                    f" on edge {edge} has type {edge_type}")
 
         self._disambiguate_direction_dependent_views()
 
@@ -1103,12 +1105,12 @@ class BackwardPassGenerator:
             # however we make an exception for initialization states; these are ignored
             is_init_state = [(state, is_initialization_state(state))
                              for state in node.sdfg.nodes()]
-            num_non_init_states = sum(b for _, b in is_init_state)
-            if num_non_init_states > 1:
-                raise AutoDiffException(
-                    "A nested SDFG may consist of at most one state (with the "
-                    "exception of initalization states), found {} states".
-                    format(num_non_init_states))
+            num_non_init_states = sum(not b for _, b in is_init_state)
+            # if num_non_init_states > 1:
+            #     raise AutoDiffException(
+            #         "A nested SDFG may consist of at most one state (with the "
+            #         "exception of initalization states), found {} states".
+            #         format(num_non_init_states))
             state_to_diff = [state for state, b in is_init_state if not b][0]
         else:
             state_to_diff = node.sdfg.nodes()[0]
