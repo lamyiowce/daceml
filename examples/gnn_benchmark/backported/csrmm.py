@@ -12,6 +12,7 @@ from dace.libraries.blas.blas_helpers import (to_blastype, get_gemm_opts, check_
 import numpy as np
 
 from examples.gnn_benchmark.backported.cusparse import cuSPARSE
+from examples.gnn_benchmark.backported.intel_mkl import IntelMKLSparse
 
 
 def _is_complex(dtype):
@@ -76,6 +77,77 @@ def _get_csrmm_operands(node,
                              "\"{}\" not found.".format(name))
     return result
 
+
+@dace.library.expansion
+class ExpandCSRMMMKL(ExpandTransformation):
+    environments = [IntelMKLSparse]
+    @staticmethod
+    def expansion(node, state, sdfg):
+        node.validate(sdfg, state)
+        operands = _get_csrmm_operands(node, state, sdfg)
+        arows = operands['_a_rows'][1]
+        acols = operands['_a_cols'][1]
+        avals = operands['_a_vals'][1]
+        bdesc = operands['_b'][1]
+        dtype = avals.dtype.base_type
+        func = f"mkl_sparse_{to_blastype(dtype.type).lower()}"
+        alpha = f'{dtype.ctype}({node.alpha})'
+        beta = f'{dtype.ctype}({node.beta})'
+        # Deal with complex input constants
+        if isinstance(node.alpha, complex):
+            alpha = f'{dtype.ctype}({node.alpha.real}, {node.alpha.imag})'
+        if isinstance(node.beta, complex):
+            beta = f'{dtype.ctype}({node.beta.real}, {node.beta.imag})'
+        cdesc = sdfg.arrays[state.out_edges(node)[0].data.data]
+        check_access(dtypes.ScheduleType.CPU_Multicore, arows, acols, avals, bdesc, cdesc)
+        opt = {}
+
+        opt['func'] = func
+
+        if node.transA:
+            opt['opA'] = 'SPARSE_OPERATION_TRANSPOSE'
+        else:
+            opt['opA'] = 'SPARSE_OPERATION_NON_TRANSPOSE'
+
+        opt['layout'] = 'SPARSE_LAYOUT_ROW_MAJOR'
+
+        code = ''
+        if dtype in (dace.complex64, dace.complex128):
+            code = f'''
+            {dtype.ctype} alpha = {alpha};
+            {dtype.ctype} beta = {beta};
+            '''
+            opt['alpha'] = '&alpha'
+            opt['beta'] = '&beta'
+        else:
+            opt['alpha'] = alpha
+            opt['beta'] = beta
+        opt['nrows'] = cdesc.shape[0]
+        opt['ncols'] = cdesc.shape[1]
+        opt['arows'] = cdesc.shape[0]
+        opt['acols'] = bdesc.shape[0]
+        if node.transA:
+            opt['arows'], opt['acols'] = opt['acols'], opt['arows']
+
+        opt['ldb'] = opt['ncols']
+        opt['ldc'] = opt['ncols']
+        code += """
+            sparse_matrix_t __csrA;
+            {func}_create_csr(&__csrA, SPARSE_INDEX_BASE_ZERO, {arows}, {acols}, _a_rows, _a_rows + 1, _a_cols, _a_vals);
+            struct matrix_descr __descrA;
+            __descrA.type = SPARSE_MATRIX_TYPE_GENERAL;
+            __descrA.mode = SPARSE_FILL_MODE_UPPER;
+            __descrA.diag = SPARSE_DIAG_NON_UNIT;
+            {func}_mm({opA}, {alpha}, __csrA, __descrA, {layout}, _b, {ncols}, {ldb}, {beta}, _c, {ldc});
+        """.format_map(opt)
+        tasklet = dace.sdfg.nodes.Tasklet(
+            node.name,
+            node.in_connectors,
+            node.out_connectors,
+            code,
+            language=dace.dtypes.Language.CPP,
+        )
+        return tasklet
 
 @dace.library.expansion
 class ExpandCSRMMPure(ExpandTransformation):
@@ -471,7 +543,7 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
 
     # Global properties
-    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE}
+    implementations = {"pure": ExpandCSRMMPure, "cuSPARSE": ExpandCSRMMCuSPARSE}
     default_implementation = "cuSPARSE"
 
     # Object fields
