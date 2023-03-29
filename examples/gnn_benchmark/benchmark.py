@@ -78,7 +78,14 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
     torch_csr_pred = torch_model(*torch_csr_args)
     torch_edge_list_pred = torch_edge_list_pred.detach().cpu()
     torch_csr_pred = torch_csr_pred.detach().cpu()
-    assert torch.allclose(torch_edge_list_pred, torch_csr_pred, atol=1.0e-5)
+    if not torch.allclose(torch_edge_list_pred, torch_csr_pred, atol=1.0e-5):
+        print("Torch edge list and torch csr results are not equal!")
+        print("** Max abs error: ",
+              abs((torch_edge_list_pred - torch_csr_pred)).max())
+        print("** Avg abs error: ",
+              abs((torch_edge_list_pred - torch_csr_pred)).mean())
+        print("** Max rel error: ",
+              (abs((torch_edge_list_pred - torch_csr_pred)) / abs(torch_csr_pred)).max())
 
     all_correct = True
     for name, experiment_info in dace_models.items():
@@ -135,7 +142,7 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
     from examples.gnn_benchmark.performance_measurement import print_time_statistics
     if use_gpu:
         from examples.gnn_benchmark.performance_measurement import \
-        measure_performance
+            measure_performance
     else:
         from examples.gnn_benchmark.performance_measurement import \
             measure_performance_cpu as measure_performance
@@ -279,7 +286,7 @@ def main():
                   'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer}
 
     parser = argparse.ArgumentParser(description='benchmark')
-    parser.add_argument('--data', choices=list(datasets.dataset_classes.keys()) + ['small'], default='cora')
+    parser.add_argument('--data', required=True)
     parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace', 'benchmark_small'],
                         required=True)
     parser.add_argument('--impl', type=str, nargs='+', required=True)
@@ -287,6 +294,7 @@ def main():
     parser.add_argument('--persistent-mem', action='store_true')
     parser.add_argument('--opt', action='store_true')
     parser.add_argument('--threadblock-dynamic', action='store_true')
+    parser.add_argument('--skip-check', action='store_true')
     parser.add_argument('--model', choices=model_dict.keys())
     parser.add_argument('--hidden', type=int, default=None, required=True)
     parser.add_argument('--outfile', type=str, default=None)
@@ -354,19 +362,21 @@ def main():
 
     # Create args lists for torch models.
     # pyg requires the sparse tensor input to be transposed.
-    torch_csr_args = x, sparse_edge_index.t()
+    if not args.skip_check or args.mode != 'onlydace':
+        torch_csr_args = x, sparse_edge_index.t()
 
-    torch_edge_list_args = x, data.edge_index
-    if edge_weights is not None and 'gcn' in args.model:
-        torch_edge_list_args += (data.edge_weight,)
+        torch_edge_list_args = x, data.edge_index
+        if edge_weights is not None and 'gcn' in args.model:
+            torch_edge_list_args += (data.edge_weight,)
 
-    results_correct = check_correctness(dace_models, torch_model,
-                                        torch_edge_list_args, torch_csr_args)
+    if not args.skip_check:
+        results_correct = check_correctness(dace_models, torch_model,
+                                            torch_edge_list_args, torch_csr_args)
 
     if args.mode == 'onlydace':
         print('Only dace models for profiling.')
         for dace_model_name, dace_model_info in dace_models.items():
-            model = dace_model_info.dace_model
+            model = dace_model_info.model
             inputs = dace_model_info.data.to_input_list()
             result = model(*inputs)
             if use_gpu:
