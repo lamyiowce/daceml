@@ -1106,11 +1106,11 @@ class BackwardPassGenerator:
             is_init_state = [(state, is_initialization_state(state))
                              for state in node.sdfg.nodes()]
             num_non_init_states = sum(not b for _, b in is_init_state)
-            # if num_non_init_states > 1:
-            #     raise AutoDiffException(
-            #         "A nested SDFG may consist of at most one state (with the "
-            #         "exception of initalization states), found {} states".
-            #         format(num_non_init_states))
+            if num_non_init_states > 1:
+                raise AutoDiffException(
+                    "A nested SDFG may consist of at most one state (with the "
+                    "exception of initalization states), found {} states".
+                    format(num_non_init_states))
             state_to_diff = [state for state, b in is_init_state if not b][0]
         else:
             state_to_diff = node.sdfg.nodes()[0]
