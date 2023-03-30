@@ -1,16 +1,20 @@
 import abc
-from typing import Type, Dict, Union
+from typing import Dict, Union
 
 import dace
 import numpy as np
 from dace import nodes, SDFG, SDFGState
 
+import examples.gnn_benchmark.implementations.gcn_backward
 from daceml.onnx.nodes import onnx_op
 from daceml.onnx.op_implementations.utils import op_implementation
 from daceml.onnx.op_implementations.utils import program_for_node
 from daceml.util.utils import in_desc_with_name
 from examples.gnn_benchmark import csrmm_libnode, sparse
 from examples.gnn_benchmark.implementations.common import SparseLayerBase
+
+# Mark this import as used. It's needed to register the backward pass.
+assert examples.gnn_benchmark.implementations.gcn_backward
 
 
 class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
