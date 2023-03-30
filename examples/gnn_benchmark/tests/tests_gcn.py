@@ -7,7 +7,7 @@ from torch_geometric.nn import GCNConv
 from torch_sparse import SparseTensor
 
 from daceml.torch.module import DaceModule
-from examples.gnn_benchmark.benchmark import register_replacement_overrides
+from examples.gnn_benchmark.util import register_replacement_overrides
 
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False

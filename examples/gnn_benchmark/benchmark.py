@@ -1,32 +1,24 @@
 import argparse
-import copy
 import dataclasses
 import faulthandler
 import functools
 import logging
-import statistics
 from pathlib import Path
 from typing import Sequence, Dict, Optional, Type
 
-import dace
 import numpy as np
 import torch
 from torch_geometric.transforms import GCNNorm
-from torch_sparse import SparseTensor
 
 import daceml
 from daceml import onnx as donnx
-from daceml.onnx import register_replacement, ONNXForward
-from daceml.onnx.nodes import replacement_entries
-from daceml.torch.module import dace_module, DaceModule
-from examples.gnn_benchmark import sdfg_util, sparse, models, datasets
+from daceml.onnx import ONNXForward
+from daceml.torch.module import dace_module
+from examples.gnn_benchmark import sparse, models
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
-from examples.gnn_benchmark.implementations import gat_implementations
-from examples.gnn_benchmark.implementations import gcn_implementations
-from examples.gnn_benchmark.implementations.common import SparseLayerBase
-from examples.gnn_benchmark.sdfg_util import specialize_mem_onnx, \
-    apply_dace_auto_optimize, make_maps_dynamic
+from examples.gnn_benchmark.util import stats_as_csv_entry, create_dace_model, \
+    register_replacement_overrides, make_torch_args, name_to_impl_class
 
 faulthandler.enable()
 donnx.default_implementation = "pure"
@@ -50,26 +42,6 @@ class ExperimentInfo:
     data: Optional[sparse.GraphMatrix] = None
 
 
-def stats_as_string(times, func_names, model, hidden_size):
-    """ Print timing statistics.
-    :param times: the result of time_funcs.
-    :param func_names: a name to use for each function timed.
-    """
-
-    out = ''
-    for name, func_time, in zip(func_names, times):
-        row = [
-            name, model, hidden_size,
-            min(func_time),
-            statistics.mean(func_time),
-            statistics.median(func_time),
-            statistics.stdev(func_time) if len(func_time) > 1 else 0.0,
-            max(func_time)
-        ]
-        out += ','.join(map(str, row)) + '\n'
-    return out
-
-
 def check_correctness(dace_models: Dict[str, ExperimentInfo],
                       torch_model: torch.nn.Module,
                       torch_edge_list_args,
@@ -85,7 +57,8 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
         print("** Avg abs error: ",
               abs((torch_edge_list_pred - torch_csr_pred)).mean())
         print("** Max rel error: ",
-              (abs((torch_edge_list_pred - torch_csr_pred)) / abs(torch_csr_pred)).max())
+              (abs((torch_edge_list_pred - torch_csr_pred)) / abs(
+                  torch_csr_pred)).max())
 
     all_correct = True
     for name, experiment_info in dace_models.items():
@@ -95,7 +68,7 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
         register_replacement_overrides(experiment_info.impl_name,
                                        experiment_info.gnn_type)
         if use_gpu:
-            torch.cuda.nvtx.range_push(name + ' Correctness')
+            torch.cuda.nvtx.range_push(name + ' correctness')
         dace_pred = model(*args)
         if use_gpu:
             torch.cuda.synchronize()
@@ -111,22 +84,26 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
             print("** Avg abs error: ",
                   abs((dace_pred_cpu - torch_edge_list_pred)).mean())
             print("** Max rel error: ",
-                  (abs((dace_pred_cpu - torch_edge_list_pred)) / abs(torch_edge_list_pred)).max())
+                  (abs((dace_pred_cpu - torch_edge_list_pred)) / abs(
+                      torch_edge_list_pred)).max())
             print(dace_pred_cpu)
             print(torch_edge_list_pred)
             experiment_info.correct = False
             all_correct = False
 
     correct_keys = [key for key, value in dace_models.items() if value.correct]
-    incorrect_keys = [key for key, value in dace_models.items() if not value.correct]
+    incorrect_keys = [key for key, value in dace_models.items() if
+                      not value.correct]
 
     print(f"\n☆ =================== SUMMARY ================== ☆")
     if len(correct_keys) > 0:
         print(f"☆ ============================================== ☆")
-        print(f"==== Results correct for {', '.join(correct_keys)}. ☆ ╰(o＾◡＾o)╯ ☆ ====")
+        print(
+            f"==== Results correct for {', '.join(correct_keys)}. ☆ ╰(o＾◡＾o)╯ ☆ ====")
         print(f"☆ ============================================== ☆")
     if len(incorrect_keys) > 0:
-        print(f"****** INCORRECT RESULTS FOR {', '.join(incorrect_keys)}! (ノಥ﹏ಥ)ノ彡┻━┻ ******")
+        print(
+            f"****** INCORRECT RESULTS FOR {', '.join(incorrect_keys)}! (ノಥ﹏ಥ)ノ彡┻━┻ ******")
         print(f"****************************************************\n")
 
     return all_correct
@@ -139,7 +116,8 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  args,
                  save_output: bool = True,
                  small: bool = False):
-    from examples.gnn_benchmark.performance_measurement import print_time_statistics
+    from examples.gnn_benchmark.performance_measurement import \
+        print_time_statistics
     if use_gpu:
         from examples.gnn_benchmark.performance_measurement import \
             measure_performance
@@ -171,6 +149,7 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
         name += f"_{experiment_info.impl_name}"
         func_names.append(name)
 
+    print(f"---> Benchmarking...")
     times = measure_performance(funcs,
                                 func_names=func_names,
                                 warmups=10 if not small else 2,
@@ -191,91 +170,10 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                 ]
                 file.write(','.join(headers) + '\n')
             file.write(
-                stats_as_string(times, func_names, args.model,
-                                args.hidden))
+                stats_as_csv_entry(times, func_names, args.model,
+                                   args.hidden))
 
 
-def create_dace_model(model: torch.nn.Module,
-                      gnn_implementation_name: str,
-                      do_opt: bool,
-                      persistent_mem: bool,
-                      threadblock_dynamic: bool) -> dace.DaceModule:
-    sdfg_name = f"{model.__class__.__name__}_{gnn_implementation_name}"
-    dace_model = DaceModule(copy.deepcopy(model), sdfg_name=sdfg_name).to(device)
-
-    dace_model.eval()
-
-    if do_opt:
-        print("---> Adding auto-opt hook.")
-        dace_model.append_post_onnx_hook("dace_auto_optimize",
-                                         apply_dace_auto_optimize)
-
-    if persistent_mem:
-        print("---> Adding persistent memory hook.")
-        specialize_mem_onnx(dace_model)
-
-    if threadblock_dynamic:
-        print("---> Adding threadblock dynamic maps hook.")
-        exclude_loops = []
-        if isinstance(model, models.GCN):
-            # Has to be skipped, otherwise the computation results are incorrect.
-            exclude_loops = [
-                'daceml_onnx_op_implementations_replacement_implementations_prog_sparse_45_4_46'
-            ]
-        elif isinstance(model, models.GAT):
-            exclude_loops = [
-                # Below two have to be excluded because only one-dimensional
-                # maps are supported in DaCe for dynamic block map schedule
-                # (got 2).
-                '_Div__map',
-                '_Mult__map',
-                # Below two have to be excluded, otherwise compile errors
-                # occur (the generated code is incorrect).
-                'assign_137_12_map',
-                'outer_fused',
-            ]
-        make_maps_dynamic_with_excluded_loops = functools.partial(
-            make_maps_dynamic, exclude_loops=exclude_loops)
-        dace_model.append_post_onnx_hook(
-            "apply_threadblock_dynamic_maps",
-            make_maps_dynamic_with_excluded_loops)
-
-    set_implementation = functools.partial(
-        sdfg_util.set_implementation, implementation_name=gnn_implementation_name)
-    dace_model.prepend_post_onnx_hook("set_implementation",
-                                      set_implementation)
-
-    return dace_model
-
-
-name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
-    "gcn": {"csr": gcn_implementations.GCNConvCSR,
-            "coo": gcn_implementations.GCNConvCOO,
-            "csc": gcn_implementations.GCNConvCSC,
-            "ellpack_t": gcn_implementations.GCNConvEllpackTransposed,
-            "ellpack": gcn_implementations.GCNConvEllpack,
-            "semester_thesis": gcn_implementations.GCNConvSemesterThesis},
-    "gat": {"csr": gat_implementations.GATConvCSR,
-            "semester_thesis": gat_implementations.GATConvSemesterThesis}
-}
-name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
-
-
-def register_replacement_overrides(implementation_name, layer_name):
-    impl_class = name_to_impl_class[layer_name][implementation_name]
-    input_spec = impl_class.input_spec
-    if 'gcn' in layer_name:
-        register_replacement('torch_geometric.nn.conv.gcn_conv.GCNConv',
-                             inputs=input_spec,
-                             outputs={'output': dace.float32},
-                             shape_infer=replacement_entries.shape_infer_GCNConv,
-                             shape_fn_from_module=replacement_entries.make_GCNConv_shape_fn)
-    elif layer_name == 'gat':
-        register_replacement('torch_geometric.nn.conv.gat_conv.GATConv',
-                             inputs=input_spec,
-                             outputs={'output': dace.float32},
-                             shape_infer=replacement_entries.shape_infer_GATConv,
-                             shape_fn_from_module=replacement_entries.make_GATConv_shape_fn)
 
 
 def main():
@@ -284,7 +182,8 @@ def main():
 
     parser = argparse.ArgumentParser(description='benchmark')
     parser.add_argument('--data', required=True)
-    parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace', 'benchmark_small'],
+    parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace',
+                                           'benchmark_small'],
                         required=True)
     parser.add_argument('--impl', type=str, nargs='+', required=True)
     parser.add_argument('--normalize', action='store_true')
@@ -300,7 +199,6 @@ def main():
 
     model_class = model_dict[args.model]
     num_hidden_features = args.hidden
-    args.hidden = args.hidden or (8 if args.model == 'gat' else 512)
     args.outfile = Path(args.outfile) if args.outfile is not None else None
 
     log = logging.getLogger(__name__)
@@ -339,41 +237,26 @@ def main():
                                        gnn_implementation_name=impl_name,
                                        threadblock_dynamic=args.threadblock_dynamic,
                                        persistent_mem=args.persistent_mem,
-                                       do_opt=args.opt)
-        dace_models[impl_name] = ExperimentInfo(impl_name=impl_name,
-                                                implementation=implementation_class,
-                                                model=dace_model,
-                                                data_format=implementation_class.graph_format,
-                                                gnn_type=args.model)
+                                       do_opt=args.opt,
+                                       device=device)
+        info = ExperimentInfo(impl_name=impl_name,
+                              implementation=implementation_class,
+                              model=dace_model,
+                              data_format=implementation_class.graph_format,
+                              gnn_type=args.model)
+        dace_models[impl_name] = info
 
     if 'gcn' in args.model:
         gcn_norm = GCNNorm(add_self_loops=True)
         data = gcn_norm(data)
 
-
-
     torch_model, dace_models = optimize_data(torch_model, dace_models, data)
-    print(dace_models)
+    for k, v in dace_models.items():
+        print(f"Impl: {k}")
+        print(v)
 
-    # Create args lists for torch models.
-    # pyg requires the sparse tensor input to be transposed.
-    if not args.skip_check or args.mode != 'onlydace':
-        x = data.x
-        sparse_edge_index = SparseTensor.from_edge_index(
-            data.edge_index, edge_attr=data.edge_weight)
-        torch_csr_args = x, sparse_edge_index.t()
-
-        torch_edge_list_args = x, data.edge_index
-        if hasattr(data, 'edge_weight') and 'gcn' in args.model:
-            torch_edge_list_args += (data.edge_weight,)
-
-    results_correct = True
-    if not args.skip_check:
-        results_correct = check_correctness(dace_models, torch_model,
-                                            torch_edge_list_args, torch_csr_args)
-
-    if args.mode == 'onlydace':
-        print('Only dace models for profiling.')
+    if args.mode == 'only_dace':
+        print('Running only dace models.')
         for dace_model_name, dace_model_info in dace_models.items():
             model = dace_model_info.model
             inputs = dace_model_info.data.to_input_list()
@@ -381,23 +264,20 @@ def main():
             if use_gpu:
                 torch.cuda.synchronize()
             print(f"Dace {dace_model_name}: ", result)
-    elif args.mode == 'dry':
-        print("Single run of all models.")
-        for dace_model_name, dace_model_info in dace_models.items():
-            model = dace_model_info.model
-            inputs = dace_model_info.data.to_input_list()
-            result = model(*inputs)
-            if use_gpu:
-                torch.cuda.synchronize()
-            print(f"Dace {dace_model_name}: ", result)
-        print("PyG csr: ", torch_model(*torch_csr_args))
-        print("PyG edge list: ", torch_model(*torch_edge_list_args))
-    elif args.mode == 'benchmark' or args.mode == 'benchmark_small':
-        print("Benchmarking...")
-        do_benchmark(dace_models, torch_model, torch_csr_args,
-                     torch_edge_list_args, args, save_output=results_correct, small=args.mode == 'benchmark_small')
     else:
-        raise ValueError("Mode not supported " + args.mode)
+        torch_csr_args, torch_edge_list_args = make_torch_args(data,
+                                                               model_name=args.model)
+
+        results_correct = check_correctness(dace_models, torch_model,
+                                            torch_edge_list_args,
+                                            torch_csr_args)
+
+        if args.mode == 'benchmark' or args.mode == 'benchmark_small':
+            print("Benchmarking...")
+            do_benchmark(dace_models, torch_model, torch_csr_args,
+                         torch_edge_list_args, args,
+                         save_output=results_correct,
+                         small=args.mode == 'benchmark_small')
 
 
 if __name__ == '__main__':

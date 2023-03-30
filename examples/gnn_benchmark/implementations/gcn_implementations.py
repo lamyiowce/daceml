@@ -15,8 +15,8 @@ from examples.gnn_benchmark.implementations.common import SparseLayerBase
 
 class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
     """
-    A GCN node, given node features X, weights W and adjacency matrix A, computes:
-    X' = A.t @ (X @ W.t)
+    A GCN node, given node features X, weights W and adjacency matrix A,
+    computes: X' = A.t @ (X @ W.t)
     """
 
     @classmethod
@@ -52,7 +52,9 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
 
         return program_for_node(gcn_op, sdfg, state, node)
 
-@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="semester_thesis")
+
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
+                   name="semester_thesis")
 class GCNConvSemesterThesis(GCNConvBase):
     graph_format: sparse.GraphMatrix = sparse.CsrGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
@@ -81,7 +83,8 @@ class GCNConvSemesterThesis(GCNConvBase):
             output[:] = 0
             for i, k in dace.map[0:N, 0:num_out_features]:
                 for j in dace.map[rowptrs[i]:rowptrs[i + 1]]:
-                    # Below lines result in compile errors when enabling thread block dynamic scheduling.
+                    # Below lines result in compile errors when enabling thread
+                    # block dynamic scheduling.
                     column = columns[j]
                     mult = features[i, k] * edge_vals[j]
                     output[column, k] += mult
@@ -96,6 +99,7 @@ class GCNConvSemesterThesis(GCNConvBase):
 
             return bias_prog
         return gcn_op
+
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csr")
 class GCNConvCSR(GCNConvBase):
@@ -112,7 +116,7 @@ class GCNConvCSR(GCNConvBase):
                 dtype: dace.dtypes.Typeclasses, do_bias: bool):
         if do_bias:
             def gcn_op(node_features, rowptrs, columns, edge_vals,
-                          linDOTweight, bias, output):
+                       linDOTweight, bias, output):
                 """
                 node_features: input features, N x M
                 rowptrs: row pointers (CSR format), N+1
@@ -122,10 +126,12 @@ class GCNConvCSR(GCNConvBase):
                 output: N x F
                 """
                 features = dace.define_local((N, num_out_features), dtype=dtype)
-                features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
+                features[:] = np.einsum('ij,kj->ik', node_features,
+                                        linDOTweight)
                 for i, j in dace.map[0:N, 0:num_out_features]:
                     output[i, j] = bias[j]
-                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output, beta=1.0, transA=True)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features,
+                                    output, beta=1.0, transA=True)
         else:
             def gcn_op(node_features, rowptrs, columns, edge_vals,
                        linDOTweight, output):
@@ -138,8 +144,10 @@ class GCNConvCSR(GCNConvBase):
                 output: N x F
                 """
                 features = dace.define_local((N, num_out_features), dtype=dtype)
-                features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
-                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features, output, transA=True)
+                features[:] = np.einsum('ij,kj->ik', node_features,
+                                        linDOTweight)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features,
+                                    output, transA=True)
 
         return gcn_op
 
@@ -170,8 +178,10 @@ class GCNConvCSC(GCNConvBase):
             features = dace.define_local((N, num_out_features), dtype=dtype)
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
 
-            # A is in CSC format, so in order to compute A.t @ B, we call CSR matmul. This is because CSC(A) = CSR(A.t).
-            csrmm_libnode.csrmm(colptrs, rows, edge_vals, features, output, transA=False)
+            # A is in CSC format, so in order to compute A.t @ B, we call CSR
+            # matmul. This is because CSC(A) = CSR(A.t).
+            csrmm_libnode.csrmm(colptrs, rows, edge_vals, features, output,
+                                transA=False)
 
         if do_bias:
             def bias_prog(node_features, colptrs, rows, edge_vals,

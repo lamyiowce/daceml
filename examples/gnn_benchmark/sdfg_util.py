@@ -12,6 +12,8 @@ import daceml
 def _specialize_memory(sdfg):
     from dace.sdfg.scope import is_devicelevel_gpu
 
+    count = 0
+
     # Make memory persistent
     for state in sdfg.nodes():
         for dnode in state.data_nodes():
@@ -22,18 +24,20 @@ def _specialize_memory(sdfg):
             arr = sdfg.arrays[dnode.data]
             if (arr.transient and not isinstance(arr, dace.data.View)
                     and arr.storage != dace.StorageType.Register):
-                print(f'Setting lifetime from {arr.lifetime}'
-                      f' to persistent: {dnode.data}')
+                if arr.lifetime != dace.AllocationLifetime.Persistent:
+                    count += 1
                 arr.lifetime = dace.AllocationLifetime.Persistent
 
     # Disable OpenMP sections
     sdfg.openmp_sections = False
-
+    return count
 
 def specialize_mem_onnx(mod):
     def spec(module):
+        count = 0
         for sd in module.sdfg.all_sdfgs_recursive():
-            _specialize_memory(sd)
+            count += _specialize_memory(sd)
+        print(f"Specialized {count} arrays to persistent.")
 
     mod.append_post_onnx_hook("specializemem", spec)
 

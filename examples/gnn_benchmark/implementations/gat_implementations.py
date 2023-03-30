@@ -5,7 +5,6 @@ import dace
 import numpy as np
 from dace import nodes, SDFG, SDFGState
 
-from daceml.onnx.forward_implementation_abc import ONNXForward
 from daceml.onnx.nodes import onnx_op
 from daceml.onnx.op_implementations.utils import op_implementation
 from daceml.onnx.op_implementations.utils import program_for_node
