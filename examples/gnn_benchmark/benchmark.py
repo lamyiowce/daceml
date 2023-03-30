@@ -128,9 +128,8 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
         if use_gpu:
             torch.cuda.synchronize()
             torch.cuda.nvtx.range_pop()
-        dace_pred_cpu = dace_pred.detach().cpu()
 
-        experiment_info.correct = check_equal(dace_pred_cpu,
+        experiment_info.correct = check_equal(dace_pred,
                                               torch_edge_list_pred,
                                               name_result=f"Predictions for DaCe {name}",
                                               name_expected="Torch predictions")
@@ -239,11 +238,11 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
             loss = criterion(pred, targets)
             loss.backward()
 
-        backward_funcs = [lambda: backward_fn(f) for f in funcs]
+        backward_funcs = [functools.partial(backward_fn, f) for f in funcs]
 
         print(f"---> Benchmarking the BACKWARD pass...")
-        times = measure_performance(funcs,
-                                    func_names=backward_funcs,
+        times = measure_performance(backward_funcs,
+                                    func_names=func_names,
                                     warmups=10 if not small else 2,
                                     num_iters=10 if not small else 2,
                                     timing_iters=100 if not small else 3)
@@ -369,7 +368,7 @@ def main():
         if args.mode == 'benchmark' or args.mode == 'benchmark_small':
             do_benchmark(dace_models, torch_model, torch_csr_args,
                          torch_edge_list_args, args,
-                         backward=False,
+                         backward=args.backward,
                          targets=data.y,
                          save_output=results_correct,
                          small=args.mode == 'benchmark_small')

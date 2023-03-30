@@ -16,7 +16,7 @@ from examples.gnn_benchmark.implementations import gcn_implementations, \
     gat_implementations
 from examples.gnn_benchmark.implementations.common import SparseLayerBase
 from examples.gnn_benchmark.sdfg_util import apply_dace_auto_optimize, \
-    specialize_mem_onnx, make_maps_dynamic
+    specialize_mem_onnx, make_maps_dynamic, apply_dace_auto_opt_after_autodiff
 
 name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
     "gcn": {"csr": gcn_implementations.GCNConvCSR,
@@ -68,8 +68,12 @@ def create_dace_model(model: torch.nn.Module,
 
     if do_opt:
         print("---> Adding auto-opt hook.")
-        dace_model.append_post_onnx_hook("dace_auto_optimize",
-                                         apply_dace_auto_optimize)
+        if backward:
+            dace_model.append_post_autodiff_hook("dace_auto_optimize",
+                                                 apply_dace_auto_opt_after_autodiff)
+        else:
+            dace_model.append_post_onnx_hook("dace_auto_optimize",
+                                             apply_dace_auto_optimize)
 
     if persistent_mem:
         print("---> Adding persistent memory hook.")

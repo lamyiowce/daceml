@@ -32,6 +32,7 @@ def _specialize_memory(sdfg):
     sdfg.openmp_sections = False
     return count
 
+
 def specialize_mem_onnx(mod):
     def spec(module):
         count = 0
@@ -48,6 +49,14 @@ def apply_dace_auto_optimize(module):
         sdfg,
         device=dace.dtypes.DeviceType.GPU
         if torch.cuda.is_available() else dace.dtypes.DeviceType.CPU)
+
+
+def apply_dace_auto_opt_after_autodiff(forward_sdfg, backward_sdfg):
+    dace_device = dace.dtypes.DeviceType.GPU if torch.cuda.is_available() else dace.dtypes.DeviceType.CPU
+    dace_auto_optimize(forward_sdfg,
+                       device=dace_device)
+    # dace_auto_optimize(backward_sdfg,
+    #                    device=dace_device)
 
 
 def make_maps_dynamic(module, exclude_loops=None):
