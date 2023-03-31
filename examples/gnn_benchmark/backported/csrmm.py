@@ -1,15 +1,14 @@
 # Copyright 2019-2022 ETH Zurich and the DaCe authors. All rights reserved.
 from copy import deepcopy as dc
-from dace import dtypes, memlet as mm, properties, data as dt, propagate_memlets_sdfg
-from dace.symbolic import symstr
+
 import dace.library
-from dace import SDFG, SDFGState
-from dace.frontend.common import op_repository as oprepo
 import dace.sdfg.nodes
-from dace.transformation.transformation import ExpandTransformation
-from dace.libraries.blas.blas_helpers import (to_blastype, get_gemm_opts, check_access, dtype_to_cudadatatype,
-                                              to_cublas_computetype)
 import numpy as np
+from dace import SDFG, SDFGState
+from dace import dtypes, memlet as mm, properties, data as dt, propagate_memlets_sdfg
+from dace.libraries.blas.blas_helpers import (to_blastype, check_access, to_cublas_computetype)
+from dace.symbolic import symstr
+from dace.transformation.transformation import ExpandTransformation
 
 from examples.gnn_benchmark.backported.cusparse import cuSPARSE
 from examples.gnn_benchmark.backported.intel_mkl import IntelMKLSparse
@@ -155,6 +154,9 @@ class ExpandCSRMMPure(ExpandTransformation):
 
     @staticmethod
     def expansion(node, state: SDFGState, sdfg: SDFG):
+        if node.transA:
+            raise NotImplementedError("Pure expansion of CSRMM does not support transA")
+
         nsdfg = SDFG(node.label + "_nsdfg")
 
         operands = _get_csrmm_operands(node, state, sdfg)
@@ -535,6 +537,120 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         return tasklet
 
 
+@dace.library.expansion
+class ExpandCSRMMCpp(ExpandTransformation):
+    environments = []
+
+    @staticmethod
+    def expansion(node, state, sdfg):
+        node.validate(sdfg, state)
+
+        operands = _get_csrmm_operands(node, state, sdfg)
+        arows = operands['_a_rows'][1]
+        acols = operands['_a_cols'][1]
+        avals = operands['_a_vals'][1]
+        bdesc = operands['_b'][1]
+        cdesc = sdfg.arrays[state.out_edges(node)[0].data.data]
+
+        dtype = avals.dtype.base_type
+        func = "cusparseSpMM"
+        if dtype == dace.float32:
+            cdtype = 'float'
+        elif dtype == dace.float64:
+            cdtype = 'double'
+        else:
+            raise ValueError("Unsupported type: " + str(dtype))
+
+        # ptr_dtype = acols.dtype.base_type
+        # if ptr_dtype not in [dace.int32, dace.int64]:
+        #     raise ValueError("Unsupported type: " + str(ptr_dtype))
+        # c_ptr_dtype = 'int' if acols.dtype.base_type == dace.int32 else 'long long'
+
+        # Deal with complex input constants
+        if isinstance(node.alpha, complex):
+            alpha = f'{dtype.ctype}({node.alpha.real}, {node.alpha.imag})'
+        else:
+            alpha = f'{dtype.ctype}({node.alpha})'
+        if isinstance(node.beta, complex):
+            beta = f'{dtype.ctype}({node.beta.real}, {node.beta.imag})'
+        else:
+            beta = f'{dtype.ctype}({node.beta})'
+
+        # Set up options for code formatting
+        opt = {}
+
+        opt['func'] = func
+        opt['dtype'] = cdtype
+        if node.transA:
+            opt['opA'] = 'CUSPARSE_OPERATION_TRANSPOSE'
+        else:
+            opt['opA'] = 'CUSPARSE_OPERATION_NON_TRANSPOSE'
+
+        if node.transB:
+            opt['opB'] = 'CUSPARSE_OPERATION_TRANSPOSE'
+        else:
+            opt['opB'] = 'CUSPARSE_OPERATION_NON_TRANSPOSE'
+
+        opt['alpha'] = alpha
+        opt['beta'] = beta
+
+        opt['nrows'] = cdesc.shape[0]
+        opt['ncols'] = cdesc.shape[1]
+        opt['ldc'] = opt['ncols']
+
+        opt['brows'] = bdesc.shape[0]
+        opt['bcols'] = bdesc.shape[1]
+
+        opt['arows'] = cdesc.shape[0]
+        if node.transB:
+            opt['acols'] = bdesc.shape[1]
+        else:
+            opt['acols'] = bdesc.shape[0]
+
+        if node.transA:
+            code = """
+                for (int i = 0; i < {nrows}; i++) {{
+                    for (int k = 0; k < {ncols}; k++) {{
+                        _c[i * {ncols} + k] *= {beta};
+                    }}
+                }}
+                for (int i = 0; i < {nrows}; i++) {{
+                    for (int k = 0; k < {ncols}; k++) {{
+                        for (int j = _a_rows[i]; j < _a_rows[i + 1]; j++) {{
+                            auto column = _a_cols[j];
+                            {dtype} mult = {alpha} * _b[i * {bcols} + k] * _a_vals[j];
+                            _c[column * {ncols} + k] += mult;
+                        }}
+                    }}
+                }}
+            """.format_map(opt)
+        else:
+            code = """
+                for (int i = 0; i < {nrows}; i++) {{
+                    for (int k = 0; k < {ncols}; k++) {{
+                        _c[i * {ncols} + k] *= {beta};
+                    }}
+                }}
+                for (int i = 0; i < {nrows}; i++) {{
+                    for (int k = 0; k < {ncols}; k++) {{
+                        for (int j = _a_rows[i]; j < _a_rows[i + 1]; j++) {{
+                            auto column = _a_cols[j];
+                            {dtype} mult = {alpha} * _b[column * {bcols} + k] * _a_vals[j];
+                            _c[i * {ncols} + k] += mult;
+                        }}
+                    }}
+                }}
+            """.format_map(opt)
+
+        tasklet = dace.sdfg.nodes.Tasklet(
+            node.name,
+            node.in_connectors,
+            node.out_connectors,
+            code,
+            language=dace.dtypes.Language.CPP,
+        )
+
+        return tasklet
 @dace.library.node
 class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
@@ -543,8 +659,8 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
 
     # Global properties
-    implementations = {"pure": ExpandCSRMMPure, "cuSPARSE": ExpandCSRMMCuSPARSE}
-    default_implementation = "cuSPARSE"
+    implementations = {"pure": ExpandCSRMMCpp, "cuSPARSE": ExpandCSRMMCuSPARSE}
+    default_implementation = "specialize"
 
     # Object fields
     transA = properties.Property(dtype=bool, desc="Whether to transpose A before multiplying")

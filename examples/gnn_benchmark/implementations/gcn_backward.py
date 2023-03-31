@@ -51,14 +51,13 @@ class GCNConvBackward(BackwardImplementation):
 
             # Compute the gradient of the GCN layer.
             temp = np.zeros((N, M), dtype=dace.float32)
-            for i, k in dace.map[0:N, 0:M]:
-                for j in dace.map[rowptrs[i]:rowptrs[i + 1]]:
-                    column = columns[j]
-                    mult = node_features[i, k] * edge_vals[j]
-                    temp[column, k] += mult
+            csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
+                                temp, transA=True)
 
+            # Grad W = Grad C^T @ A^t @ X
             linDOTweight_grad[:] = output_grad.T @ temp
 
+            # Grad X = A @ Grad G @ W
             node_features_grad[:] = 0
             temp[:] = output_grad @ linDOTweight
             csrmm_libnode.csrmm(rowptrs, columns, edge_vals, temp,
