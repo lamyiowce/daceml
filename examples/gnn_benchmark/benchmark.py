@@ -364,6 +364,13 @@ def main():
                                             torch_csr_args,
                                             targets=data.y,
                                             backward=args.backward)
+        for dace_model_name, dace_model_info in dace_models.items():
+            with open(f"bwd_sdfg_{dace_model_name}.dill", 'ab+') as f:
+                import dill, json
+                sdfg = copy.deepcopy(dace_model_info.model.backward_sdfg)
+                sdfg.transformation_hist = []
+                dill.dump(sdfg, f)
+
 
         if args.mode == 'benchmark' or args.mode == 'benchmark_small':
             do_benchmark(dace_models, torch_model, torch_csr_args,
