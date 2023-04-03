@@ -659,8 +659,8 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
 
     # Global properties
-    implementations = {"pure": ExpandCSRMMCpp, "cuSPARSE": ExpandCSRMMCuSPARSE}
-    default_implementation = "specialize"
+    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE, "pure": ExpandCSRMMCpp}
+    default_implementation = None
 
     # Object fields
     transA = properties.Property(dtype=bool, desc="Whether to transpose A before multiplying")

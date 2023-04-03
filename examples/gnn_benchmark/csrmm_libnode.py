@@ -50,7 +50,7 @@ def csrmm_libnode(pv: 'ProgramVisitor',
     C_out = state.add_write(C)
 
     libnode = CSRMM('csrmm', transA=transA.item() if transA is not None else False, alpha=alpha, beta=beta)
-    libnode.implementation = 'cuSPARSE' if torch.cuda.is_available() else 'mkl'
+    libnode.implementation = 'cuSPARSE' if torch.cuda.is_available() else 'pure'
     state.add_node(libnode)
 
     # Connect nodes
