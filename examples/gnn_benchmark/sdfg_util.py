@@ -12,7 +12,7 @@ import daceml
 def _specialize_memory(sdfg):
     from dace.sdfg.scope import is_devicelevel_gpu
 
-    count = 0
+    arrays = []
 
     # Make memory persistent
     for state in sdfg.nodes():
@@ -25,20 +25,20 @@ def _specialize_memory(sdfg):
             if (arr.transient and not isinstance(arr, dace.data.View)
                     and arr.storage != dace.StorageType.Register):
                 if arr.lifetime != dace.AllocationLifetime.Persistent:
-                    count += 1
+                    arrays.append(dnode.data)
                 arr.lifetime = dace.AllocationLifetime.Persistent
 
     # Disable OpenMP sections
     sdfg.openmp_sections = False
-    return count
+    return arrays
 
 
 def specialize_mem_onnx(mod):
     def spec(module):
-        count = 0
+        arrays = []
         for sd in module.sdfg.all_sdfgs_recursive():
-            count += _specialize_memory(sd)
-        print(f"Specialized {count} arrays to persistent.")
+            arrays += _specialize_memory(sd)
+        print(f"Specialized {len(arrays)} arrays to persistent: {' '.join(arrays)}")
 
     mod.append_post_onnx_hook("specializemem", spec)
 
@@ -91,3 +91,10 @@ def set_implementation(module: daceml.torch.module.DaceModule,
         if isinstance(node,
                       dace.sdfg.nodes.LibraryNode) and implementation_name in node.implementations:
             node.implementation = implementation_name
+
+
+def set_memory_to_register(sdfg: dace.SDFG, array_name: str):
+    for node, _ in sdfg.all_nodes_recursive():
+        if isinstance(node, dace.nodes.AccessNode) and node.data == array_name:
+            arr = sdfg.arrays[node.data]
+            arr.storage = dace.dtypes.StorageType.Register
