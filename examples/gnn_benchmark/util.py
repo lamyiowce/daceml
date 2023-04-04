@@ -107,15 +107,8 @@ def create_dace_model(model: torch.nn.Module,
             "apply_threadblock_dynamic_maps",
             make_maps_dynamic_with_excluded_loops)
 
-    def set_memory_to_register(sdfg: dace.SDFG, node_name: str):
-        for node, _ in sdfg.all_nodes_recursive():
-            if isinstance(node, dace.nodes.AccessNode) and node.data == node_name:
-                arr = sdfg.arrays[node.data]
-                arr.storage = dace.dtypes.StorageType.Register
-
-    # dace_model.append_post_autodiff_hook("Set __tmp1 to register",
-    #                                      lambda forward_sdfg, backward_sdfg: set_memory_to_register(backward_sdfg,
-    #                                                                                                 '__tmp1'))
+    fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(backward_sdfg, '__tmp1')
+    dace_model.append_post_autodiff_hook("Set __tmp1 to register", fn)
 
     set_implementation = functools.partial(
         sdfg_util.set_implementation,
