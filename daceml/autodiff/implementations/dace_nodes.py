@@ -2,12 +2,13 @@ import typing
 
 import dace.dtypes as dtypes
 import dace.libraries.standard.nodes
-from dace import SDFGState, SDFG, detect_reduction_type, Memlet
+from dace import SDFGState, SDFG, Memlet
+from dace.frontend.operations import detect_reduction_type
 from dace.registry import autoregister_params
 from dace.sdfg.nodes import Node
 
 from daceml.autodiff.base_abc import BackwardImplementation, BackwardContext, BackwardResult, AutoDiffException
-from daceml.util.utils import in_edge_with_name, in_desc_with_name, out_desc_with_name, out_edge_with_name
+from daceml.util.utils import in_desc_with_name, out_desc_with_name
 
 
 @autoregister_params(node_type=dace.libraries.standard.nodes.Reduce,

@@ -270,6 +270,11 @@ class BackwardPass(nodes.LibraryNode):
     )
 
     def __init__(self, name, given_gradients: Dict[str, str], *args, **kwargs):
+        raise NotImplementedError(
+            "Backward pass library nodes are not expanded correctly at the moment. "
+            "(see daceml/autodiff/library/python_frontend.py)"
+        )
+
         super().__init__(name, *args, **kwargs)
         self.given_gradients = given_gradients
         self.required_gradients = {}
@@ -302,10 +307,10 @@ class BackwardPass(nodes.LibraryNode):
                         node._conflicted_gradients |= conflicts
 
     def determine_forward_state(
-        self,
-        sdfg: SDFG,
-        state: SDFGState,
-        access_sets: Optional[autodiff_analysis.AccessSets] = None
+            self,
+            sdfg: SDFG,
+            state: SDFGState,
+            access_sets: Optional[autodiff_analysis.AccessSets] = None
     ) -> SDFGState:
         """
         Determine what the forward pass state for this backward node is.
