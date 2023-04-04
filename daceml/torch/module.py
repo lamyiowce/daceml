@@ -91,6 +91,7 @@ class DaceModule(nn.Module, frontend_common.SDFGConvertible):
                  auto_optimize: bool = True,
                  debug_transients: bool = False,
                  compile_torch_extension: bool = True,
+                 regenerate_code: bool = True,
                  sdfg_name: Optional[str] = None):
 
         super(DaceModule, self).__init__()
@@ -108,6 +109,7 @@ class DaceModule(nn.Module, frontend_common.SDFGConvertible):
         self.debug_transients = debug_transients
         self.compile_torch_extension = compile_torch_extension
         self.inputs_to_skip = inputs_to_skip or []
+        self.regenerate_code = regenerate_code
 
         self.function = None
 
@@ -325,6 +327,9 @@ class DaceModule(nn.Module, frontend_common.SDFGConvertible):
 
             self.sdfg.validate()
 
+            # Set regenerate and recompile flags
+            self.sdfg._regenerate_code = self.regenerate_code
+
             for _, hook in self.post_onnx_hooks.items():
                 hook(self)
 
@@ -357,6 +362,9 @@ class DaceModule(nn.Module, frontend_common.SDFGConvertible):
 
                 for _, hook in self.post_autodiff_hooks.items():
                     hook(self.forward_sdfg, self.backward_sdfg)
+
+                self.forward_sdfg._regenerate_code = self.regenerate_code
+                self.backward_sdfg._regenerate_code = self.regenerate_code
 
                 self.compiled_function = function_generator(self, dummy_inputs)
             else:

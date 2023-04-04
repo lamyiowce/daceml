@@ -285,6 +285,7 @@ def main():
     parser.add_argument('--hidden', type=int, default=None, required=True)
     parser.add_argument('--outfile', type=str, default=None)
     parser.add_argument('--name', type=str, default='dace')
+    parser.add_argument('--no-gen-code', action='store_true')
     args = parser.parse_args()
 
     model_class = model_dict[args.model]
@@ -329,6 +330,7 @@ def main():
                                        persistent_mem=args.persistent_mem,
                                        do_opt=args.opt,
                                        device=device,
+                                       gen_code=not args.no_gen_code,
                                        backward=args.backward)
         info = ExperimentInfo(impl_name=impl_name,
                               implementation=implementation_class,
@@ -364,13 +366,6 @@ def main():
                                             torch_csr_args,
                                             targets=data.y,
                                             backward=args.backward)
-        for dace_model_name, dace_model_info in dace_models.items():
-            with open(f"bwd_sdfg_{dace_model_name}.dill", 'ab+') as f:
-                import dill, json
-                sdfg = copy.deepcopy(dace_model_info.model.backward_sdfg)
-                sdfg.transformation_hist = []
-                dill.dump(sdfg, f)
-
 
         if args.mode == 'benchmark' or args.mode == 'benchmark_small':
             do_benchmark(dace_models, torch_model, torch_csr_args,

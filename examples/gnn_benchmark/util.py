@@ -57,11 +57,13 @@ def create_dace_model(model: torch.nn.Module,
                       persistent_mem: bool,
                       threadblock_dynamic: bool,
                       device: torch.device,
-                      backward: bool) -> dace.DaceModule:
+                      backward: bool,
+                      gen_code: bool = True) -> dace.DaceModule:
     sdfg_name = f"{model.__class__.__name__}_{gnn_implementation_name}"
     dace_model = DaceModule(copy.deepcopy(model),
                             sdfg_name=sdfg_name,
                             backward=backward,
+                            regenerate_code=gen_code,
                             inputs_to_skip=['1', '2', '3']).to(device)
 
     dace_model.eval()
