@@ -1,4 +1,5 @@
 # Copyright 2019-2022 ETH Zurich and the DaCe authors. All rights reserved.
+import os
 from copy import deepcopy as dc
 
 import dace.library
@@ -659,7 +660,7 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
 
     # Global properties
-    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE, "pure": ExpandCSRMMCpp}
+    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE} if os.environ['CUDA_VISIBLE_DEVICES'] != '' else {"pure": ExpandCSRMMCpp}
     default_implementation = None
 
     # Object fields
