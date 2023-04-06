@@ -265,9 +265,9 @@ def write_stats_to_file(args, func_names, times, file_path: pathlib.Path):
     with open(file_path, 'a') as file:
         if add_header:
             headers = [
-                'Name', 'Model', 'Size', 'Fwd min', 'Fwd mean',
-                'Fwd median',
-                'Fwd stdev', 'Fwd max'
+                'Name', 'Model', 'Size', 'Min', 'Mean',
+                'Median',
+                'Stdev', 'Max'
             ]
             file.write(','.join(headers) + '\n')
         file.write(
