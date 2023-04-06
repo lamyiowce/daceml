@@ -132,22 +132,13 @@ class GCNConvCSR(GCNConvBase):
                 Compute X' = A.t @ X @ W.t + b
                 """
 
-                if num_out_features < num_in_features:
-                    for i, j in dace.map[0:N, 0:num_out_features]:
-                        output[i, j] = bias[j]
-                    features = dace.define_local((N, num_out_features), dtype=dtype)
-                    features[:] = np.einsum('ij,kj->ik', node_features,
-                                            linDOTweight)
-                    csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features,
-                                        output, beta=1.0, transA=True)
-                else:
-                    # TODO: but this is incorrect?
-                    temp = dace.define_local((N, num_in_features), dtype=dtype)
-                    csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
-                                        temp, beta=0.0, transA=True)
-                    output[:] = np.einsum('ij,kj->ik', temp, linDOTweight)
-                    for i, j in dace.map[0:N, 0:num_out_features]:
-                        output[i, j] += bias[j]
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] = bias[j]
+                features = dace.define_local((N, num_out_features), dtype=dtype)
+                features[:] = np.einsum('ij,kj->ik', node_features,
+                                        linDOTweight)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features,
+                                    output, beta=1.0, transA=True)
 
         else:
             def gcn_op(node_features, rowptrs, columns, edge_vals,
