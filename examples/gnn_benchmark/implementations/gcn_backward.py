@@ -50,18 +50,19 @@ class GCNConvBackward(BackwardImplementation):
             # The gradient of the adjacency matrix is not computed.
 
             # Compute the gradient of the GCN layer.
-            temp = np.zeros((N, M), dtype=dace.float32)
+            # Grad W = Grad C^T @ A^t @ X
+            temp = dace.define_local((N, M), dtype=dace.float32)
             csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
                                 temp, transA=True)
-
-            # Grad W = Grad C^T @ A^t @ X
-            linDOTweight_grad[:] = output_grad.T @ temp
+            linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp)
 
             # Grad X = A @ Grad G @ W
-            node_features_grad[:] = 0
-            temp[:] = output_grad @ linDOTweight
-            csrmm_libnode.csrmm(rowptrs, columns, edge_vals, temp,
+            # node_features_grad[:] = 0
+            temp2 = dace.define_local((N, M), dtype=dace.float32)
+            temp2[:] = output_grad @ linDOTweight
+            csrmm_libnode.csrmm(rowptrs, columns, edge_vals, temp2,
                                 node_features_grad)
+
             bias_grad[:] = np.sum(output_grad, axis=0)
 
         result_node, result = autodiff_utils.backward_program_for_node(

@@ -5,7 +5,7 @@ from torch_geometric.nn import GCNConv, GATConv
 
 class GCNSingleLayer(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes,
-                 normalize):
+                 normalize, bias_init=torch.nn.init.zeros_):
         del num_classes
         del normalize
         super().__init__()
@@ -13,6 +13,7 @@ class GCNSingleLayer(torch.nn.Module):
                             num_hidden_features,
                             normalize=False,
                             add_self_loops=False)
+        bias_init(self.conv.bias)
 
     def forward(self, x, *edge_info):
         x = self.conv(x, *edge_info)
@@ -22,7 +23,7 @@ class GCNSingleLayer(torch.nn.Module):
 
 class GCN(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes,
-                 normalize):
+                 normalize, bias_init=torch.nn.init.zeros_):
         super().__init__()
         self.conv1 = GCNConv(num_node_features,
                              num_hidden_features,
@@ -32,6 +33,8 @@ class GCN(torch.nn.Module):
                              num_classes,
                              normalize=normalize,
                              add_self_loops=False)
+        bias_init(self.conv1.bias)
+        bias_init(self.conv2.bias)
 
         self.act = nn.ReLU()
         self.log_softmax = nn.LogSoftmax(dim=1)
@@ -61,7 +64,8 @@ class GAT(torch.nn.Module):
                  features_per_head,
                  num_classes,
                  _unsued,
-                 num_heads=8):
+                 num_heads=8,
+                 bias_init=torch.nn.init.zeros_):
         super().__init__()
         self.conv1 = GATConv(num_node_features,
                              features_per_head,

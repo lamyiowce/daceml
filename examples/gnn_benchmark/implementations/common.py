@@ -22,8 +22,8 @@ class SparseLayerBase(ONNXForward, metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     @staticmethod
-    def make_op(N: int, num_out_features: int, num_entries: int,
-                dtype: dace.dtypes.Typeclasses, do_bias: bool):
+    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
+                do_bias: bool):
         raise NotImplementedError
 
 

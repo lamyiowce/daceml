@@ -4,6 +4,7 @@ import dataclasses
 import faulthandler
 import functools
 import logging
+import pathlib
 from pathlib import Path
 from typing import Sequence, Dict, Optional, Type
 
@@ -56,14 +57,14 @@ def check_equal(result, expected, name_result=None, name_expected=None,
         print(
             f"****** INCORRECT: {name_result}! (ノಥ﹏ಥ)ノ彡┻━┻ ******")
         print("** Max abs error: ",
-              abs((expected - result)).max())
+              abs((expected - result)).max().item())
         print("** Avg abs error: ",
-              abs((expected - result)).mean())
+              abs((expected - result)).mean().item())
         print("** Max rel error: ",
               (abs((expected - result)) / abs(
-                  result)).max())
+                  result)).max().item())
         print("** Avg rel error: ", (abs((expected - result)) / abs(
-            result)).mean())
+            result)).mean().item())
         print(f"** {name_result}:", result)
         print(f"** {name_expected}:", expected)
         return False
@@ -228,6 +229,9 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
     print_time_statistics(times, func_names)
     print()
 
+    if args.outfile is not None and save_output:
+        write_stats_to_file(args, func_names, times, file_path=args.outfile)
+
     if backward:
         assert targets is not None
 
@@ -251,19 +255,24 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
         print_time_statistics(times, func_names)
         print()
 
-    if args.outfile is not None and save_output:
-        add_header = not args.outfile.exists()
-        with open(args.outfile, 'a') as file:
-            if add_header:
-                headers = [
-                    'Name', 'Model', 'Size', 'Fwd min', 'Fwd mean',
-                    'Fwd median',
-                    'Fwd stdev', 'Fwd max'
-                ]
-                file.write(','.join(headers) + '\n')
-            file.write(
-                stats_as_csv_entry(times, func_names, args.model,
-                                   args.hidden))
+        if args.outfile and save_output:
+            path = args.outfile.with_name(args.outfile.stem + "-bwd.csv")
+            write_stats_to_file(args, func_names, times, path)
+
+
+def write_stats_to_file(args, func_names, times, file_path: pathlib.Path):
+    add_header = not file_path.exists()
+    with open(file_path, 'a') as file:
+        if add_header:
+            headers = [
+                'Name', 'Model', 'Size', 'Fwd min', 'Fwd mean',
+                'Fwd median',
+                'Fwd stdev', 'Fwd max'
+            ]
+            file.write(','.join(headers) + '\n')
+        file.write(
+            stats_as_csv_entry(times, func_names, args.model,
+                               args.hidden))
 
 
 def main():
@@ -310,7 +319,7 @@ def main():
     # Define models.
     model_args = (data.num_node_features, num_hidden_features, num_classes,
                   normalize)
-    torch_model = model_class(*model_args).to(device)
+    torch_model = model_class(*model_args, bias_init=torch.nn.init.uniform_).to(device)
     torch_model.eval()
 
     dace_models = {}
