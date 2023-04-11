@@ -108,7 +108,10 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
         loss.backward()
 
     if backward:
-        criterion = torch.nn.NLLLoss()
+        if hasattr(torch_model, 'conv2'):
+            criterion = torch.nn.NLLLoss()
+        else:
+            criterion = lambda pred, targets: torch.sum(pred)
 
         backward_func(torch_edge_list_pred)
         backward_func(torch_csr_pred)
@@ -235,7 +238,10 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
     if backward:
         assert targets is not None
 
-        criterion = torch.nn.NLLLoss()
+        if hasattr(torch_model, 'conv2'):
+            criterion = torch.nn.NLLLoss()
+        else:
+            criterion = lambda pred, targets: torch.sum(pred)
 
         def backward_fn(pred_fn):
             pred = pred_fn()

@@ -57,7 +57,6 @@ class GCNConvBackward(BackwardImplementation):
             linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp)
 
             # Grad X = A @ Grad G @ W
-            # node_features_grad[:] = 0
             temp2 = dace.define_local((N, M), dtype=dace.float32)
             temp2[:] = output_grad @ linDOTweight
             csrmm_libnode.csrmm(rowptrs, columns, edge_vals, temp2,
