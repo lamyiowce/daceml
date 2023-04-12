@@ -27,8 +27,10 @@ class GCNConvBackward(BackwardImplementation):
             forward_node, context, "node_features").shape
         M = node_features_shape[1]
 
+        compute_grad_for_node_features = 'node_features' in required_gradients
+
         def gcn_backward(node_features, rowptrs, columns, edge_vals,
-                         linDOTweight, bias, node_features_grad,
+                         linDOTweight,
                          linDOTweight_grad, bias_grad,
                          output_grad):
             """
@@ -56,15 +58,20 @@ class GCNConvBackward(BackwardImplementation):
                                 temp, transA=True)
             linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp)
 
-            # Grad X = A @ Grad G @ W
-            temp2 = dace.define_local((N, M), dtype=dace.float32)
-            temp2[:] = output_grad @ linDOTweight
-            csrmm_libnode.csrmm(rowptrs, columns, edge_vals, temp2,
-                                node_features_grad)
-
             bias_grad[:] = np.sum(output_grad, axis=0)
 
+        def gcn_backward_with_node_features(node_features, rowptrs, columns, edge_vals,
+                                            linDOTweight, node_features_grad,
+                                            linDOTweight_grad, bias_grad,
+                                            output_grad):
+            # Grad X = A @ Grad G @ W
+            temp = dace.define_local((N, M), dtype=dace.float32)
+            temp[:] = output_grad @ linDOTweight
+            csrmm_libnode.csrmm(rowptrs, columns, edge_vals, temp,
+                                node_features_grad)
+            gcn_backward(node_features, rowptrs, columns, edge_vals, linDOTweight,
+                         linDOTweight_grad, bias_grad, output_grad)
         result_node, result = autodiff_utils.backward_program_for_node(
-            gcn_backward, context, forward_node)
+            gcn_backward_with_node_features if compute_grad_for_node_features else gcn_backward, context, forward_node)
 
         return result_node, result

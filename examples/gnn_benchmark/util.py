@@ -64,7 +64,7 @@ def create_dace_model(model: torch.nn.Module,
                             sdfg_name=sdfg_name,
                             backward=backward,
                             regenerate_code=gen_code,
-                            inputs_to_skip=['1', '2', '3']).to(device)
+                            inputs_to_skip=['0', '1', '2', '3']).to(device)
 
     dace_model.eval()
 
@@ -107,8 +107,8 @@ def create_dace_model(model: torch.nn.Module,
             "apply_threadblock_dynamic_maps",
             make_maps_dynamic_with_excluded_loops)
 
-    fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(backward_sdfg, '__tmp1')
-    dace_model.append_post_autodiff_hook("Set __tmp1 to register", fn)
+    fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(backward_sdfg, '__tmp3')
+    dace_model.append_post_autodiff_hook("Set __tmp3 to register", fn)
 
     set_implementation = functools.partial(
         sdfg_util.set_implementation,
