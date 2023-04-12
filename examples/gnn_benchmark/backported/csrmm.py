@@ -81,6 +81,7 @@ def _get_csrmm_operands(node,
 @dace.library.expansion
 class ExpandCSRMMMKL(ExpandTransformation):
     environments = [IntelMKLSparse]
+
     @staticmethod
     def expansion(node, state, sdfg):
         node.validate(sdfg, state)
@@ -148,6 +149,7 @@ class ExpandCSRMMMKL(ExpandTransformation):
             language=dace.dtypes.Language.CPP,
         )
         return tasklet
+
 
 @dace.library.expansion
 class ExpandCSRMMPure(ExpandTransformation):
@@ -327,7 +329,6 @@ class ExpandCSRMMPure(ExpandTransformation):
 
 @dace.library.expansion
 class ExpandCSRMMCuSPARSE(ExpandTransformation):
-
     environments = [cuSPARSE]
 
     @staticmethod
@@ -652,6 +653,8 @@ class ExpandCSRMMCpp(ExpandTransformation):
         )
 
         return tasklet
+
+
 @dace.library.node
 class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
@@ -660,7 +663,8 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
 
     # Global properties
-    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE} if os.environ['CUDA_VISIBLE_DEVICES'] != '' else {"pure": ExpandCSRMMCpp}
+    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE} if os.environ['CUDA_VISIBLE_DEVICES'] != '' else {
+        "pure": ExpandCSRMMCpp}
     default_implementation = None
 
     # Object fields
