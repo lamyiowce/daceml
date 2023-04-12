@@ -111,14 +111,15 @@ def make_performance_plot(full_df, name):
 
 
 def main():
-    tag = "10-04-gcn-csr-cora"
+    # tag = "11-04-gcn-csr-cora"
     # plot_block_sizes(tag)
     # plot_adapt_matmul_order()
 
-    plot_backward(tag)
+    plot_backward("11-04-gcn-csr-cora-no-input-grad", model='GCN')
+    plot_backward("11-04-gcn-single-csr-cora-no-input-grad", model='GCN Single Layer')
 
 
-def plot_backward(tag):
+def plot_backward(tag, model):
     df = pd.read_csv(tag + '.csv')
     labels = {
         'dace_autoopt_persistent_mem_csr': 'DaCe CSR',
@@ -127,7 +128,7 @@ def plot_backward(tag):
     }
     make_plot(df, "Forward pass", labels)
     bwd_df = pd.read_csv(tag + '-bwd.csv')
-    make_plot(df, "Backward + forward pass", labels, bwd_df=bwd_df)
+    make_plot(df, f"{model} Backward + forward pass", labels, bwd_df=bwd_df)
 
 
 def plot_adapt_matmul_order():
