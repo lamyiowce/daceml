@@ -37,7 +37,10 @@ def test_blocked_ellpack_mm_libnode(beta, transA):
     C = torch.rand(3, 2)
     A_ell = sparse.EllpackGraph.from_dense(A, node_features=None)
     _, A_columns, A_values = A_ell.to_input_list()
-    expected_C = A @ B + beta * C
+    if not transA:
+        expected_C = A @ B + beta * C
+    else:
+        expected_C = A.T @ B + beta * C
 
     @dace.program
     def spmm(A_columns, A_vals, B, C):
