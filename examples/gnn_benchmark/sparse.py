@@ -49,10 +49,10 @@ class CscGraph(TorchSparseGraph):
 
 
 class EllpackGraph(GraphMatrix):
-    def __init__(self, node_features: torch.Tensor, rowptrs: torch.Tensor,
+    def __init__(self, node_features: Optional[torch.Tensor], rowptrs: torch.Tensor,
                  columns: torch.Tensor, vals: Optional[torch.Tensor]):
         self.node_features = node_features
-        device = node_features.device
+        device = rowptrs.device
         num_rows = rowptrs.shape[0] - 1
         max_elems_in_row = torch.max(rowptrs[1:] - rowptrs[:-1]).item()
         if vals is not None:
@@ -82,6 +82,12 @@ class EllpackGraph(GraphMatrix):
             value=edge_weight)
         rowptr, col, val = sparse_matrix.csr()
         return cls(data.x, rowptr, col, val)
+
+    @classmethod
+    def from_dense(cls, adjacency_matrix: torch.Tensor, node_features: Optional[torch.Tensor]):
+        csr_matrix = torch_sparse.SparseTensor.from_dense(adjacency_matrix)
+        rowptr, col, val = csr_matrix.csr()
+        return EllpackGraph(node_features, rowptrs=rowptr, columns=col, vals=val)
 
 
 class EllpackTransposedGraph(GraphMatrix):
