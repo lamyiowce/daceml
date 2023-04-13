@@ -3,17 +3,18 @@ import copy
 import dace
 from dace import memlet
 from dace import properties
+from dace.frontend.common import op_repository as oprepo
 from dace.sdfg import SDFG, SDFGState
 from dace.transformation import ExpandTransformation
 
 
 def _get_operands(node,
-                        state,
-                        sdfg,
-                        name_lhs_ellvalue="_a_ellvalue",
-                        name_lhs_ellcolind="_a_ellcolind",
-                        name_rhs="_b",
-                        name_out="_c"):
+                  state,
+                  sdfg,
+                  name_lhs_ellvalue="_a_ellvalue",
+                  name_lhs_ellcolind="_a_ellcolind",
+                  name_rhs="_b",
+                  name_out="_c"):
     """Returns the Blocked Ellpack input edges, arrays, and shape."""
 
     result = {}
@@ -67,7 +68,6 @@ class ExpandBlockedEllpackMMCpp(ExpandTransformation):
             cdtype = 'double'
         else:
             raise ValueError("Unsupported type: " + str(dtype))
-
 
         alpha = f'{dtype.ctype}({node.alpha})'
         beta = f'{dtype.ctype}({node.beta})'
@@ -154,6 +154,9 @@ class BlockedEllpackMM(dace.sdfg.nodes.LibraryNode):
     beta = properties.Property(allow_none=False,
                                default=0,
                                desc="A scalar which will be multiplied with C before adding C")
+    ellBlockSize = properties.Property(allow_none=False,
+                                       dtype=int,
+                                desc="Size of the ellpack block.")
 
     def __init__(self, name, ellBlockSize, location=None, transA=False, transB=False, alpha=1, beta=0):
         super().__init__(name,
@@ -169,58 +172,43 @@ class BlockedEllpackMM(dace.sdfg.nodes.LibraryNode):
 
     def validate(self, sdfg, state):
         in_edges = state.in_edges(self)
-        if len(in_edges) not in [4, 5]:
-            raise ValueError("Expected 4 or 5 inputs to CSRMM")
-        size4 = None
-        for _, _, _, dst_conn, memlet in state.in_edges(self):
-            # if dst_conn == '_a_rows':
-            #     subset = copy.deepcopy(memlet.subset)
-            #     subset.squeeze()
-            #     size0 = subset.size()
-            # if dst_conn == '_a_cols':
-            #     subset = copy.deepcopy(memlet.subset)
-            #     subset.squeeze()
-            #     size1 = subset.size()
-            # if dst_conn == '_a_vals':
-            #     subset = copy.deepcopy(memlet.subset)
-            #     subset.squeeze()
-            #     size2 = subset.size()
-            if dst_conn == '_b':
-                subset = copy.deepcopy(memlet.subset)
-                subset.squeeze()
-                size3 = subset.size()
-            elif dst_conn == '_cin':
-                subset = copy.deepcopy(memlet.subset)
-                subset.squeeze()
-                size4 = subset.size()
-            else:
-                pass
-                # TODO: check if the other input sizes are correct
+        if len(in_edges) != 3:
+            raise ValueError("Expected 3 inputs to Blocked Ellpack.")
 
+        # Get sizes of all memlets.
+        sizes = {'_cin': None}
+        for _, _, _, dst_conn, memlet in state.in_edges(self):
+            subset = copy.deepcopy(memlet.subset)
+            subset.squeeze()
+            sizes[dst_conn] = subset.size()
+
+        # Get output size.
         out_edges = state.out_edges(self)
         if len(out_edges) != 1:
             raise ValueError("Expected exactly one output from matrix-matrix product")
         out_memlet = out_edges[0].data
-        # Function is symmetric, edge order does not matter
-        if len(size3) != 2:
-            raise ValueError("matrix-matrix product only supported on matrices")
-
-        A_rows = size0[0] - 1
-        if self.transB:
-            B_cols = size3[0]
-        else:
-            B_cols = size3[1]
-
-        # if size0[1] != size1[0]:
-        #     raise ValueError("Inputs to matrix-matrix product " "must agree in the k-dimension")
         out_subset = copy.deepcopy(out_memlet.subset)
         out_subset.squeeze()
-        size5 = out_subset.size()
-        if size4 is not None and size4 != size5:
+        sizes['_out'] = out_subset.size()
+
+        # Check all are 2d matrices.
+        wrong_size_lens = {k: len(v) for k, v in sizes.items() if v is not None and len(v) != 2}
+        if len(wrong_size_lens) > 0:
+            raise ValueError(f"matrix-matrix product only supported on matrices. Got: {wrong_size_lens}")
+
+        if self.transA:
+            A_cols, A_rows = sizes['_a_ellvalues']
+        else:
+            A_rows, A_cols = sizes['_a_ellvalues']
+
+        B_rows, B_cols = sizes['_b']
+
+        if A_cols != B_rows:
+            raise ValueError("Inputs to matrix-matrix product must agree in the k-dimension")
+
+        if sizes['_cin'] is not None and sizes['_cin'] != sizes['_out']:
             raise ValueError("Input C matrix must match output matrix.")
-        if len(size5) != 2:
-            raise ValueError("matrix-matrix product only supported on matrices")
-        if len(size5) == 2 and list(size5) != [A_rows, B_cols]:
+        if sizes['_out'] != [A_rows, B_cols]:
             raise ValueError("Output to matrix-matrix product must agree in the m and n "
                              "dimensions")
 
@@ -242,7 +230,6 @@ def blocked_ellpack_mm(
         alpha: float = 1.0,
         beta: float = 0.,
         transA: bool = False):
-
     C[:] = beta * C
     N = A_ellvalues.shape[0]
     num_ell_cols = A_ellvalues.shape[1]
@@ -257,7 +244,6 @@ def blocked_ellpack_mm(
                 mult = alpha * A_ellvalues[i, j] * B[column, k]
                 C[i, k] += mult
     else:
-
         for i, k in dace.map[0:N, 0:K]:
             for j in dace.map[0:num_ell_cols]:
                 # i: row idx.
@@ -265,21 +251,28 @@ def blocked_ellpack_mm(
                 mult = alpha * A_ellvalues[i, j] * B[i, k]
                 C[column, k] += mult
 
-# @oprepo.replaces('examples.gnn_benchmark.sparse_mm.blocked_ellpack_mm.blocked_ellpack_mm')
+
+@oprepo.replaces('examples.gnn_benchmark.sparse_mm.blocked_ellpack_mm.blocked_ellpack_mm')
 def blocked_ellpack_mm_libnode(pv: 'ProgramVisitor',
-                  sdfg: SDFG,
-                  state: SDFGState,
-                  A_ellcolind,
-                  A_ellvalues,
-                  B,
-                  C, alpha=1., beta=0., transA=None):
+                               sdfg: SDFG,
+                               state: SDFGState,
+                               A_ellcolind,
+                               A_ellvalues,
+                               ellBlockSize: int,
+                               B,
+                               C,
+                               alpha=1.,
+                               beta=0.,
+                               transA=None):
+    assert ellBlockSize == 1
     # Add nodes
     A_ellcolind_in, A_ellvalues_in, B_in = (state.add_read(name) for
                                             name in (
                                                 A_ellcolind, A_ellvalues, B))
     C_out = state.add_write(C)
 
-    libnode = BlockedEllpackMM('blocked_ellpack_mm', ellBlockSize=1, transA=transA.item() if transA is not None else False, alpha=alpha,
+    libnode = BlockedEllpackMM('blocked_ellpack_mm', ellBlockSize=1,
+                               transA=transA.item() if transA is not None else False, alpha=alpha,
                                beta=beta)
     # libnode.implementation = 'cuSPARSE' if torch.cuda.is_available() else 'pure'
     state.add_node(libnode)
