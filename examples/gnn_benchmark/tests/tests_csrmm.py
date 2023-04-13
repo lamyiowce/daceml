@@ -22,17 +22,21 @@ def set_implementation(dace_module, implementation):
 
 
 @pytest.mark.parametrize("beta", [0.0, 1.0])
-def test_spmm_libnode(beta):
+@pytest.mark.parametrize("transA", [True, False])
+def test_spmm_libnode(beta, transA):
     A = torch.tensor([[1, 0, 3], [0, 2, 0], [0, 2., 4.5]])
     B = torch.tensor([[1., 1], [0, 0], [1, 0]])
     C = torch.zeros((3, 2)) if beta == 0.0 else torch.rand(3, 2)
     A_sparse = SparseTensor.from_dense(A)
     A_rowptrs, A_columns, A_vals = A_sparse.csr()
-    expected_C = A @ B + beta * C
+    if not transA:
+        expected_C = A @ B + beta * C
+    else:
+        expected_C = A.T @ B + beta * C
 
     @dace.program
     def spmm(A_rowptrs, A_columns, A_vals, B, C):
-        csrmm(A_rowptrs, A_columns, A_vals, B, C, beta=beta, transA=False)
+        csrmm(A_rowptrs, A_columns, A_vals, B, C, beta=beta, transA=transA)
 
     spmm(A_rowptrs, A_columns, A_vals, B, C)
 
@@ -95,4 +99,4 @@ def test_many_stream_spmm():
     assert np.allclose(C2.cpu().numpy(), expected_single)
     assert np.allclose(C3.cpu().numpy(), expected_single)
     assert np.allclose(C1.cpu().numpy(), expected_single)
-    assert np.allclose(C_sum.cpu().numpy(), 3*expected_single)
+    assert np.allclose(C_sum.cpu().numpy(), 3 * expected_single)
