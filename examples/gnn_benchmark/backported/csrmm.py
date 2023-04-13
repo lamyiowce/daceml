@@ -663,7 +663,7 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
 
     # Global properties
-    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE} if os.environ['CUDA_VISIBLE_DEVICES'] != '' else {
+    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE} if os.environ.get('CUDA_VISIBLE_DEVICES', '') != '' else {
         "pure": ExpandCSRMMCpp}
     default_implementation = None
 
