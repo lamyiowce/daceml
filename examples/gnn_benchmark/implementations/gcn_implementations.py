@@ -12,6 +12,7 @@ from daceml.onnx.op_implementations.utils import program_for_node
 from daceml.util.utils import in_desc_with_name
 from examples.gnn_benchmark import csrmm_libnode, sparse
 from examples.gnn_benchmark.implementations.common import SparseLayerBase
+from examples.gnn_benchmark.sparse_mm.blocked_ellpack_mm import blocked_ellpack_mm
 
 # Mark this import as used. It's needed to register the backward pass.
 assert examples.gnn_benchmark.implementations.gcn_backward
@@ -294,7 +295,7 @@ class GCNConvEllpackTransposed(GCNConvBase):
 
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
-                   name="ellpack")
+                   name="ellpack_pure")
 class GCNConvEllpack(GCNConvBase):
     graph_format: sparse.GraphMatrix = sparse.EllpackGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
@@ -327,6 +328,46 @@ class GCNConvEllpack(GCNConvBase):
                     column = columns[i, j]
                     mult = edge_vals[i, j] * features[i, k]
                     output[column, k] += mult
+
+        if do_bias:
+            def bias_prog(node_features, columns, edge_vals,
+                          linDOTweight, bias, output):
+                gcn_op(node_features, columns, edge_vals,
+                       linDOTweight, output)
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] += bias[j]
+
+            return bias_prog
+        return gcn_op
+
+
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
+                   name="ellpack")
+class GCNConvEllpack(GCNConvBase):
+    graph_format: sparse.GraphMatrix = sparse.EllpackGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': dace.float32,
+        'columns': dace.int64,
+        'edge_vals': dace.float32,
+    }
+
+    @staticmethod
+    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
+                do_bias: bool):
+        # num_entries is the maximal number of values in a row.
+        def gcn_op(node_features, columns, edge_vals,
+                   linDOTweight, output):
+            """
+            node_features: input features, N x M
+            columns: col, N x max_row_entries
+            edge_vals: N x max_row_entries
+            linDOTweight: F x M
+            output: N x F
+            """
+            features = dace.define_local((N, num_out_features), dtype=dtype)
+            features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
+
+            blocked_ellpack_mm(A_ellcolind=columns, A_ellvalues=edge_vals, ellBlockSize=1, B=features, C=output, beta=0.0)
 
         if do_bias:
             def bias_prog(node_features, columns, edge_vals,

@@ -3,8 +3,6 @@ from typing import Tuple, Dict
 import torch
 import torch_geometric
 
-from examples.gnn_benchmark import sparse
-
 
 def normalize(model: torch.nn.Module, data: torch_geometric.data.Data) -> \
         Tuple[torch.nn.Module, torch_geometric.data.Data]:
