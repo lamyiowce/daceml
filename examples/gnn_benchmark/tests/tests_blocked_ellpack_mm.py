@@ -14,16 +14,21 @@ torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
 
 
-def test_blocked_ellpack_mm_pure():
+@pytest.mark.parametrize("beta", [0.0, 1.0])
+@pytest.mark.parametrize("transA", [True, False])
+def test_blocked_ellpack_mm_pure(beta, transA):
     A = torch.tensor([[1, 0, 3], [0, 2, 0], [0, 2., 4.5]])
     B = torch.tensor([[1., 1], [0, 0], [1, 0]])
-    C = torch.zeros((3, 2))
+    C = torch.tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])
     A_ell = sparse.EllpackGraph.from_dense(A, node_features=None)
     _, A_columns, A_values = A_ell.to_input_list()
 
-    expected_C = A @ B
+    if not transA:
+        expected_C = A @ B + beta * C
+    else:
+        expected_C = A.T @ B + beta * C
     blocked_ellpack_mm(A_ellcolind=A_columns,
-                       A_ellvalues=A_values, ellBlockSize=1, B=B, C=C, beta=0.0)
+                       A_ellvalues=A_values, ellBlockSize=1, B=B, C=C, beta=beta, transA=transA)
     print('\nCalculated: \n', C)
     print('Expected: \n', expected_C)
     assert np.allclose(C, expected_C)
@@ -34,7 +39,7 @@ def test_blocked_ellpack_mm_pure():
 def test_blocked_ellpack_mm_libnode(beta, transA):
     A = torch.tensor([[1, 0, 3], [0, 2, 0], [0, 2., 4.5]])
     B = torch.tensor([[1., 1], [0, 0], [1, 0]])
-    C = torch.rand(3, 2)
+    C = torch.tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])
     A_ell = sparse.EllpackGraph.from_dense(A, node_features=None)
     _, A_columns, A_values = A_ell.to_input_list()
     if not transA:

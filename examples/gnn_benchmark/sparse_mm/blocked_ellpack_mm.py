@@ -11,7 +11,7 @@ from dace.transformation import ExpandTransformation
 def _get_operands(node,
                   state,
                   sdfg,
-                  name_lhs_ellvalue="_a_ellvalue",
+                  name_lhs_ellvalue="_a_ellvalues",
                   name_lhs_ellcolind="_a_ellcolind",
                   name_rhs="_b",
                   name_out="_c"):
@@ -55,13 +55,12 @@ class ExpandBlockedEllpackMMCpp(ExpandTransformation):
         node.validate(sdfg, state)
 
         operands = _get_operands(node, state, sdfg)
-        aellvalue = operands['_a_ellvalue'][1]
+        aellvalues = operands['_a_ellvalues'][1]
         aellcolind = operands['_a_ellcolind'][1]
-        avals = operands['_a_vals'][1]
         bdesc = operands['_b'][1]
         cdesc = sdfg.arrays[state.out_edges(node)[0].data.data]
 
-        dtype = avals.dtype.base_type
+        dtype = aellvalues.dtype.base_type
         if dtype == dace.float32:
             cdtype = 'float'
         elif dtype == dace.float64:
@@ -80,7 +79,7 @@ class ExpandBlockedEllpackMMCpp(ExpandTransformation):
         opt['alpha'] = alpha
         opt['beta'] = beta
 
-        opt['num_ellcols'] = aellvalue.shape[1]
+        opt['num_ellcols'] = aellvalues.shape[1]
         opt['nrows'] = cdesc.shape[0]
         opt['ncols'] = cdesc.shape[1]
 
@@ -98,9 +97,9 @@ class ExpandBlockedEllpackMMCpp(ExpandTransformation):
                 for (int i = 0; i < {nrows}; i++) {{
                     for (int k = 0; k < {ncols}; k++) {{
                         for (int j = 0; j < {num_ellcols}; j++) {{
-                            auto column = _a_ellcolind[j];
-                            {dtype} mult = {alpha} * _b[column * {bcols} + k] * _a_ellvalues[i * {nrows} + j];
-                            _c[i * {ncols} + k] += mult;
+                            auto column = _a_ellcolind[i * {num_ellcols} + j];
+                            {dtype} mult = {alpha} * _b[i * {bcols} + k] * _a_ellvalues[i * {num_ellcols} + j];
+                            _c[column * {ncols} + k] += mult;
                         }}
                     }}
                 }}
@@ -115,9 +114,9 @@ class ExpandBlockedEllpackMMCpp(ExpandTransformation):
                 for (int i = 0; i < {nrows}; i++) {{
                     for (int k = 0; k < {ncols}; k++) {{
                         for (int j = 0; j < {num_ellcols}; j++) {{
-                            auto column = _a_ellcolind[j];
-                            {dtype} mult = {alpha} * _b[i * {bcols} + k] * _a_ellvalues[i * {nrows} + j];
-                            _c[column * {ncols} + k] += mult;
+                            auto column = _a_ellcolind[i * {num_ellcols} + j];
+                            {dtype} mult = {alpha} * _b[column * {bcols} + k] * _a_ellvalues[i * {num_ellcols} + j];
+                            _c[i * {ncols} + k] += mult;
                         }}
                     }}
                 }}
@@ -149,20 +148,20 @@ class BlockedEllpackMM(dace.sdfg.nodes.LibraryNode):
     transA = properties.Property(dtype=bool, desc="Whether to transpose A before multiplying")
     transB = properties.Property(dtype=bool, desc="Whether to transpose B before multiplying")
     alpha = properties.Property(allow_none=False,
-                                default=1,
+                                default=1.,
                                 desc="A scalar which will be multiplied with A @ B before adding C")
     beta = properties.Property(allow_none=False,
-                               default=0,
+                               default=0.,
                                desc="A scalar which will be multiplied with C before adding C")
     ellBlockSize = properties.Property(allow_none=False,
                                        dtype=int,
-                                desc="Size of the ellpack block.")
+                                       desc="Size of the ellpack block.")
 
-    def __init__(self, name, ellBlockSize, location=None, transA=False, transB=False, alpha=1, beta=0):
+    def __init__(self, name, ellBlockSize, location=None, transA=False, transB=False, alpha=1., beta=0.):
         super().__init__(name,
                          location=location,
-                         inputs=({"_a_ellvalue", "_a_ellcolind", "_b", "_cin"}
-                                 if beta != 0 and beta != 1.0 else {"_a_ellvalue", "_a_ellcolind", "_b"}),
+                         inputs=({"_a_ellvalues", "_a_ellcolind", "_b", "_cin"}
+                                 if beta != 0 and beta != 1.0 else {"_a_ellvalues", "_a_ellcolind", "_b"}),
                          outputs={"_c"})
         self.ellBlockSize = ellBlockSize
         self.transA = transA
@@ -196,21 +195,22 @@ class BlockedEllpackMM(dace.sdfg.nodes.LibraryNode):
         if len(wrong_size_lens) > 0:
             raise ValueError(f"matrix-matrix product only supported on matrices. Got: {wrong_size_lens}")
 
-        if self.transA:
-            A_cols, A_rows = sizes['_a_ellvalues']
-        else:
-            A_rows, A_cols = sizes['_a_ellvalues']
+
+        A_ellrows, _ = sizes['_a_ellvalues']
 
         B_rows, B_cols = sizes['_b']
 
-        if A_cols != B_rows:
-            raise ValueError("Inputs to matrix-matrix product must agree in the k-dimension")
-
         if sizes['_cin'] is not None and sizes['_cin'] != sizes['_out']:
             raise ValueError("Input C matrix must match output matrix.")
-        if sizes['_out'] != [A_rows, B_cols]:
-            raise ValueError("Output to matrix-matrix product must agree in the m and n "
+
+        if not self.transA:
+            if sizes['_out'] != [A_ellrows, B_cols]:
+                raise ValueError("Output to matrix-matrix product must agree in the m and n "
                              "dimensions")
+        else:
+            if A_ellrows != B_rows:
+                raise ValueError("Inputs to matrix-matrix product must agree in the k-dimension")
+
 
 
 # Number of rows and columns in A.
@@ -274,7 +274,7 @@ def blocked_ellpack_mm_libnode(pv: 'ProgramVisitor',
     libnode = BlockedEllpackMM('blocked_ellpack_mm', ellBlockSize=1,
                                transA=transA.item() if transA is not None else False, alpha=alpha,
                                beta=beta)
-    # libnode.implementation = 'cuSPARSE' if torch.cuda.is_available() else 'pure'
+    libnode.implementation = 'pure'
     state.add_node(libnode)
 
     # Connect nodes
