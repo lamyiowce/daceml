@@ -40,6 +40,7 @@ class ExperimentInfo:
     implementation: ONNXForward
     data_format: Type[sparse.GraphMatrix]
     model: daceml.torch.DaceModule
+    idx_dtype: torch.dtype
     correct: Optional[bool] = None
     correct_grads: Optional[bool] = None
     data: Optional[sparse.GraphMatrix] = None
@@ -124,7 +125,8 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
         model = experiment_info.model
         args = experiment_info.data.to_input_list()
         register_replacement_overrides(experiment_info.impl_name,
-                                       experiment_info.gnn_type)
+                                       experiment_info.gnn_type,
+                                       experiment_info.idx_dtype)
 
         if use_gpu:
             torch.cuda.nvtx.range_push(name + ' correctness')
@@ -300,8 +302,15 @@ def main():
     parser.add_argument('--hidden', type=int, default=None, required=True)
     parser.add_argument('--outfile', type=str, default=None)
     parser.add_argument('--name', type=str, default='dace')
+    parser.add_argument('--idx-dtype', type=str, default='int32')
     parser.add_argument('--no-gen-code', action='store_true')
     args = parser.parse_args()
+
+    dtype_str_to_torch_type = {
+        'int32': torch.int32,
+        'int64': torch.int64
+    }
+    args.idx_dtype = dtype_str_to_torch_type[args.idx_dtype]
 
     model_class = model_dict[args.model]
     num_hidden_features = args.hidden
@@ -351,7 +360,8 @@ def main():
                               implementation=implementation_class,
                               model=dace_model,
                               data_format=implementation_class.graph_format,
-                              gnn_type=args.model)
+                              gnn_type=args.model,
+                              idx_dtype=torch.int32)
         dace_models[impl_name] = info
 
     if 'gcn' in args.model:
