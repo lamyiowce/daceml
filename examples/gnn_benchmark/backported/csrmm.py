@@ -391,6 +391,11 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         # Set up options for code formatting
         # opt = _get_codegen_gemm_opts(node, state, sdfg, adesc, bdesc, cdesc, alpha, beta, cdtype, func)
 
+        # Get indices data type.
+        idx_dtype = arows.dtype.base_type
+        if idx_dtype not in [dace.int32, dace.int64]:
+            raise ValueError(f"Unsupported index type: {idx_dtype} (only int32 and int64 supported).")
+
         opt = {}
 
         opt['arr_prefix'] = arr_prefix = ''
@@ -412,6 +417,7 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         opt['layout'] = 'CUSPARSE_ORDER_ROW'
 
         opt['compute'] = f'CUDA_R_{to_cublas_computetype(dtype)}'
+        opt['idx_dtype'] = 'CUSPARSE_INDEX_32I' if idx_dtype == dace.int32 else 'CUSPARSE_INDEX_64I'
         opt['handle'] = '__dace_cusparse_handle'
 
         opt['alpha'] = alpha
@@ -441,7 +447,7 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
             // Create sparse matrix A in CSR format
             dace::sparse::CheckCusparseError( cusparseCreateCsr(&matA, {arows}, {acols}, {annz},
                                                 {arr_prefix}_a_rows, {arr_prefix}_a_cols, {arr_prefix}_a_vals,
-                                                CUSPARSE_INDEX_64I, CUSPARSE_INDEX_64I,
+                                                {idx_dtype}, {idx_dtype},
                                                 CUSPARSE_INDEX_BASE_ZERO, {compute}) );
             // Create dense matrix B
             dace::sparse::CheckCusparseError( cusparseCreateDnMat(&matB, {brows}, {bcols}, {ldb}, {arr_prefix}_b,
