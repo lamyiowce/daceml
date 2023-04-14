@@ -330,6 +330,7 @@ def main():
     normalize = args.normalize
     print("Normalize: ", normalize)
     print("Implementation: ", args.impl)
+    print("DaCe indices dtype: ", args.idx_dtype)
 
     # Define models.
     model_args = (data.num_node_features, num_hidden_features, num_classes,

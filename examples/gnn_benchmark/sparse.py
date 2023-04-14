@@ -21,9 +21,8 @@ class ScipySparseGraph(GraphMatrix):
 
     @classmethod
     def from_pyg_data(cls, data: torch_geometric.data.Data, idx_dtype='keep'):
-        idx_dtype = data.edge_index.dtype if idx_dtype == 'keep' else idx_dtype
-        edge_index = data.edge_index.to(idx_dtype).numpy()
-        edge_weight = data.edge_weight.numpy()
+        edge_index = data.edge_index
+        edge_weight = data.edge_weight
         sparse_matrix = cls(node_features=data.x,
                             edge_vals=edge_weight,
                             rows=edge_index[0],
@@ -48,11 +47,11 @@ class CsrGraph(ScipySparseGraph):
                  idx_dtype='keep'
                  ):
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
-        sparse = scipy.sparse.csr_matrix((edge_vals, (rows, cols)))
-        edge_vals, rowptrs, columns = sparse.data, sparse.indptr, sparse.indices
-        self.edge_vals = torch.from_numpy(edge_vals)
-        self.rowptrs = torch.from_numpy(rowptrs).to(idx_dtype)
-        self.columns = torch.from_numpy(columns).to(idx_dtype)
+        sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols)
+        rowptrs, columns, edge_vals = sparse.csr()
+        self.edge_vals = edge_vals
+        self.rowptrs = rowptrs.to(idx_dtype)
+        self.columns = columns.to(idx_dtype)
         super().__init__(node_features)
 
     def data_list(self):
@@ -69,9 +68,9 @@ class CooGraph(ScipySparseGraph):
                  idx_dtype='keep'
                  ):
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
-        self.edge_vals = torch.from_numpy(edge_vals)
-        self.cols = torch.from_numpy(cols).to(idx_dtype)
-        self.rows = torch.from_numpy(rows).to(idx_dtype)
+        self.edge_vals = edge_vals
+        self.cols = cols.to(idx_dtype)
+        self.rows = rows.to(idx_dtype)
         super().__init__(node_features)
 
     def data_list(self):
@@ -88,11 +87,11 @@ class CscGraph(ScipySparseGraph):
                  idx_dtype='keep'
                  ):
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
-        sparse = scipy.sparse.csc_matrix((edge_vals, (rows, cols)))
-        edge_vals, colptrs, rows = sparse.data, sparse.indptr, sparse.indices
-        self.edge_vals = torch.from_numpy(edge_vals)
-        self.colptrs = torch.from_numpy(colptrs).to(idx_dtype)
-        self.rows = torch.from_numpy(rows).to(idx_dtype)
+        sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols)
+        colptrs, rows, edge_vals = sparse.csc()
+        self.edge_vals = edge_vals
+        self.colptrs = colptrs.to(idx_dtype)
+        self.rows = rows.to(idx_dtype)
         super().__init__(node_features)
 
     def data_list(self):
