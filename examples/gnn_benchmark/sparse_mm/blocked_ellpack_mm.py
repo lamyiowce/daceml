@@ -78,7 +78,7 @@ class ExpandBlockedEllpackMMCuSPARSE(ExpandTransformation):
         idx_dtype = aellcolind.dtype.base_type
         if aellcolind.dtype.base_type != dace.int32:
             raise ValueError(f"Unsupported index type: {idx_dtype} (only int32 supported).")
-        # TODO maybe int 16 would also be supported?
+
         # Set up options for code formatting
         opt = {}
 

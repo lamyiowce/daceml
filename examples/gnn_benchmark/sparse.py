@@ -119,7 +119,7 @@ class EllpackGraph(GraphMatrix):
             self.vals = torch.zeros(num_rows, max_elems_in_row,
                                     dtype=edge_vals.dtype).to(device)
         self.columns = torch.zeros(num_rows, max_elems_in_row,
-                                   dtype=torch.int64).to(device)
+                                   dtype=columns.dtype).to(device)
 
         for i in range(num_rows):
             len = rowptrs[i + 1] - rowptrs[i]
