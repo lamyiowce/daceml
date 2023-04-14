@@ -1,10 +1,17 @@
 import abc
+from enum import Enum
 from typing import Type, Dict
 
 import dace
+import torch
 
 from daceml.onnx import ONNXForward
 from examples.gnn_benchmark import sparse
+
+
+class SpecialInputType(Enum):
+    """ Types of special inputs that can be passed to a dace model. """
+    IDX_DTYPE = 1  # Uses dtype specified in experiment info.
 
 
 class SparseLayerBase(ONNXForward, metaclass=abc.ABCMeta):
@@ -25,6 +32,8 @@ class SparseLayerBase(ONNXForward, metaclass=abc.ABCMeta):
     def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):
         raise NotImplementedError
+
+    allowed_idx_dtypes = [torch.int8, torch.int16, torch.int32, torch.int64]
 
 
 @dace.program

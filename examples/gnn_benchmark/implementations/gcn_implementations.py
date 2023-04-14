@@ -3,6 +3,7 @@ from typing import Dict, Union
 
 import dace
 import numpy as np
+import torch
 from dace import nodes, SDFG, SDFGState
 
 import examples.gnn_benchmark.implementations.gcn_backward
@@ -11,6 +12,7 @@ from daceml.onnx.op_implementations.utils import op_implementation
 from daceml.onnx.op_implementations.utils import program_for_node
 from daceml.util.utils import in_desc_with_name
 from examples.gnn_benchmark import csrmm_libnode, sparse
+from examples.gnn_benchmark.implementations import common
 from examples.gnn_benchmark.implementations.common import SparseLayerBase
 from examples.gnn_benchmark.sparse_mm.blocked_ellpack_mm import blocked_ellpack_mm
 
@@ -64,8 +66,8 @@ class GCNConvSemesterThesis(GCNConvBase):
     graph_format: sparse.GraphMatrix = sparse.CsrGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
-        'rowptrs': dace.int64,
-        'columns': dace.int64,
+        'rowptrs': common.SpecialInputType.IDX_DTYPE,
+        'columns': common.SpecialInputType.IDX_DTYPE,
         'edge_vals': dace.float32,
     }
 
@@ -111,8 +113,8 @@ class GCNConvCSR(GCNConvBase):
     graph_format: sparse.GraphMatrix = sparse.CsrGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
-        'rowptrs': dace.int64,
-        'columns': dace.int64,
+        'rowptrs': common.SpecialInputType.IDX_DTYPE,
+        'columns': common.SpecialInputType.IDX_DTYPE,
         'edge_vals': dace.float32,
     }
 
@@ -166,8 +168,8 @@ class GCNConvCSC(GCNConvBase):
     graph_format: sparse.GraphMatrix = sparse.CscGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
-        'colptrs': dace.int64,
-        'rows': dace.int64,
+        'colptrs': common.SpecialInputType.IDX_DTYPE,
+        'rows': common.SpecialInputType.IDX_DTYPE,
         'edge_vals': dace.float32,
     }
 
@@ -209,8 +211,8 @@ class GCNConvCOO(GCNConvBase):
     graph_format: sparse.GraphMatrix = sparse.CooGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
-        'rows': dace.int64,
-        'columns': dace.int64,
+        'rows': common.SpecialInputType.IDX_DTYPE,
+        'columns': common.SpecialInputType.IDX_DTYPE,
         'edge_vals': dace.float32,
     }
 
@@ -254,7 +256,7 @@ class GCNConvEllpackTransposed(GCNConvBase):
     graph_format: sparse.GraphMatrix = sparse.EllpackTransposedGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
-        'rows': dace.int64,
+        'rows': common.SpecialInputType.IDX_DTYPE,
         'edge_vals': dace.float32,
     }
 
@@ -276,11 +278,8 @@ class GCNConvEllpackTransposed(GCNConvBase):
 
             output[:] = 0
 
-            for i, k in dace.map[0:N, 0:num_out_features]:
-                for j in dace.map[0:num_entries]:
-                    row = rows[i, j]
-                    mult = edge_vals[i, j] * features[row, k]
-                    output[i, k] += mult
+            blocked_ellpack_mm(A_ellcolind=rows, A_ellvalues=edge_vals, ellBlockSize=1, B=features, C=output,
+                               beta=0.0, transA=False)
 
         if do_bias:
             def bias_prog(node_features, rows, edge_vals,
@@ -300,7 +299,7 @@ class GCNConvEllpack(GCNConvBase):
     graph_format: sparse.GraphMatrix = sparse.EllpackGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
-        'columns': dace.int64,
+        'columns': common.SpecialInputType.IDX_DTYPE,
         'edge_vals': dace.float32,
     }
 
@@ -347,9 +346,10 @@ class GCNConvEllpack(GCNConvBase):
     graph_format: sparse.GraphMatrix = sparse.EllpackGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
-        'columns': dace.int64,
+        'columns': common.SpecialInputType.IDX_DTYPE,
         'edge_vals': dace.float32,
     }
+    allowed_idx_dtypes = [torch.int32]
 
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
@@ -368,7 +368,7 @@ class GCNConvEllpack(GCNConvBase):
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
 
             blocked_ellpack_mm(A_ellcolind=columns, A_ellvalues=edge_vals, ellBlockSize=1, B=features, C=output,
-                               beta=0.0, transA=True)
+                               beta=0.0, transA=False)
 
         if do_bias:
             def bias_prog(node_features, columns, edge_vals,

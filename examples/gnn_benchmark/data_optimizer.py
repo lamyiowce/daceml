@@ -19,7 +19,7 @@ def optimize_data(model: torch.nn.Module,
 
     # TODO: This converts data for every model, we should only do it once per
     #  type.
-    for impl_name, model_info in dace_models.items():
-        data_in_target_format = model_info.data_format.from_pyg_data(data)
-        model_info.data = data_in_target_format
+    for impl_name, experiment_info in dace_models.items():
+        data_in_target_format = experiment_info.data_format.from_pyg_data(data, idx_dtype=experiment_info.idx_dtype)
+        experiment_info.data = data_in_target_format
     return model, dace_models

@@ -7,14 +7,14 @@ import dace
 import torch
 from torch_sparse import SparseTensor
 
-from daceml.onnx import register_replacement
+from daceml.onnx import register_replacement, TORCH_DTYPE_TO_TYPECLASS
 from daceml.onnx.nodes import replacement_entries
 
 from daceml.torch import DaceModule
 from examples.gnn_benchmark import models, sdfg_util
 from examples.gnn_benchmark.implementations import gcn_implementations, \
     gat_implementations
-from examples.gnn_benchmark.implementations.common import SparseLayerBase
+from examples.gnn_benchmark.implementations.common import SparseLayerBase, SpecialInputType
 from examples.gnn_benchmark.sdfg_util import apply_dace_auto_optimize, \
     specialize_mem_onnx, make_maps_dynamic, apply_dace_auto_opt_after_autodiff
 
@@ -119,9 +119,13 @@ def create_dace_model(model: torch.nn.Module,
     return dace_model
 
 
-def register_replacement_overrides(implementation_name, layer_name):
+def register_replacement_overrides(implementation_name, layer_name, idx_dtype):
     impl_class = name_to_impl_class[layer_name][implementation_name]
     input_spec = impl_class.input_spec
+    if idx_dtype not in impl_class.allowed_idx_dtypes:
+        raise ValueError(f"idx_dtype {idx_dtype} not allowed for {layer_name} with {implementation_name}. Allowed: {impl_class.allowed_idx_dtypes}")
+    idx_dtype = TORCH_DTYPE_TO_TYPECLASS[idx_dtype]
+    input_spec = {k: idx_dtype if v is SpecialInputType.IDX_DTYPE else v for k, v in input_spec.items()}
     if 'gcn' in layer_name:
         register_replacement('torch_geometric.nn.conv.gcn_conv.GCNConv',
                              inputs=input_spec,

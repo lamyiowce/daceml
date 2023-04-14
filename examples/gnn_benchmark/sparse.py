@@ -1,5 +1,6 @@
-from typing import Optional
+from typing import Optional, Union
 
+import scipy.sparse
 import torch
 import torch_geometric
 import torch_sparse
@@ -10,23 +11,24 @@ class GraphMatrix:
         raise NotImplementedError
 
 
-class TorchSparseGraph(GraphMatrix, torch_sparse.SparseTensor):
+class ScipySparseGraph(GraphMatrix):
+
     def __init__(self,
                  node_features: torch.Tensor,
-                 *args, **kwargs):
+                 *args, **kwargs
+                 ):
         self.node_features = node_features
-        super().__init__(*args, **kwargs)
 
     @classmethod
-    def from_pyg_data(cls, data: torch_geometric.data.Data):
-        edge_index = data.edge_index
-        edge_weight = data.edge_weight
+    def from_pyg_data(cls, data: torch_geometric.data.Data, idx_dtype='keep'):
+        idx_dtype = data.edge_index.dtype if idx_dtype == 'keep' else idx_dtype
+        edge_index = data.edge_index.to(idx_dtype).numpy()
+        edge_weight = data.edge_weight.numpy()
         sparse_matrix = cls(node_features=data.x,
-                            row=edge_index[0],
-                            rowptr=None,
-                            col=edge_index[1],
-                            value=edge_weight)
-
+                            edge_vals=edge_weight,
+                            rows=edge_index[0],
+                            cols=edge_index[1],
+                            idx_dtype=idx_dtype)
         return sparse_matrix
 
     def to_input_list(self):
@@ -36,17 +38,65 @@ class TorchSparseGraph(GraphMatrix, torch_sparse.SparseTensor):
         return input_list
 
 
-class CsrGraph(TorchSparseGraph):
-    data_list = TorchSparseGraph.csr
+class CsrGraph(ScipySparseGraph):
+
+    def __init__(self,
+                 node_features: torch.Tensor,
+                 edge_vals: torch.Tensor,
+                 rows: torch.Tensor,
+                 cols: torch.Tensor,
+                 idx_dtype='keep'
+                 ):
+        idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
+        sparse = scipy.sparse.csr_matrix((edge_vals, (rows, cols)))
+        edge_vals, rowptrs, columns = sparse.data, sparse.indptr, sparse.indices
+        self.edge_vals = torch.from_numpy(edge_vals)
+        self.rowptrs = torch.from_numpy(rowptrs).to(idx_dtype)
+        self.columns = torch.from_numpy(columns).to(idx_dtype)
+        super().__init__(node_features)
+
+    def data_list(self):
+        return self.rowptrs, self.columns, self.edge_vals
 
 
-class CooGraph(TorchSparseGraph):
-    data_list = TorchSparseGraph.coo
+class CooGraph(ScipySparseGraph):
+
+    def __init__(self,
+                 node_features: torch.Tensor,
+                 edge_vals: torch.Tensor,
+                 rows: torch.Tensor,
+                 cols: torch.Tensor,
+                 idx_dtype='keep'
+                 ):
+        idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
+        self.edge_vals = torch.from_numpy(edge_vals)
+        self.cols = torch.from_numpy(cols).to(idx_dtype)
+        self.rows = torch.from_numpy(rows).to(idx_dtype)
+        super().__init__(node_features)
+
+    def data_list(self):
+        return self.rows, self.cols, self.edge_vals
 
 
-class CscGraph(TorchSparseGraph):
-    data_list = TorchSparseGraph.csc
+class CscGraph(ScipySparseGraph):
 
+    def __init__(self,
+                 node_features: torch.Tensor,
+                 edge_vals: torch.Tensor,
+                 rows: torch.Tensor,
+                 cols: torch.Tensor,
+                 idx_dtype='keep'
+                 ):
+        idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
+        sparse = scipy.sparse.csc_matrix((edge_vals, (rows, cols)))
+        edge_vals, colptrs, rows = sparse.data, sparse.indptr, sparse.indices
+        self.edge_vals = torch.from_numpy(edge_vals)
+        self.colptrs = torch.from_numpy(colptrs).to(idx_dtype)
+        self.rows = torch.from_numpy(rows).to(idx_dtype)
+        super().__init__(node_features)
+
+    def data_list(self):
+        return self.colptrs, self.rows, self.edge_vals
 
 class EllpackGraph(GraphMatrix):
     def __init__(self, node_features: Optional[torch.Tensor], rowptrs: torch.Tensor,
@@ -71,8 +121,9 @@ class EllpackGraph(GraphMatrix):
         return self.node_features, self.columns, self.vals
 
     @classmethod
-    def from_pyg_data(cls, data: torch_geometric.data.Data):
-        edge_index = data.edge_index
+    def from_pyg_data(cls, data: torch_geometric.data.Data, idx_dtype: Union[str, torch.dtype] = 'keep'):
+        idx_dtype = data.edge_index.dtype if idx_dtype == 'keep' else idx_dtype
+        edge_index = data.edge_index.to(idx_dtype)
         edge_weight = data.edge_weight
 
         sparse_matrix = torch_sparse.SparseTensor(
@@ -92,7 +143,7 @@ class EllpackGraph(GraphMatrix):
 
 class EllpackTransposedGraph(GraphMatrix):
     def __init__(self, node_features: torch.Tensor, colptrs: torch.Tensor,
-                    rows: torch.Tensor, vals: Optional[torch.Tensor]):
+                 rows: torch.Tensor, vals: Optional[torch.Tensor]):
         self.node_features = node_features
         ellpack = EllpackGraph(node_features, colptrs, rows, vals)
         _, self.rows, self.vals = ellpack.to_input_list()
@@ -101,8 +152,9 @@ class EllpackTransposedGraph(GraphMatrix):
         return self.node_features, self.rows, self.vals
 
     @classmethod
-    def from_pyg_data(cls, data: torch_geometric.data.Data):
-        edge_index = data.edge_index
+    def from_pyg_data(cls, data: torch_geometric.data.Data, idx_dtype: Union[str, torch.dtype] = 'keep'):
+        idx_dtype = data.edge_index.dtype if idx_dtype == 'keep' else idx_dtype
+        edge_index = data.edge_index.to(idx_dtype)
         edge_weight = data.edge_weight
 
         sparse_matrix = torch_sparse.SparseTensor(
