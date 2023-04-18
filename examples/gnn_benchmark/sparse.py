@@ -104,44 +104,76 @@ class EllpackGraph(GraphMatrix):
                  edge_vals: torch.Tensor,
                  rows: torch.Tensor,
                  cols: torch.Tensor,
+                 block_size: int,
                  idx_dtype='keep'
                  ):
+        num_nodes = node_features.shape[0]
+        if num_nodes % block_size != 0:
+            raise ValueError(f"Ellpack block size ({block_size} should divide the number of nodes ({num_nodes}).")
         self.node_features = node_features
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
+        device = rows.device
 
         sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols)
         rowptrs, columns, edge_vals = sparse.csr()
 
-        device = rowptrs.device
-        num_rows = rowptrs.shape[0] - 1
-        max_elems_in_row = torch.max(rowptrs[1:] - rowptrs[:-1]).item()
-        if edge_vals is not None:
-            self.vals = torch.zeros(num_rows, max_elems_in_row,
-                                    dtype=edge_vals.dtype).to(device)
-        self.columns = torch.zeros(num_rows, max_elems_in_row,
-                                   dtype=columns.dtype).to(device)
+        num_blocked_rows = num_nodes // block_size
+        col_block_idxs = columns // block_size
 
-        for i in range(num_rows):
-            len = rowptrs[i + 1] - rowptrs[i]
-            self.columns[i, :len] = columns[rowptrs[i]:rowptrs[i + 1]]
-            if edge_vals is not None:
-                self.vals[i, :len] = edge_vals[rowptrs[i]:rowptrs[i + 1]]
+        ell_columns = -torch.ones((num_blocked_rows, num_blocked_rows), dtype=columns.dtype, device=device)
+        max_num_blocks_in_row = 0
+        for i, (a, b) in enumerate(zip(rowptrs[:-block_size:block_size], rowptrs[block_size::block_size])):
+            unique_idxs = col_block_idxs[a:b].unique()
+            unique_idxs.sort()
+            ell_columns[i, :unique_idxs.shape[0]] = unique_idxs
+            num_blocks_in_row = unique_idxs.shape[0]
+            max_num_blocks_in_row = max(max_num_blocks_in_row, num_blocks_in_row)
 
-        self.columns = self.columns.to(idx_dtype)
+        self.columns = ell_columns[:, :max_num_blocks_in_row].to(idx_dtype).contiguous()
+
+        self.values = torch.zeros((num_nodes, max_num_blocks_in_row * block_size), dtype=edge_vals.dtype, device=device)
+        for i, (a, b) in enumerate(zip(rowptrs[:-1], rowptrs[1:])):
+            row_cols = columns[a:b]
+            row_col_block_idxs = col_block_idxs[a:b]
+            row_vals = edge_vals[a:b]
+
+            for j in range(max_num_blocks_in_row):
+                # Get the column index of the block.
+                col_idx = self.columns[i // block_size, j]
+                # Find all entries that should end up in this block.
+                this_block_selector = row_col_block_idxs == col_idx
+                # Compute indices where the entries should be placed in the value matrix.
+                target_indices = row_cols[this_block_selector] % block_size + j * block_size
+                # Place the values in the value matrix.
+                self.values[i, target_indices] = row_vals[this_block_selector]
+
+        self.num_zero_vals = (self.values == 0).to(torch.float32).mean()
+
+        block_stats = torch.zeros((block_size * block_size + 1,), dtype=torch.int64)
+        for i in range(0, max_num_blocks_in_row * block_size, block_size):
+            for j in range(0, num_nodes, block_size):
+                patch = self.values[i:i + block_size, j:j + block_size]
+                num_nonzero = (patch != 0).sum()
+                block_stats[num_nonzero] += 1
+
+        self.block_stats = block_stats
+        print("Num zero vals:", self.num_zero_vals)
+        print("Block stats:", block_stats)
 
     def to_input_list(self):
-        return self.node_features, self.columns, self.vals
+        return self.node_features, self.columns, self.values
 
     @classmethod
-    def from_pyg_data(cls, data: torch_geometric.data.Data, idx_dtype: Union[str, torch.dtype] = 'keep'):
+    def from_pyg_data(cls, data: torch_geometric.data.Data, block_size: int,
+                      idx_dtype: Union[str, torch.dtype] = 'keep'):
         return cls(data.x, edge_vals=data.edge_weight, rows=data.edge_index[0], cols=data.edge_index[1],
-                   idx_dtype=idx_dtype)
+                   idx_dtype=idx_dtype, block_size=block_size)
 
     @classmethod
-    def from_dense(cls, adjacency_matrix: torch.Tensor, node_features: Optional[torch.Tensor]):
+    def from_dense(cls, adjacency_matrix: torch.Tensor, node_features: Optional[torch.Tensor], block_size: int):
         csr_matrix = torch_sparse.SparseTensor.from_dense(adjacency_matrix)
         rows, col, val = csr_matrix.coo()
-        return EllpackGraph(node_features, rows=rows, cols=col, edge_vals=val)
+        return EllpackGraph(node_features, rows=rows, cols=col, edge_vals=val, block_size=block_size)
 
 
 class EllpackTransposedGraph(EllpackGraph):
@@ -150,10 +182,10 @@ class EllpackTransposedGraph(EllpackGraph):
         self.rows = self.columns
 
     def to_input_list(self):
-        return self.node_features, self.rows, self.vals
+        return self.node_features, self.rows, self.values
 
     @classmethod
-    def from_pyg_data(cls, data: torch_geometric.data.Data, idx_dtype: Union[str, torch.dtype] = 'keep'):
+    def from_pyg_data(cls, data: torch_geometric.data.Data, block_size: int, idx_dtype: Union[str, torch.dtype] = 'keep'):
         # Same as for EllpackGraph, but the rows and cols are switched.
         return cls(data.x, edge_vals=data.edge_weight, rows=data.edge_index[1], cols=data.edge_index[0],
-                   idx_dtype=idx_dtype)
+                   idx_dtype=idx_dtype, block_size=block_size)

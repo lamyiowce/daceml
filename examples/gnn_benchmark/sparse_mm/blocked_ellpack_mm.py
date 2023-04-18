@@ -112,8 +112,8 @@ class ExpandBlockedEllpackMMCuSPARSE(ExpandTransformation):
         opt['compute'] = f'CUDA_R_{to_cublas_computetype(dtype)}'
         opt['layout'] = 'CUSPARSE_ORDER_ROW'
 
-        opt['ellBlockSize'] = node.ellBlockSize
-        assert node.ellBlockSize == 1, "Other ell block sizes not supproted"
+        opt['block_size'] = node.block_size
+        assert node.block_size == 1, "Other ell block sizes not supproted"
 
         call = """
                     cusparseSpMatDescr_t matA;
@@ -123,7 +123,7 @@ class ExpandBlockedEllpackMMCuSPARSE(ExpandTransformation):
                         &matA, // cusparseSpMatDescr_t * spMatDescr,
                         {arows}, // int64_t rows,
                         {acols}, // int64_t cols,
-                        {ellBlockSize}, // int64_t ellBlockSize,
+                        {block_size}, // int64_t block_size,
                         {num_ellcols}, // int64_t ellCols,
                         _a_ellcolind, // void * ellColInd,
                         _a_ellvalues, // void * ellValue,
@@ -223,7 +223,7 @@ class ExpandBlockedEllpackMMCpp(ExpandTransformation):
 
         opt['bcols'] = bdesc.shape[1]
 
-        assert node.ellBlockSize == 1, "Other ell block sizes not supproted"
+        assert node.block_size == 1, "Other ell block sizes not supproted"
 
         if node.transA:
             code = """
@@ -236,8 +236,10 @@ class ExpandBlockedEllpackMMCpp(ExpandTransformation):
                     for (int k = 0; k < {ncols}; k++) {{
                         for (int j = 0; j < {num_ellcols}; j++) {{
                             auto column = _a_ellcolind[i * {num_ellcols} + j];
-                            {dtype} mult = {alpha} * _b[i * {bcols} + k] * _a_ellvalues[i * {num_ellcols} + j];
-                            _c[column * {ncols} + k] += mult;
+                            if (column != -1) {{
+                                {dtype} mult = {alpha} * _b[i * {bcols} + k] * _a_ellvalues[i * {num_ellcols} + j];
+                                _c[column * {ncols} + k] += mult;
+                            }}
                         }}
                     }}
                 }}
@@ -253,8 +255,10 @@ class ExpandBlockedEllpackMMCpp(ExpandTransformation):
                     for (int k = 0; k < {ncols}; k++) {{
                         for (int j = 0; j < {num_ellcols}; j++) {{
                             auto column = _a_ellcolind[i * {num_ellcols} + j];
-                            {dtype} mult = {alpha} * _b[column * {bcols} + k] * _a_ellvalues[i * {num_ellcols} + j];
-                            _c[i * {ncols} + k] += mult;
+                            if (column != -1) {{
+                                {dtype} mult = {alpha} * _b[column * {bcols} + k] * _a_ellvalues[i * {num_ellcols} + j];
+                                _c[i * {ncols} + k] += mult;
+                            }}
                         }}
                     }}
                 }}
@@ -292,17 +296,17 @@ class BlockedEllpackMM(dace.sdfg.nodes.LibraryNode):
     beta = properties.Property(allow_none=False,
                                default=0.,
                                desc="A scalar which will be multiplied with C before adding C")
-    ellBlockSize = properties.Property(allow_none=False,
+    block_size = properties.Property(allow_none=False,
                                        dtype=int,
                                        desc="Size of the ellpack block.")
 
-    def __init__(self, name, ellBlockSize, location=None, transA=False, transB=False, alpha=1., beta=0.):
+    def __init__(self, name, block_size, location=None, transA=False, transB=False, alpha=1., beta=0.):
         super().__init__(name,
                          location=location,
                          inputs=({"_a_ellvalues", "_a_ellcolind", "_b", "_cin"}
                                  if beta != 0 and beta != 1.0 else {"_a_ellvalues", "_a_ellcolind", "_b"}),
                          outputs={"_c"})
-        self.ellBlockSize = ellBlockSize
+        self.block_size = block_size
         self.transA = transA
         self.transB = transB
         self.alpha = alpha
@@ -361,7 +365,7 @@ K = dace.symbol('K')
 def blocked_ellpack_mm(
         A_ellcolind,
         A_ellvalues,
-        ellBlockSize,
+        block_size,
         B,
         C,
         alpha: float = 1.0,
@@ -371,7 +375,7 @@ def blocked_ellpack_mm(
     N = A_ellvalues.shape[0]
     num_ell_cols = A_ellvalues.shape[1]
     K = B.shape[1]
-    assert ellBlockSize == 1
+    assert block_size == 1
 
     if not transA:
         for i, k in dace.map[0:N, 0:K]:
@@ -395,20 +399,18 @@ def blocked_ellpack_mm_libnode(pv: 'ProgramVisitor',
                                state: SDFGState,
                                A_ellcolind,
                                A_ellvalues,
-                               ellBlockSize: int,
+                               block_size: int,
                                B,
                                C,
                                alpha=1.,
                                beta=0.,
                                transA=None):
-    assert ellBlockSize == 1
-    # Add nodes
     A_ellcolind_in, A_ellvalues_in, B_in = (state.add_read(name) for
                                             name in (
                                                 A_ellcolind, A_ellvalues, B))
     C_out = state.add_write(C)
 
-    libnode = BlockedEllpackMM('blocked_ellpack_mm', ellBlockSize=1,
+    libnode = BlockedEllpackMM('blocked_ellpack_mm', block_size=block_size,
                                transA=transA.item() if transA is not None else False, alpha=alpha,
                                beta=beta)
     libnode.implementation = "cuSPARSE" if os.environ.get('CUDA_VISIBLE_DEVICES', '') != '' else "pure"

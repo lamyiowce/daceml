@@ -6,10 +6,11 @@ import functools
 import logging
 import pathlib
 from pathlib import Path
-from typing import Sequence, Dict, Optional, Type
+from typing import Sequence, Dict, Optional, Callable
 
 import numpy as np
 import torch
+import torch_geometric
 from torch_geometric.transforms import GCNNorm
 
 import daceml
@@ -20,7 +21,7 @@ from examples.gnn_benchmark import sparse, models
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
 from examples.gnn_benchmark.util import stats_as_csv_entry, create_dace_model, \
-    register_replacement_overrides, make_torch_args, name_to_impl_class
+    register_replacement_overrides, make_torch_args, name_to_impl_class, get_impl_class
 
 faulthandler.enable()
 donnx.default_implementation = "pure"
@@ -38,7 +39,7 @@ class ExperimentInfo:
     impl_name: str
     gnn_type: str
     implementation: ONNXForward
-    data_format: Type[sparse.GraphMatrix]
+    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix]
     model: daceml.torch.DaceModule
     idx_dtype: torch.dtype
     correct: Optional[bool] = None
@@ -307,6 +308,8 @@ def main():
     args = parser.parse_args()
 
     dtype_str_to_torch_type = {
+        'float16': torch.float16,
+        'float32': torch.float32,
         'int32': torch.int32,
         'int64': torch.int64
     }
@@ -343,14 +346,21 @@ def main():
     if args.impl == ['none']:
         available_implementations = {}
     elif args.impl != ['all']:
-        available_implementations = {
-            impl: available_implementations[impl]
-            for impl in args.impl
-        }
+        available_implementations = {}
+        for impl in args.impl:
+            available_implementations[impl] = get_impl_class(args.model, impl)
 
     for impl_name, implementation_class in available_implementations.items():
+        if 'ellpack' in impl_name:
+            block_size = impl_name.split('_')[-1]
+            clean_impl_name = impl_name.replace(f'_{block_size}', '')
+            convert_data = functools.partial(
+                implementation_class.convert_data,
+                block_size=int(block_size))
+        else:
+            convert_data = implementation_class.convert_data
         dace_model = create_dace_model(torch_model,
-                                       gnn_implementation_name=impl_name,
+                                       gnn_implementation_name=clean_impl_name,
                                        threadblock_dynamic=args.threadblock_dynamic,
                                        persistent_mem=args.persistent_mem,
                                        do_opt=args.opt,
@@ -360,7 +370,7 @@ def main():
         info = ExperimentInfo(impl_name=impl_name,
                               implementation=implementation_class,
                               model=dace_model,
-                              data_format=implementation_class.graph_format,
+                              convert_data=convert_data,
                               gnn_type=args.model,
                               idx_dtype=torch.int32)
         dace_models[impl_name] = info

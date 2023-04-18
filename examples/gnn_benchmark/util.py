@@ -1,5 +1,6 @@
 import copy
 import functools
+import re
 import statistics
 from typing import Dict
 
@@ -29,6 +30,14 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
             "semester_thesis": gat_implementations.GATConvSemesterThesis}
 }
 name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
+
+
+def get_impl_class(model: str, impl_name: str):
+    # Parse names like ellpack_t_4 as ellpack_t with block size 4.
+    if 'ellpack' in impl_name:
+        # Use regex to replace _[0-9]+ at the end with ''
+        impl_name = re.sub(r'_\d+$', '', impl_name)
+    return name_to_impl_class[model][impl_name]
 
 
 def stats_as_csv_entry(times, func_names, model, hidden_size):
@@ -120,7 +129,7 @@ def create_dace_model(model: torch.nn.Module,
 
 
 def register_replacement_overrides(implementation_name, layer_name, idx_dtype):
-    impl_class = name_to_impl_class[layer_name][implementation_name]
+    impl_class = get_impl_class(layer_name, implementation_name)
     input_spec = impl_class.input_spec
     if idx_dtype not in impl_class.allowed_idx_dtypes:
         raise ValueError(f"idx_dtype {idx_dtype} not allowed for {layer_name} with {implementation_name}. Allowed: {impl_class.allowed_idx_dtypes}")

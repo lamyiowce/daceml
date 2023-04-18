@@ -1,9 +1,10 @@
 import abc
-from typing import Dict, Union
+from typing import Dict, Union, Callable
 
 import dace
 import numpy as np
 import torch
+import torch_geometric
 from dace import nodes, SDFG, SDFGState
 
 import examples.gnn_benchmark.implementations.gcn_backward
@@ -26,9 +27,9 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
     computes: X' = A.t @ X @ W.t
     """
 
-    @classmethod
-    def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
-                sdfg: SDFG) -> Union[nodes.Node, SDFG]:
+    @staticmethod
+    def forward_can_be_applied(node: onnx_op.ONNXOp, state: SDFGState,
+                               sdfg: SDFG) -> bool:
         if node.module.add_self_loops:
             raise NotImplementedError("Adding self loops is not supported. "
                                       "Add self-loops in preprocessing.")
@@ -37,13 +38,24 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
                 "Normalization is not implemented. "
                 "Normalize edge weights in preprocessing.")
 
+        return True
+
+    @classmethod
+    def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
+                sdfg: SDFG) -> Union[nodes.Node, SDFG]:
+        N, do_bias, dtype, num_entries, num_in_features, num_out_features = cls.get_info(node, state, sdfg)
+
+        gcn_op = cls.make_op(N, num_in_features, num_out_features, num_entries, dtype, do_bias)
+
+        return program_for_node(gcn_op, sdfg, state, node)
+
+    @staticmethod
+    def get_info(node: onnx_op.ONNXOp, state: SDFGState, sdfg: SDFG):
         features_desc = in_desc_with_name(node, state, sdfg, "node_features")
         N, num_in_features = features_desc.shape
         dtype = features_desc.dtype
-
         weights_desc = in_desc_with_name(node, state, sdfg, "linDOTweight")
         num_out_features = weights_desc.shape[0]
-
         try:
             col_desc = in_desc_with_name(node, state, sdfg, "columns")
             num_entries = col_desc.shape[-1]
@@ -52,18 +64,14 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
             # array.
             row_desc = in_desc_with_name(node, state, sdfg, "rows")
             num_entries = row_desc.shape[-1]
-
         do_bias = 'bias' in [inp.name for inp in node.schema.inputs]
-
-        gcn_op = cls.make_op(N, num_in_features, num_out_features, num_entries, dtype, do_bias)
-
-        return program_for_node(gcn_op, sdfg, state, node)
+        return N, do_bias, dtype, num_entries, num_in_features, num_out_features
 
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="semester_thesis")
 class GCNConvSemesterThesis(GCNConvBase):
-    graph_format: sparse.GraphMatrix = sparse.CsrGraph
+    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CsrGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
         'rowptrs': common.SpecialInputType.IDX_DTYPE,
@@ -110,7 +118,7 @@ class GCNConvSemesterThesis(GCNConvBase):
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csr")
 class GCNConvCSR(GCNConvBase):
-    graph_format: sparse.GraphMatrix = sparse.CsrGraph
+    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CsrGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
         'rowptrs': common.SpecialInputType.IDX_DTYPE,
@@ -165,7 +173,7 @@ class GCNConvCSR(GCNConvBase):
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csc")
 class GCNConvCSC(GCNConvBase):
-    graph_format: sparse.GraphMatrix = sparse.CscGraph
+    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CscGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
         'colptrs': common.SpecialInputType.IDX_DTYPE,
@@ -208,7 +216,7 @@ class GCNConvCSC(GCNConvBase):
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="coo")
 class GCNConvCOO(GCNConvBase):
-    graph_format: sparse.GraphMatrix = sparse.CooGraph
+    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CooGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
         'rows': common.SpecialInputType.IDX_DTYPE,
@@ -253,7 +261,8 @@ class GCNConvCOO(GCNConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="ellpack_t")
 class GCNConvEllpackTransposed(GCNConvBase):
-    graph_format: sparse.GraphMatrix = sparse.EllpackTransposedGraph
+    convert_data: Callable[
+        [torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackTransposedGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
         'rows': common.SpecialInputType.IDX_DTYPE,
@@ -278,7 +287,7 @@ class GCNConvEllpackTransposed(GCNConvBase):
 
             output[:] = 0
 
-            blocked_ellpack_mm(A_ellcolind=rows, A_ellvalues=edge_vals, ellBlockSize=1, B=features, C=output,
+            blocked_ellpack_mm(A_ellcolind=rows, A_ellvalues=edge_vals, block_size=1, B=features, C=output,
                                beta=0.0, transA=False)
 
         if do_bias:
@@ -296,7 +305,7 @@ class GCNConvEllpackTransposed(GCNConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="ellpack_pure")
 class GCNConvEllpack(GCNConvBase):
-    graph_format: sparse.GraphMatrix = sparse.EllpackGraph
+    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
         'columns': common.SpecialInputType.IDX_DTYPE,
@@ -343,7 +352,7 @@ class GCNConvEllpack(GCNConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="ellpack")
 class GCNConvEllpack(GCNConvBase):
-    graph_format: sparse.GraphMatrix = sparse.EllpackGraph
+    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': dace.float32,
         'columns': common.SpecialInputType.IDX_DTYPE,
@@ -351,10 +360,26 @@ class GCNConvEllpack(GCNConvBase):
     }
     allowed_idx_dtypes = [torch.int32]
 
+    @classmethod
+    def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
+                sdfg: SDFG) -> Union[nodes.Node, SDFG]:
+        N, do_bias, dtype, max_num_blocks_in_row, num_in_features, num_out_features = cls.get_info(node, state, sdfg)
+
+        col_desc = in_desc_with_name(node, state, sdfg, "columns")
+        num_column_rows = col_desc.shape[1]
+        values_desc = in_desc_with_name(node, state, sdfg, "edge_vals")
+        num_values_rows = values_desc.shape[1]
+        block_size = num_values_rows // num_column_rows
+        gcn_op = cls.make_op(N=N, num_in_features=num_in_features, num_out_features=num_out_features,
+                             dtype=dtype, do_bias=do_bias,
+                             block_size=block_size)
+
+        return program_for_node(gcn_op, sdfg, state, node)
+
     @staticmethod
-    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
-        # num_entries is the maximal number of values in a row.
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                dtype: dace.dtypes.Typeclasses,
+                do_bias: bool, block_size: int):
         def gcn_op(node_features, columns, edge_vals,
                    linDOTweight, output):
             """
@@ -367,8 +392,8 @@ class GCNConvEllpack(GCNConvBase):
             features = dace.define_local((N, num_out_features), dtype=dtype)
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
 
-            blocked_ellpack_mm(A_ellcolind=columns, A_ellvalues=edge_vals, ellBlockSize=1, B=features, C=output,
-                               beta=0.0, transA=False)
+            blocked_ellpack_mm(A_ellcolind=columns, A_ellvalues=edge_vals, block_size=block_size, B=features, C=output,
+                               beta=0.0, transA=True)
 
         if do_bias:
             def bias_prog(node_features, columns, edge_vals,
