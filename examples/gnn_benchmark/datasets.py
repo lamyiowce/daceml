@@ -28,10 +28,10 @@ def get_dataset_class(dataset_name: str):
 def get_dataset(dataset_name: str, device) -> torch_geometric.data.Data:
     data_path = f'/tmp/datasets/{dataset_name}'
     if dataset_name == 'small':
-        _x = torch.tensor([[0., 1], [1, 1], [-1, 0]]).to(device)
-        _edge_index = torch.tensor([[0, 0, 0, 2, 2], [0, 1, 2, 0, 2]]).to(device)
+        _x = torch.tensor([[0., 1], [1, 1], [-1, 0], [3, 5]]).to(device)
+        _edge_index = torch.tensor([[0, 0, 0, 3, 1], [0, 1, 2, 0, 1]]).to(device)
         _edge_attr = torch.tensor([1, 1, 1, 1., 1]).to(device)
-        _y = torch.tensor([0, 1, 2]).to(device)
+        _y = torch.tensor([0, 1, 2, 1]).to(device)
         data = torch_geometric.data.Data(x=_x, edge_index=_edge_index,
                                          edge_attr=_edge_attr, y=_y)
     else:

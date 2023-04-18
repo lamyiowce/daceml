@@ -287,7 +287,7 @@ class GCNConvEllpackTransposed(GCNConvBase):
 
             output[:] = 0
 
-            blocked_ellpack_mm(A_ellcolind=rows, A_ellvalues=edge_vals, block_size=1, B=features, C=output,
+            blocked_ellpack_mm(A_ellcolind=rows, A_ellvalues=edge_vals, B=features, C=output,
                                beta=0.0, transA=False)
 
         if do_bias:
@@ -392,7 +392,7 @@ class GCNConvEllpack(GCNConvBase):
             features = dace.define_local((N, num_out_features), dtype=dtype)
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
 
-            blocked_ellpack_mm(A_ellcolind=columns, A_ellvalues=edge_vals, block_size=block_size, B=features, C=output,
+            blocked_ellpack_mm(A_ellcolind=columns, A_ellvalues=edge_vals, B=features, C=output,
                                beta=0.0, transA=True)
 
         if do_bias:

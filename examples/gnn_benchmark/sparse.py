@@ -1,6 +1,5 @@
 from typing import Optional, Union
 
-import scipy.sparse
 import torch
 import torch_geometric
 import torch_sparse

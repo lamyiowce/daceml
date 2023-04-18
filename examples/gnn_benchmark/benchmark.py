@@ -359,6 +359,7 @@ def main():
                 block_size=int(block_size))
         else:
             convert_data = implementation_class.convert_data
+            clean_impl_name = impl_name
         dace_model = create_dace_model(torch_model,
                                        gnn_implementation_name=clean_impl_name,
                                        threadblock_dynamic=args.threadblock_dynamic,
