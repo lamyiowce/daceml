@@ -38,7 +38,8 @@ def specialize_mem_onnx(mod):
         arrays = []
         for sd in module.sdfg.all_sdfgs_recursive():
             arrays += _specialize_memory(sd)
-        print(f"Specialized {len(arrays)} arrays to persistent: {' '.join(arrays)}")
+        print(
+            f"Specialized {len(arrays)} arrays to persistent: {' '.join(arrays)}")
 
     mod.append_post_onnx_hook("specializemem", spec)
 
@@ -85,11 +86,14 @@ def make_maps_dynamic(module, exclude_loops=None):
 
 
 def set_implementation(module: daceml.torch.module.DaceModule,
-                       implementation_name: str):
+                       implementation_name: str,
+                       backward: bool = False):
     sdfg = module.sdfg
     for node, _ in sdfg.all_nodes_recursive():
         if isinstance(node,
                       dace.sdfg.nodes.LibraryNode) and implementation_name in node.implementations:
+            if backward:
+                node.backward_implementation = implementation_name
             node.implementation = implementation_name
 
 

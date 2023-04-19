@@ -1,5 +1,6 @@
 import copy
 import os
+from typing import Optional
 
 import dace
 from dace import memlet
@@ -91,8 +92,7 @@ class ExpandCOOMMCuSPARSE(ExpandTransformation):
         # Set up options for code formatting
         opt = {}
 
-        opt[
-            'idx_dtype'] = f'CUSPARSE_INDEX_{"32" if idx_dtype == dace.int32 else "64"}I'
+        opt['idx_dtype'] = f'CUSPARSE_INDEX_{"32" if idx_dtype == dace.int32 else "64"}I'
         opt['dtype'] = cdtype
         opt['handle'] = '__dace_cusparse_handle'
 
@@ -113,8 +113,12 @@ class ExpandCOOMMCuSPARSE(ExpandTransformation):
         opt['ncols'] = cdesc.shape[1]
         opt['ldc'] = opt['ncols']
 
-        opt['arows'] = cdesc.shape[0]
-        opt['acols'] = bdesc.shape[0]
+        if not node.transA:
+            opt['arows'] = cdesc.shape[0]
+            opt['acols'] = bdesc.shape[0]
+        else:
+            opt['arows'] = bdesc.shape[0]
+            opt['acols'] = cdesc.shape[0]
 
         opt['brows'] = bdesc.shape[0]
         opt['bcols'] = bdesc.shape[1]
@@ -244,8 +248,8 @@ class ExpandCOOMMCpp(ExpandTransformation):
                     for (int k = 0; k < {ncols}; k++) {{
                         auto column = _a_cols[i];
                         auto row = _a_rows[i];
-                        {dtype} mult = {alpha} * _b[column * {bcols} + k] * _a_vals[i];
-                        _c[row * {ncols} + k] += mult;
+                        {dtype} mult = {alpha} * _b[row * {bcols} + k] * _a_vals[i];
+                        _c[column * {ncols} + k] += mult;
                     }}
                 }}
             """.format_map(opt)
@@ -260,8 +264,8 @@ class ExpandCOOMMCpp(ExpandTransformation):
                     for (int k = 0; k < {ncols}; k++) {{
                         auto column = _a_cols[i];
                         auto row = _a_rows[i];
-                        {dtype} mult = {alpha} * _b[row * {bcols} + k] * _a_vals[i];
-                        _c[column * {ncols} + k] += mult;
+                        {dtype} mult = {alpha} * _b[column * {bcols} + k] * _a_vals[i];
+                        _c[row * {ncols} + k] += mult;
                     }}
                 }}
             """.format_map(opt)
@@ -384,15 +388,15 @@ def coomm_libnode(pv: 'ProgramVisitor',
                   state: SDFGState,
                   A_rows,
                   A_cols,
-                  A_values,
+                  A_vals,
                   B,
                   C,
-                  alpha=1.,
-                  beta=0.,
-                  transA=None):
-    A_cols_in, A_rows_in, A_values_in, B_in = (state.add_read(name) for
-                                               name in (
-                                                   A_cols, A_rows, A_values, B))
+                  alpha: float = 1.,
+                  beta: float = 0.,
+                  transA: Optional[bool] = None):
+    A_cols_in, A_rows_in, A_vals_in, B_in = (state.add_read(name) for
+                                             name in (
+                                                 A_cols, A_rows, A_vals, B))
     C_out = state.add_write(C)
 
     libnode = COOMM('coomm',
@@ -408,8 +412,8 @@ def coomm_libnode(pv: 'ProgramVisitor',
                    memlet.Memlet(A_cols))
     state.add_edge(A_rows_in, None, libnode, '_a_rows',
                    memlet.Memlet(A_rows))
-    state.add_edge(A_values_in, None, libnode, '_a_vals',
-                   memlet.Memlet(A_values))
+    state.add_edge(A_vals_in, None, libnode, '_a_vals',
+                   memlet.Memlet(A_vals))
     state.add_edge(B_in, None, libnode, '_b', memlet.Memlet(B))
     state.add_edge(libnode, '_c', C_out, None, memlet.Memlet(C))
 

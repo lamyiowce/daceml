@@ -15,7 +15,8 @@ from daceml.torch import DaceModule
 from examples.gnn_benchmark import models, sdfg_util
 from examples.gnn_benchmark.implementations import gcn_implementations, \
     gat_implementations
-from examples.gnn_benchmark.implementations.common import SparseLayerBase, SpecialInputType
+from examples.gnn_benchmark.implementations.common import SparseLayerBase, \
+    SpecialInputType
 from examples.gnn_benchmark.sdfg_util import apply_dace_auto_optimize, \
     specialize_mem_onnx, make_maps_dynamic, apply_dace_auto_opt_after_autodiff
 
@@ -116,12 +117,14 @@ def create_dace_model(model: torch.nn.Module,
             "apply_threadblock_dynamic_maps",
             make_maps_dynamic_with_excluded_loops)
 
-    fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(backward_sdfg, '__tmp3')
+    fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(
+        backward_sdfg, '__tmp3')
     dace_model.append_post_autodiff_hook("Set __tmp3 to register", fn)
 
     set_implementation = functools.partial(
         sdfg_util.set_implementation,
-        implementation_name=gnn_implementation_name)
+        implementation_name=gnn_implementation_name,
+        backward=backward)
     dace_model.prepend_post_onnx_hook("set_implementation",
                                       set_implementation)
 
@@ -132,9 +135,11 @@ def register_replacement_overrides(implementation_name, layer_name, idx_dtype):
     impl_class = get_impl_class(layer_name, implementation_name)
     input_spec = impl_class.input_spec
     if idx_dtype not in impl_class.allowed_idx_dtypes:
-        raise ValueError(f"idx_dtype {idx_dtype} not allowed for {layer_name} with {implementation_name}. Allowed: {impl_class.allowed_idx_dtypes}")
+        raise ValueError(
+            f"idx_dtype {idx_dtype} not allowed for {layer_name} with {implementation_name}. Allowed: {impl_class.allowed_idx_dtypes}")
     idx_dtype = TORCH_DTYPE_TO_TYPECLASS[idx_dtype]
-    input_spec = {k: idx_dtype if v is SpecialInputType.IDX_DTYPE else v for k, v in input_spec.items()}
+    input_spec = {k: idx_dtype if v is SpecialInputType.IDX_DTYPE else v for
+                  k, v in input_spec.items()}
     if 'gcn' in layer_name:
         register_replacement('torch_geometric.nn.conv.gcn_conv.GCNConv',
                              inputs=input_spec,
