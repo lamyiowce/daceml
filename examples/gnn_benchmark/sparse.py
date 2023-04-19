@@ -10,7 +10,7 @@ class GraphMatrix:
         raise NotImplementedError
 
 
-class ScipySparseGraph(GraphMatrix):
+class SparseGraph(GraphMatrix):
 
     def __init__(self,
                  node_features: torch.Tensor,
@@ -36,7 +36,7 @@ class ScipySparseGraph(GraphMatrix):
         return input_list
 
 
-class CsrGraph(ScipySparseGraph):
+class CsrGraph(SparseGraph):
 
     def __init__(self,
                  node_features: torch.Tensor,
@@ -57,7 +57,7 @@ class CsrGraph(ScipySparseGraph):
         return self.rowptrs, self.columns, self.edge_vals
 
 
-class CooGraph(ScipySparseGraph):
+class CooGraph(SparseGraph):
 
     def __init__(self,
                  node_features: torch.Tensor,
@@ -76,7 +76,7 @@ class CooGraph(ScipySparseGraph):
         return self.rows, self.cols, self.edge_vals
 
 
-class CscGraph(ScipySparseGraph):
+class CscGraph(SparseGraph):
 
     def __init__(self,
                  node_features: torch.Tensor,

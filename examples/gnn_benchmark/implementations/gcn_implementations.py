@@ -16,6 +16,7 @@ from examples.gnn_benchmark import csrmm_libnode, sparse
 from examples.gnn_benchmark.implementations import common
 from examples.gnn_benchmark.implementations.common import SparseLayerBase
 from examples.gnn_benchmark.sparse_mm.blocked_ellpack_mm import blocked_ellpack_mm
+from examples.gnn_benchmark.sparse_mm.coomm import coomm
 
 # Mark this import as used. It's needed to register the backward pass.
 assert examples.gnn_benchmark.implementations.gcn_backward
@@ -227,34 +228,36 @@ class GCNConvCOO(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):
-        def gcn_op(node_features, rows, columns, edge_vals,
-                   linDOTweight, output):
-            """
-            node_features: input features, N x M
-            row: row idxs (COO format), num_entries
-            columns: col, num_entries
-            edge_vals: values, num_entries
-            linDOTweight: F x M
-            output: N x F
-            """
-            features = dace.define_local((N, num_out_features), dtype=dtype)
-            features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
-
-            output[:] = 0
-            for i, k in dace.map[0:num_entries, 0:num_out_features]:
-                c = columns[i]
-                r = rows[i]
-                output[c, k] += edge_vals[i] * features[r, k]
-
         if do_bias:
-            def bias_prog(node_features, rows, columns, edge_vals,
-                          linDOTweight, bias, output):
-                gcn_op(node_features, rows, columns, edge_vals,
-                       linDOTweight, output)
+            def gcn_op(node_features, rows, columns, edge_vals,
+                       linDOTweight, bias, output):
+                """
+                node_features: input features, N x M
+                row: row idxs (COO format), num_entries
+                columns: col, num_entries
+                edge_vals: values, num_entries
+                linDOTweight: F x M
+                output: N x F
+                """
+                features = dace.define_local((N, num_out_features), dtype=dtype)
+                features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
                 for i, j in dace.map[0:N, 0:num_out_features]:
-                    output[i, j] += bias[j]
-
-            return bias_prog
+                    output[i, j] = bias[j]
+                coomm(rows, columns, edge_vals, features, output, beta=1.0, transA=True)
+        else:
+            def gcn_op(node_features, rows, columns, edge_vals,
+                       linDOTweight, output):
+                """
+                node_features: input features, N x M
+                row: row idxs (COO format), num_entries
+                columns: col, num_entries
+                edge_vals: values, num_entries
+                linDOTweight: F x M
+                output: N x F
+                """
+                features = dace.define_local((N, num_out_features), dtype=dtype)
+                features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
+                coomm(rows, columns, edge_vals, features, output, transA=True)
         return gcn_op
 
 
