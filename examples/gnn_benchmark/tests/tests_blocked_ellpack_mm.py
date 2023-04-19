@@ -28,7 +28,7 @@ def test_blocked_ellpack_mm_pure(beta, transA):
     else:
         expected_C = A.T @ B + beta * C
     blocked_ellpack_mm(A_ellcolind=A_columns,
-                       A_ellvalues=A_values, ellBlockSize=1, B=B, C=C, beta=beta, transA=transA)
+                       A_ellvalues=A_values, B=B, C=C, beta=beta, transA=transA)
     print('\nCalculated: \n', C)
     print('Expected: \n', expected_C)
     assert np.allclose(C, expected_C)
@@ -40,7 +40,7 @@ def test_blocked_ellpack_mm_libnode(beta, transA):
     A = torch.tensor([[1, 0, 3], [0, 2, 0], [0, 2., 4.5]])
     B = torch.tensor([[1., 1], [0, 0], [1, 0]])
     C = torch.tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]])
-    A_ell = sparse.EllpackGraph.from_dense(A, node_features=None)
+    A_ell = sparse.EllpackGraph.from_dense(A, node_features=None, block_size=1)
     _, A_columns, A_values = A_ell.to_input_list()
     if not transA:
         expected_C = A @ B + beta * C
@@ -51,7 +51,6 @@ def test_blocked_ellpack_mm_libnode(beta, transA):
     def spmm(A_columns, A_vals, B, C):
         blocked_ellpack_mm(A_ellcolind=A_columns,
                            A_ellvalues=A_vals,
-                           ellBlockSize=1,
                            B=B,
                            C=C,
                            beta=beta,

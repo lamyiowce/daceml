@@ -67,7 +67,9 @@ class ExpandBlockedEllpackMMCuSPARSE(ExpandTransformation):
 
         # Get values data type.
         dtype = aellvalues.dtype.base_type
-        if dtype == dace.float32:
+        if dtype == dace.float16:
+            cdtype = '__half'
+        elif dtype == dace.float32:
             cdtype = 'float'
         elif dtype == dace.float64:
             cdtype = 'double'

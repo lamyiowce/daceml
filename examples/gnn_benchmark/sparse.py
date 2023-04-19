@@ -106,15 +106,15 @@ class EllpackGraph(GraphMatrix):
                  block_size: int,
                  idx_dtype='keep'
                  ):
-        num_nodes = node_features.shape[0]
-        if num_nodes % block_size != 0:
-            raise ValueError(f"Ellpack block size ({block_size} should divide the number of nodes ({num_nodes}).")
         self.node_features = node_features
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
         device = rows.device
 
         sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols)
         rowptrs, columns, edge_vals = sparse.csr()
+        num_nodes = rowptrs.shape[0] - 1
+        if num_nodes % block_size != 0:
+            raise ValueError(f"Ellpack block size ({block_size} should divide the number of nodes ({num_nodes}).")
 
         num_blocked_rows = num_nodes // block_size
         col_block_idxs = columns // block_size
@@ -169,10 +169,10 @@ class EllpackGraph(GraphMatrix):
                    idx_dtype=idx_dtype, block_size=block_size)
 
     @classmethod
-    def from_dense(cls, adjacency_matrix: torch.Tensor, node_features: Optional[torch.Tensor], block_size: int):
+    def from_dense(cls, adjacency_matrix: torch.Tensor, node_features: Optional[torch.Tensor], block_size: int, idx_dtype: Union[str, torch.dtype] = 'keep'):
         csr_matrix = torch_sparse.SparseTensor.from_dense(adjacency_matrix)
         rows, col, val = csr_matrix.coo()
-        return EllpackGraph(node_features, rows=rows, cols=col, edge_vals=val, block_size=block_size)
+        return EllpackGraph(node_features, rows=rows, cols=col, edge_vals=val, block_size=block_size, idx_dtype=idx_dtype)
 
 
 class EllpackTransposedGraph(EllpackGraph):
