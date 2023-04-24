@@ -78,14 +78,14 @@ def create_dace_model(model: torch.nn.Module,
 
     dace_model.eval()
 
-    if do_opt:
-        print("---> Adding auto-opt hook.")
-        if backward:
-            dace_model.append_post_autodiff_hook("dace_auto_optimize",
-                                                 apply_dace_auto_opt_after_autodiff)
-        else:
-            dace_model.append_post_onnx_hook("dace_auto_optimize",
-                                             apply_dace_auto_optimize)
+    if device.type == 'cuda':
+        dace_model.append_post_onnx_hook("set_reduce_to_gpuauto_post_onnx",
+                                          lambda model: sdfg_util.set_reduce_to_gpuauto(model.sdfg))
+
+        dace_model.append_post_autodiff_hook("set_reduce_to_gpuauto",
+                                              sdfg_util.apply_to_both(
+                                                  sdfg_util.set_reduce_to_gpuauto))
+
 
     if persistent_mem:
         print("---> Adding persistent memory hook.")
@@ -117,9 +117,7 @@ def create_dace_model(model: torch.nn.Module,
             "apply_threadblock_dynamic_maps",
             make_maps_dynamic_with_excluded_loops)
 
-    fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(
-        backward_sdfg, '__tmp3')
-    dace_model.append_post_autodiff_hook("Set __tmp3 to register", fn)
+
 
     set_implementation = functools.partial(
         sdfg_util.set_implementation,
@@ -128,6 +126,22 @@ def create_dace_model(model: torch.nn.Module,
     dace_model.prepend_post_onnx_hook("set_implementation",
                                       set_implementation)
 
+    if do_opt:
+        print("---> Adding auto-opt hook.")
+        if backward:
+            dace_model.append_post_autodiff_hook("dace_auto_optimize",
+                                                 apply_dace_auto_opt_after_autodiff)
+        else:
+            dace_model.append_post_onnx_hook("dace_auto_optimize",
+                                         apply_dace_auto_optimize)
+
+    fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(
+        backward_sdfg, '__tmp3')
+    dace_model.append_post_autodiff_hook("Set __tmp3 to register", fn)
+
+    def simplify(sdfg: dace.SDFG):
+        sdfg.simplify(verbose=True)
+    dace_model.append_post_autodiff_hook("simplify", sdfg_util.apply_to_both(simplify))
     return dace_model
 
 

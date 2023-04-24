@@ -1,4 +1,5 @@
 import logging
+from typing import Callable
 
 import dace
 import torch
@@ -102,3 +103,20 @@ def set_memory_to_register(sdfg: dace.SDFG, array_name: str):
         if isinstance(node, dace.nodes.AccessNode) and node.data == array_name:
             arr = sdfg.arrays[node.data]
             arr.storage = dace.dtypes.StorageType.Register
+
+
+def apply_to_both(fn: Callable[[dace.SDFG], None]):
+    def wrapper(forward_sdfg, backward_sdfg):
+        fn(forward_sdfg)
+        fn(backward_sdfg)
+    return wrapper
+
+def set_reduce_to_gpuauto(sdfg: dace.SDFG):
+    counter = 0
+    for node, _ in sdfg.all_nodes_recursive():
+        if isinstance(node, dace.nodes.LibraryNode) and isinstance(node, dace.libraries.standard.nodes.Reduce):
+            print(f"Setting impl {node} from {node.implementation} to GPUAuto.")
+            node.implementation = 'GPUAuto'
+            counter += 1
+    print(f"Set {counter} reduce nodes to GPUAuto")
+
