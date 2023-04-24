@@ -102,9 +102,7 @@ class GCNConvBackward(BackwardImplementation):
         compute_grad_for_node_features = 'node_features' in required_gradients
 
         def gcn_backward(node_features, rows, columns, edge_vals,
-                         linDOTweight,
-                         linDOTweight_grad, bias_grad,
-                         output_grad):
+                         linDOTweight_grad, bias_grad, output_grad):
             """
             node_features: input features, N x M
             rowptrs: row pointers (CSR format), N+1
@@ -141,8 +139,8 @@ class GCNConvBackward(BackwardImplementation):
             temp = dace.define_local((N, M), dtype=dace.float32)
             temp[:] = output_grad @ linDOTweight
             coomm(rows, columns, edge_vals, temp, node_features_grad, beta=0.0,
-                  transA=True)
-            gcn_backward(node_features, rows, columns, edge_vals, linDOTweight,
+                  transA=False)
+            gcn_backward(node_features, rows, columns, edge_vals,
                          linDOTweight_grad, bias_grad, output_grad)
 
         result_node, result = autodiff_utils.backward_program_for_node(

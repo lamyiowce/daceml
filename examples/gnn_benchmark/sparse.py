@@ -67,9 +67,9 @@ class CooGraph(SparseGraph):
                  idx_dtype='keep'
                  ):
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
-        self.edge_vals = edge_vals
-        self.cols = cols.to(idx_dtype)
-        self.rows = rows.to(idx_dtype)
+        self.edge_vals = edge_vals.contiguous()
+        self.cols = cols.to(idx_dtype).contiguous()
+        self.rows = rows.to(idx_dtype).contiguous()
         super().__init__(node_features)
 
     def data_list(self):
