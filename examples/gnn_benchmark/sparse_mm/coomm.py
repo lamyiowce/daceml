@@ -153,7 +153,8 @@ class ExpandCOOMMCuSPARSE(ExpandTransformation):
                                                         {compute}, {layout}) );
 
                     // Get the size of the additional buffer that's needed.
-                    size_t bufferSize;
+                    // TODO: temp solution for dace_stream = nullptr.
+  /*                  size_t bufferSize;
                     dace::sparse::CheckCusparseError( cusparseSpMM_bufferSize(
                                                     {handle},
                                                     {opA},
@@ -164,7 +165,7 @@ class ExpandCOOMMCuSPARSE(ExpandTransformation):
                     void* dBuffer = __state->cusparse_handle.Buffer(__dace_cuda_device, 
                                                                     __dace_current_stream_id, 
                                                                     bufferSize);
-
+*/ void* dBuffer = NULL;
                     // execute SpMM
                     dace::sparse::CheckCusparseError( cusparseSpMM({handle},
                                                     {opA},
