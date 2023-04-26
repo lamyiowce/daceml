@@ -1,5 +1,4 @@
 import argparse
-import copy
 import dataclasses
 import faulthandler
 import functools
@@ -18,10 +17,11 @@ from daceml import onnx as donnx
 from daceml.onnx import ONNXForward
 from daceml.torch.module import dace_module
 from examples.gnn_benchmark import sparse, models
+from examples.gnn_benchmark.correctness import check_correctness
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
 from examples.gnn_benchmark.util import stats_as_csv_entry, create_dace_model, \
-    register_replacement_overrides, make_torch_args, name_to_impl_class, get_impl_class
+    make_torch_args, name_to_impl_class, get_impl_class
 
 faulthandler.enable()
 donnx.default_implementation = "pure"
@@ -48,146 +48,6 @@ class ExperimentInfo:
     data: Optional[sparse.GraphMatrix] = None
 
 
-def check_equal(result, expected, name_result=None, name_expected=None,
-                verbose=True):
-    name_result = name_result or 'result'
-    name_expected = name_expected or 'expected'
-    if torch.allclose(expected, result, atol=1.0e-5):
-        if verbose:
-            print(
-                f"==== Correct: {name_result}.  ☆ ╰(o＾◡＾o)╯ ☆  ({abs((expected - result)).max().item()}) ====")
-    else:
-        print(
-            f"****** INCORRECT: {name_result}! (ノಥ﹏ಥ)ノ彡┻━┻ ******")
-        print("** Max abs error: ",
-              abs((expected - result)).max().item())
-        print("** Avg abs error: ",
-              abs((expected - result)).mean().item())
-        print("** Max rel error: ",
-              (abs((expected - result)) / abs(
-                  result)).max().item())
-        print("** Avg rel error: ", (abs((expected - result)) / abs(
-            result)).mean().item())
-        print(f"** {name_result}:", result)
-        print(f"** {name_expected}:", expected)
-        return False
-
-    return True
-
-
-def check_gradients(result_model: torch.nn.Module,
-                    expected_model: torch.nn.Module,
-                    name_result: str,
-                    name_expected: str,
-                    verbose=True) -> bool:
-    result_parameters = dict(result_model.named_parameters())
-    all_correct = True
-    for name, parameter in expected_model.named_parameters():
-        result_grad = result_parameters[name].grad
-        all_correct &= check_equal(result_grad, parameter.grad,
-                                   name_expected=name_expected + ": " + name,
-                                   name_result=name_result + ": " + name,
-                                   verbose=verbose)
-    return all_correct
-
-
-def check_correctness(dace_models: Dict[str, ExperimentInfo],
-                      torch_model: torch.nn.Module,
-                      torch_edge_list_args,
-                      torch_csr_args,
-                      targets: torch.Tensor,
-                      backward: bool) -> bool:
-    torch_model_csr = copy.deepcopy(torch_model)
-    torch_model.train()
-    torch_model_csr.train()
-
-    torch_edge_list_pred = torch_model(*torch_edge_list_args)
-    torch_csr_pred = torch_model_csr(*torch_csr_args)
-    check_equal(torch_csr_pred.detach(), torch_edge_list_pred.detach(),
-                verbose=False)
-
-    def backward_func(pred):
-        loss = criterion(pred, targets)
-        loss.backward()
-
-    if backward:
-        if hasattr(torch_model, 'conv2'):
-            criterion = torch.nn.NLLLoss()
-        else:
-            criterion = lambda pred, targets: torch.sum(pred)
-
-        backward_func(torch_edge_list_pred)
-        backward_func(torch_csr_pred)
-
-        check_gradients(torch_model_csr, torch_model, "CSR", "EdgeList",
-                        verbose=False)
-
-    for name, experiment_info in dace_models.items():
-        print(f"---> Checking correctness for {name}...")
-        model = experiment_info.model
-        args = experiment_info.data.to_input_list()
-        register_replacement_overrides(experiment_info.impl_name,
-                                       experiment_info.gnn_type,
-                                       experiment_info.idx_dtype,
-                                       experiment_info.val_dtype)
-
-        if use_gpu:
-            torch.cuda.nvtx.range_push(name + ' forward correctness')
-        dace_pred = model(*args)
-        if use_gpu:
-            torch.cuda.synchronize()
-            torch.cuda.nvtx.range_pop()
-
-        experiment_info.correct = check_equal(dace_pred,
-                                              torch_edge_list_pred,
-                                              name_result=f"Predictions for DaCe {name}",
-                                              name_expected="Torch predictions")
-        if backward:
-            if use_gpu:
-                torch.cuda.nvtx.range_push(name + ' backward correctness')
-            backward_func(dace_pred)
-            if use_gpu:
-                torch.cuda.synchronize()
-                torch.cuda.nvtx.range_pop()
-            experiment_info.correct_grads = check_gradients(model.model,
-                                                            torch_model,
-                                                            name_result=f"Gradients for DaCe {name}",
-                                                            name_expected="Torch gradients")
-
-    correct_keys = [key for key, value in dace_models.items() if value.correct]
-    incorrect_keys = [key for key, value in dace_models.items() if
-                      not value.correct]
-
-    print(f"\n☆ =================== SUMMARY ================== ☆")
-    if len(correct_keys) > 0:
-        print(f"==== Predictions correct for {', '.join(correct_keys)}"
-              f". ☆ ╰(o＾◡＾o)╯ ☆ ====")
-        print(f"☆ ============================================== ☆")
-    if len(incorrect_keys) > 0:
-        print(f"****** INCORRECT PREDICTIONS FOR {', '.join(incorrect_keys)}"
-              f"! (ノಥ﹏ಥ)ノ彡┻━┻ ******")
-        print(f"****************************************************\n")
-
-    if backward:
-        grads_correct_keys = [key for key, value in dace_models.items() if
-                              value.correct_grads]
-        grads_incorrect_keys = [key for key, value in dace_models.items() if
-                                not value.correct_grads]
-        if len(grads_correct_keys) > 0:
-            print(
-                f"==== Gradients correct for {', '.join(grads_correct_keys)}"
-                f". ☆ ╰(o＾◡＾o)╯ ☆ ====")
-            print(f"☆ ============================================== ☆")
-        if len(grads_incorrect_keys) > 0:
-            print(
-                f"****** INCORRECT GRADIENTS FOR {', '.join(grads_incorrect_keys)}"
-                f"! (ノಥ﹏ಥ)ノ彡┻━┻ ******")
-            print(f"****************************************************\n")
-        return len(incorrect_keys) == 0 and len(grads_incorrect_keys) == 0
-
-    return len(incorrect_keys) == 0
-
-
 def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  torch_model: torch.nn.Module,
                  torch_csr_args: Sequence[torch.Tensor],
@@ -212,6 +72,8 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
     ]
     func_names = ['torch_csr', 'torch_edge_list']
 
+    ### Forward pass.
+    torch_model.eval()
     def run_with_inputs(model, inputs):
         return model(*inputs)
 
@@ -232,11 +94,14 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
         func_names.append(name)
 
     print(f"---> Benchmarking the forward pass...")
-    times = measure_performance(funcs,
-                                func_names=func_names,
-                                warmups=10 if not small else 2,
-                                num_iters=10 if not small else 2,
-                                timing_iters=100 if not small else 3)
+    with torch.no_grad():
+        grad_test = funcs[0]()
+        assert grad_test.grad_fn is None
+        times = measure_performance(funcs,
+                                    func_names=func_names,
+                                    warmups=10 if not small else 2,
+                                    num_iters=10 if not small else 2,
+                                    timing_iters=100 if not small else 3)
     print()
     print(f"\n------ {args.model.upper()} FORWARD RUNTIME [ms] ------")
     print_time_statistics(times, func_names)
@@ -245,7 +110,9 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
     if args.outfile is not None and save_output:
         write_stats_to_file(args, func_names, times, file_path=args.outfile)
 
+    ### Backward pass.
     if backward:
+        torch_model.train()
         assert targets is not None
 
         if hasattr(torch_model, 'conv2'):
@@ -349,7 +216,8 @@ def main():
     # Define models.
     model_args = (data.num_node_features, num_hidden_features, num_classes,
                   normalize)
-    torch_model = model_class(*model_args, bias_init=torch.nn.init.uniform_).to(args.val_dtype).to(device)
+    torch_model = model_class(*model_args, bias_init=torch.nn.init.uniform_).to(
+        args.val_dtype).to(device)
     torch_model.eval()
 
     dace_models = {}
@@ -385,7 +253,7 @@ def main():
                               convert_data=convert_data,
                               gnn_type=args.model,
                               idx_dtype=args.idx_dtype,
-                              val_dtype=args.val_dtype,)
+                              val_dtype=args.val_dtype, )
         dace_models[impl_name] = info
 
     if 'gcn' in args.model:
