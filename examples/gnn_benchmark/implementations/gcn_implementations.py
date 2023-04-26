@@ -15,7 +15,8 @@ from daceml.util.utils import in_desc_with_name
 from examples.gnn_benchmark import csrmm_libnode, sparse
 from examples.gnn_benchmark.implementations import common
 from examples.gnn_benchmark.implementations.common import SparseLayerBase
-from examples.gnn_benchmark.sparse_mm.blocked_ellpack_mm import blocked_ellpack_mm
+from examples.gnn_benchmark.sparse_mm.blocked_ellpack_mm import \
+    blocked_ellpack_mm
 from examples.gnn_benchmark.sparse_mm.coomm import coomm
 
 # Mark this import as used. It's needed to register the backward pass.
@@ -44,9 +45,11 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
     @classmethod
     def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
                 sdfg: SDFG) -> Union[nodes.Node, SDFG]:
-        N, do_bias, dtype, num_entries, num_in_features, num_out_features = cls.get_info(node, state, sdfg)
+        N, do_bias, dtype, num_entries, num_in_features, num_out_features = cls.get_info(
+            node, state, sdfg)
 
-        gcn_op = cls.make_op(N, num_in_features, num_out_features, num_entries, dtype, do_bias)
+        gcn_op = cls.make_op(N, num_in_features, num_out_features, num_entries,
+                             dtype, do_bias)
 
         return program_for_node(gcn_op, sdfg, state, node)
 
@@ -72,7 +75,8 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="semester_thesis")
 class GCNConvSemesterThesis(GCNConvBase):
-    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CsrGraph.from_pyg_data
+    convert_data: Callable[[
+        torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CsrGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
         'rowptrs': common.SpecialInputType.IDX_DTYPE,
@@ -81,7 +85,8 @@ class GCNConvSemesterThesis(GCNConvBase):
     }
 
     @staticmethod
-    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):
         def gcn_op(node_features, rowptrs, columns, edge_vals,
                    linDOTweight, output):
@@ -119,7 +124,8 @@ class GCNConvSemesterThesis(GCNConvBase):
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csr")
 class GCNConvCSR(GCNConvBase):
-    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CsrGraph.from_pyg_data
+    convert_data: Callable[[
+        torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CsrGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
         'rowptrs': common.SpecialInputType.IDX_DTYPE,
@@ -128,7 +134,8 @@ class GCNConvCSR(GCNConvBase):
     }
 
     @staticmethod
-    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):
         if do_bias:
             def gcn_op(node_features, rowptrs, columns, edge_vals,
@@ -172,9 +179,70 @@ class GCNConvCSR(GCNConvBase):
         return gcn_op
 
 
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
+                   name="csr_reorder")
+class GCNConvCSRReordered(GCNConvBase):
+    convert_data: Callable[[
+        torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CsrGraph.from_pyg_data
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': common.SpecialInputType.VAL_DTYPE,
+        'rowptrs': common.SpecialInputType.IDX_DTYPE,
+        'columns': common.SpecialInputType.IDX_DTYPE,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
+    }
+
+    @staticmethod
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
+                do_bias: bool):
+        if do_bias:
+            def gcn_op(node_features, rowptrs, columns, edge_vals,
+                       linDOTweight, bias, output):
+                """
+                node_features: input features, N x M
+                rowptrs: row pointers (CSR format), N+1
+                columns: col, num_entries
+                edge_vals: values, num_entries
+                linDOTweight: F x M
+                output: N x F
+
+                Compute X' = A.t @ X @ W.t + b
+                """
+
+                aggregated_features = dace.define_local((N, num_in_features),
+                                                        dtype=dtype)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
+                                    aggregated_features, beta=1.0, transA=True)
+                output[:] = np.einsum('ij,kj->ik', aggregated_features,
+                                      linDOTweight)
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] += bias[j]
+
+        else:
+            def gcn_op(node_features, rowptrs, columns, edge_vals,
+                       linDOTweight, output):
+                """
+                node_features: input features, N x M
+                rowptrs: row pointers (CSR format), N+1
+                columns: col, num_entries
+                edge_vals: values, num_entries
+                linDOTweight: F x M
+                output: N x F
+                """
+                aggregated_features = dace.define_local((N, num_in_features),
+                                                        dtype=dtype)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
+                                    aggregated_features, beta=1.0, transA=True)
+                output[:] = np.einsum('ij,kj->ik', aggregated_features,
+                                      linDOTweight)
+
+        return gcn_op
+
+
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csc")
 class GCNConvCSC(GCNConvBase):
-    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CscGraph.from_pyg_data
+    convert_data: Callable[[
+        torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CscGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
         'colptrs': common.SpecialInputType.IDX_DTYPE,
@@ -183,7 +251,8 @@ class GCNConvCSC(GCNConvBase):
     }
 
     @staticmethod
-    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):
         def gcn_op(node_features, colptrs, rows, edge_vals,
                    linDOTweight, output):
@@ -217,7 +286,8 @@ class GCNConvCSC(GCNConvBase):
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="coo")
 class GCNConvCOO(GCNConvBase):
-    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CooGraph.from_pyg_data
+    convert_data: Callable[[
+        torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CooGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
         'rows': common.SpecialInputType.IDX_DTYPE,
@@ -226,7 +296,8 @@ class GCNConvCOO(GCNConvBase):
     }
 
     @staticmethod
-    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):
         if do_bias:
             def gcn_op(node_features, rows, columns, edge_vals,
@@ -240,10 +311,12 @@ class GCNConvCOO(GCNConvBase):
                 output: N x F
                 """
                 features = dace.define_local((N, num_out_features), dtype=dtype)
-                features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
+                features[:] = np.einsum('ij,kj->ik', node_features,
+                                        linDOTweight)
                 for i, j in dace.map[0:N, 0:num_out_features]:
                     output[i, j] = bias[j]
-                coomm(rows, columns, edge_vals, features, output, beta=1.0, transA=True)
+                coomm(rows, columns, edge_vals, features, output, beta=1.0,
+                      transA=True)
         else:
             def gcn_op(node_features, rows, columns, edge_vals,
                        linDOTweight, output):
@@ -256,7 +329,8 @@ class GCNConvCOO(GCNConvBase):
                 output: N x F
                 """
                 features = dace.define_local((N, num_out_features), dtype=dtype)
-                features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
+                features[:] = np.einsum('ij,kj->ik', node_features,
+                                        linDOTweight)
                 coomm(rows, columns, edge_vals, features, output, transA=True)
         return gcn_op
 
@@ -265,7 +339,8 @@ class GCNConvCOO(GCNConvBase):
                    name="ellpack_t")
 class GCNConvEllpackTransposed(GCNConvBase):
     convert_data: Callable[
-        [torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackTransposedGraph.from_pyg_data
+        [
+            torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackTransposedGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
         'rows': common.SpecialInputType.IDX_DTYPE,
@@ -273,7 +348,8 @@ class GCNConvEllpackTransposed(GCNConvBase):
     }
 
     @staticmethod
-    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):
         # num_entries is the maximal number of values in a column.
         def gcn_op(node_features, rows, edge_vals,
@@ -290,7 +366,8 @@ class GCNConvEllpackTransposed(GCNConvBase):
 
             output[:] = 0
 
-            blocked_ellpack_mm(A_ellcolind=rows, A_ellvalues=edge_vals, B=features, C=output,
+            blocked_ellpack_mm(A_ellcolind=rows, A_ellvalues=edge_vals,
+                               B=features, C=output,
                                beta=0.0, transA=False)
 
         if do_bias:
@@ -308,7 +385,8 @@ class GCNConvEllpackTransposed(GCNConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="ellpack_pure")
 class GCNConvEllpack(GCNConvBase):
-    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackGraph.from_pyg_data
+    convert_data: Callable[[
+        torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
         'columns': common.SpecialInputType.IDX_DTYPE,
@@ -316,7 +394,8 @@ class GCNConvEllpack(GCNConvBase):
     }
 
     @staticmethod
-    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):
         # num_entries is the maximal number of values in a row.
         def gcn_op(node_features, columns, edge_vals,
@@ -355,7 +434,8 @@ class GCNConvEllpack(GCNConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="ellpack")
 class GCNConvEllpack(GCNConvBase):
-    convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackGraph.from_pyg_data
+    convert_data: Callable[[
+        torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
         'columns': common.SpecialInputType.IDX_DTYPE,
@@ -366,14 +446,16 @@ class GCNConvEllpack(GCNConvBase):
     @classmethod
     def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
                 sdfg: SDFG) -> Union[nodes.Node, SDFG]:
-        N, do_bias, dtype, max_num_blocks_in_row, num_in_features, num_out_features = cls.get_info(node, state, sdfg)
+        N, do_bias, dtype, max_num_blocks_in_row, num_in_features, num_out_features = cls.get_info(
+            node, state, sdfg)
 
         col_desc = in_desc_with_name(node, state, sdfg, "columns")
         num_column_rows = col_desc.shape[1]
         values_desc = in_desc_with_name(node, state, sdfg, "edge_vals")
         num_values_rows = values_desc.shape[1]
         block_size = num_values_rows // num_column_rows
-        gcn_op = cls.make_op(N=N, num_in_features=num_in_features, num_out_features=num_out_features,
+        gcn_op = cls.make_op(N=N, num_in_features=num_in_features,
+                             num_out_features=num_out_features,
                              dtype=dtype, do_bias=do_bias,
                              block_size=block_size)
 
@@ -395,7 +477,8 @@ class GCNConvEllpack(GCNConvBase):
             features = dace.define_local((N, num_out_features), dtype=dtype)
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
 
-            blocked_ellpack_mm(A_ellcolind=columns, A_ellvalues=edge_vals, B=features, C=output,
+            blocked_ellpack_mm(A_ellcolind=columns, A_ellvalues=edge_vals,
+                               B=features, C=output,
                                beta=0.0, transA=True)
 
         if do_bias:

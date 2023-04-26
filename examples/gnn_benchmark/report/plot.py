@@ -7,6 +7,7 @@ from matplotlib import pyplot as plt
 DATA_FOLDER = Path(__file__).parent / 'data'
 PLOT_FOLDER = Path(__file__).parent / 'plots'
 
+
 def get_colors(names: pd.Series):
     reds = ['indianred', 'lightcoral', 'darkred', 'red']
     greens = ['lightgreen', 'mediumseagreen', 'mediumaquamarine', 'darkgreen']
@@ -75,8 +76,9 @@ def make_plot(full_df, name, label_map=None, bwd_df=None):
 
     plt.tight_layout()
     # put today's date in the filename
-    plt.savefig(PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {name}.pdf',
-                bbox_inches='tight')
+    plt.savefig(
+        PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {name}.pdf',
+        bbox_inches='tight')
     plt.show()
 
 
@@ -123,22 +125,25 @@ def make_performance_plot(full_df, name):
 
 
 def read_many_dfs(filenames, name_to_replace, backward: bool = True,
-                  names=None):
+                  names=None, name_fns=None):
     dfs = []
     bwd_dfs = []
     names = names or filenames
+    name_fns = name_fns or [None] * len(filenames)
     assert len(names) == len(filenames)
-    regex = re.compile(name_to_replace)
-    for filename, name in zip(filenames, names):
+    assert len(name_fns) == len(filenames)
+    for filename, name, name_fn in zip(filenames, names, name_fns):
         df_temp = pd.read_csv(DATA_FOLDER / filename)
         dace_rows = df_temp['Name'].str.contains(name_to_replace)
-        df_temp['Name'][dace_rows] = name
+        df_temp['Name'][dace_rows] = df_temp['Name'][dace_rows].apply(
+            name_fn) if name_fn else name
         dfs.append(df_temp)
         if backward:
             bwd_path = DATA_FOLDER / filename.replace('.csv', '-bwd.csv')
             df_temp = pd.read_csv(bwd_path)
             dace_rows = df_temp['Name'].str.contains(name_to_replace)
-            df_temp.loc[dace_rows, 'Name'] = name
+            df_temp.loc[dace_rows, 'Name'] = df_temp['Name'][dace_rows].apply(
+                name_fn) if name_fn else name
             bwd_dfs.append(df_temp)
 
     return pd.concat(dfs), pd.concat(bwd_dfs)
@@ -152,25 +157,33 @@ def main():
     # plot_backward("data/24-04-gcn-reduce-gpuauto-simplify", model='GCN')
     # plot_backward("data/24-04-gcn-single-reduce-gpuauto-simplify", model='GCN Single layer')
 
-    coo_df, coo_bwd_df = read_many_dfs(filenames=['25-04-gcn-coo-cora.csv',
-                                                  '25-04-gcn-coo-cora-single-stream.csv'],
-                                       name_to_replace='dace_autoopt_persistent_mem_coo',
-                                       names=['DaCe COO many streams',
-                                              'DaCe COO single stream'],
-                                       backward=True)
+    df, bwd_df = read_many_dfs(
+        filenames=['26-04-gcn-csr-coo-cora-single-stream.csv',
+                   '26-04-gcn-csr-coo-cora-many-streams.csv'],
+        name_fns=[lambda s: s + "_single_stream",
+                  lambda s: s + "_many_streams"],
+        name_to_replace='dace_.*')
+    make_plot(df, f"GCN Backward + forward pass, Cora, V100", bwd_df=bwd_df)
 
-    make_plot(coo_df, f"GCN COO Backward + forward pass", bwd_df=coo_bwd_df)
-
-    csr_df, csr_bwd_df = read_many_dfs(filenames=['11-04-gcn-csr-cora-no-input-grad.csv',
-                                                  '26-04-gcn-csr-cora-single-stream.csv'],
-                                       name_to_replace='dace_autoopt_.*csr',
-                                       names=['DaCe CSR many streams',
-                                              'DaCe CSR single stream'])
-
-    make_plot(csr_df, f"GCN CSR Backward + forward pass", bwd_df=csr_bwd_df)
-
-    make_plot(pd.concat([csr_df, coo_df]), f"GCN bwd + fwd pass, Cora, V100",
-              bwd_df=pd.concat([csr_bwd_df, coo_bwd_df]))
+    # coo_df, coo_bwd_df = read_many_dfs(filenames=['25-04-gcn-coo-cora.csv',
+    #                                               '25-04-gcn-coo-cora-single-stream.csv'],
+    #                                    name_to_replace='dace_autoopt_persistent_mem_coo',
+    #                                    names=['DaCe COO many streams',
+    #                                           'DaCe COO single stream'],
+    #                                    backward=True)
+    #
+    # make_plot(coo_df, f"GCN COO Backward + forward pass", bwd_df=coo_bwd_df)
+    #
+    # csr_df, csr_bwd_df = read_many_dfs(filenames=['11-04-gcn-csr-cora-no-input-grad.csv',
+    #                                               '26-04-gcn-csr-cora-single-stream.csv'],
+    #                                    name_to_replace='dace_autoopt_.*csr',
+    #                                    names=['DaCe CSR many streams',
+    #                                           'DaCe CSR single stream'])
+    #
+    # make_plot(csr_df, f"GCN CSR Backward + forward pass", bwd_df=csr_bwd_df)
+    #
+    # make_plot(pd.concat([csr_df, coo_df]), f"GCN bwd + fwd pass, Cora, V100",
+    #           bwd_df=pd.concat([csr_bwd_df, coo_bwd_df]))
 
     # dfs = []
     # for path, name in zip(['data/25-04-gcn-single-coo-cora.csv', 'data/25-04-gcn-single-coo-cora-single-stream.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
