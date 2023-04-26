@@ -115,17 +115,80 @@ def main():
     # plot_block_sizes(tag)
     # plot_adapt_matmul_order()
 
-    plot_backward("11-04-gcn-csr-cora-no-input-grad", model='GCN')
-    plot_backward("11-04-gcn-single-csr-cora-no-input-grad", model='GCN Single Layer')
+    # plot_backward("data/24-04-gcn-reduce-gpuauto-simplify", model='GCN')
+    # plot_backward("data/24-04-gcn-single-reduce-gpuauto-simplify", model='GCN Single layer')
+
+    dfs = []
+    for path, name in zip(['data/25-04-gcn-coo-cora.csv', 'data/25-04-gcn-coo-cora-single-stream.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
+        df_temp = pd.read_csv(path)
+        dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_coo'
+        df_temp['Name'][dace_rows] = name
+        dfs.append(df_temp)
+    df = pd.concat(dfs)
+
+    make_plot(df, "GCN COO Forward pass")
+
+    dfs = []
+    for path, name in zip(['data/25-04-gcn-coo-cora-bwd.csv', 'data/25-04-gcn-coo-cora-single-stream-bwd.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
+        df_temp = pd.read_csv(path)
+        dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_coo'
+        df_temp['Name'][dace_rows] = name
+        dfs.append(df_temp)
+    bwd_df = pd.concat(dfs)
+    make_plot(df, f"GCN COO Backward + forward pass", bwd_df=bwd_df)
 
 
-def plot_backward(tag, model):
+    dfs = []
+    for path, name in zip(['data/25-04-gcn-csr-cora.csv', 'data/25-04-gcn-csr-cora-single-stream.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
+        df_temp = pd.read_csv(path)
+        dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_csr'
+        df_temp['Name'][dace_rows] = name
+        dfs.append(df_temp)
+    df = pd.concat(dfs)
+
+    make_plot(df, "GCN CSR Forward pass")
+
+    dfs = []
+    for path, name in zip(['data/25-04-gcn-csr-cora-bwd.csv', 'data/25-04-gcn-csr-cora-single-stream-bwd.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
+        df_temp = pd.read_csv(path)
+        dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_csr'
+        df_temp['Name'][dace_rows] = name
+        dfs.append(df_temp)
+    bwd_df = pd.concat(dfs)
+    make_plot(df, f"GCN CSR Backward + forward pass", bwd_df=bwd_df)
+
+
+    # dfs = []
+    # for path, name in zip(['data/25-04-gcn-single-coo-cora.csv', 'data/25-04-gcn-single-coo-cora-single-stream.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
+    #     df_temp = pd.read_csv(path)
+    #     dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_coo'
+    #     df_temp['Name'][dace_rows] = name
+    #     dfs.append(df_temp)
+    # df = pd.concat(dfs)
+    #
+    # make_plot(df, "GCN Single Layer COO Forward pass")
+    #
+    # dfs = []
+    # for path, name in zip(['data/25-04-gcn-single-coo-cora-bwd.csv', 'data/25-04-gcn-single-coo-cora-single-stream-bwd.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
+    #     df_temp = pd.read_csv(path)
+    #     dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_coo'
+    #     df_temp['Name'][dace_rows] = name
+    #     dfs.append(df_temp)
+    # bwd_df = pd.concat(dfs)
+    # make_plot(df, f"GCN Single Layer COO Backward + forward pass", bwd_df=bwd_df)
+
+
+
+
+def plot_backward(tag, model, labels=None):
     df = pd.read_csv(tag + '.csv')
-    labels = {
+    default_labels = {
         'dace_autoopt_persistent_mem_csr': 'DaCe CSR',
         'torch_csr': 'PyG CSR',
         'torch_edge_list': 'PyG edge list',
     }
+    default_labels.update(labels or {})
+    labels = default_labels
     make_plot(df, "Forward pass", labels)
     bwd_df = pd.read_csv(tag + '-bwd.csv')
     make_plot(df, f"{model} Backward + forward pass", labels, bwd_df=bwd_df)
