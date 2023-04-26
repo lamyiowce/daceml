@@ -5,7 +5,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 
 DATA_FOLDER = Path(__file__).parent / 'data'
-
+PLOT_FOLDER = Path(__file__).parent / 'plots'
 
 def get_colors(names: pd.Series):
     reds = ['indianred', 'lightcoral', 'darkred', 'red']
@@ -74,7 +74,9 @@ def make_plot(full_df, name, label_map=None, bwd_df=None):
             ax.bar_label(container, fmt="%.2f")
 
     plt.tight_layout()
-    plt.savefig(f'{name}.pdf', bbox_inches='tight')
+    # put today's date in the filename
+    plt.savefig(PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {name}.pdf',
+                bbox_inches='tight')
     plt.show()
 
 
@@ -116,7 +118,7 @@ def make_performance_plot(full_df, name):
             ax.bar_label(container, fmt="%.2f")
 
     plt.tight_layout()
-    plt.savefig(f'{name}-performance.pdf', bbox_inches='tight')
+    plt.savefig(PLOT_FOLDER / f'{name}-performance.pdf', bbox_inches='tight')
     plt.show()
 
 
