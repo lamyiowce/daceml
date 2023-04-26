@@ -2,7 +2,7 @@ import copy
 import functools
 import re
 import statistics
-from typing import Dict
+from typing import Dict, Tuple
 
 import dace
 import torch
@@ -68,38 +68,58 @@ def create_dace_model(model: torch.nn.Module,
                       threadblock_dynamic: bool,
                       device: torch.device,
                       backward: bool,
-                      gen_code: bool = True) -> dace.DaceModule:
+                      gen_code: bool = True
+                      ) -> Tuple[dace.DaceModule, dace.DaceModule]:
     sdfg_name = f"{model.__class__.__name__}_{gnn_implementation_name}"
-    dace_model = DaceModule(copy.deepcopy(model),
-                            sdfg_name=sdfg_name,
-                            backward=backward,
-                            regenerate_code=gen_code,
-                            inputs_to_skip=['0', '1', '2', '3']).to(device)
+    dace_model_eval = DaceModule(copy.deepcopy(model),
+                                 sdfg_name=sdfg_name + "_eval",
+                                 backward=False,
+                                 regenerate_code=gen_code,
+                                 inputs_to_skip=['0', '1', '2', '3']).to(device)
+    add_hooks(dace_model_eval, backward=False, device=device, do_opt=do_opt,
+              gnn_implementation_name=gnn_implementation_name,
+              persistent_mem=persistent_mem,
+              threadblock_dynamic=threadblock_dynamic)
 
-    dace_model.eval()
+    dace_model_train = None
+    if backward:
+        dace_model_train = DaceModule(copy.deepcopy(model),
+                                      sdfg_name=sdfg_name + "_train",
+                                      backward=True,
+                                      regenerate_code=gen_code,
+                                      inputs_to_skip=['0', '1', '2', '3']).to(
+            device)
+        add_hooks(dace_model_train, backward=True, device=device, do_opt=do_opt,
+                  gnn_implementation_name=gnn_implementation_name,
+                  persistent_mem=persistent_mem,
+                  threadblock_dynamic=threadblock_dynamic)
 
+    return dace_model_eval, dace_model_train
+
+
+def add_hooks(dace_model, backward, device, do_opt, gnn_implementation_name,
+              persistent_mem, threadblock_dynamic):
     if device.type == 'cuda':
         dace_model.append_post_onnx_hook("set_reduce_to_gpuauto_post_onnx",
-                                          lambda model: sdfg_util.set_reduce_to_gpuauto(model.sdfg))
+                                         lambda
+                                             model: sdfg_util.set_reduce_to_gpuauto(
+                                             model.sdfg))
 
         dace_model.append_post_autodiff_hook("set_reduce_to_gpuauto",
-                                              sdfg_util.apply_to_both(
-                                                  sdfg_util.set_reduce_to_gpuauto))
-
-
+                                             sdfg_util.apply_to_both(
+                                                 sdfg_util.set_reduce_to_gpuauto))
     if persistent_mem:
         print("---> Adding persistent memory hook.")
         specialize_mem_onnx(dace_model)
-
     if threadblock_dynamic:
         print("---> Adding threadblock dynamic maps hook.")
         exclude_loops = []
-        if isinstance(model, models.GCN):
+        if isinstance(dace_model.model, models.GCN):
             # Has to be skipped, otherwise the computation results are incorrect.
             exclude_loops = [
                 'daceml_onnx_op_implementations_replacement_implementations_prog_sparse_45_4_46'
             ]
-        elif isinstance(model, models.GAT):
+        elif isinstance(dace_model.model, models.GAT):
             exclude_loops = [
                 # Below two have to be excluded because only one-dimensional
                 # maps are supported in DaCe for dynamic block map schedule
@@ -116,16 +136,12 @@ def create_dace_model(model: torch.nn.Module,
         dace_model.append_post_onnx_hook(
             "apply_threadblock_dynamic_maps",
             make_maps_dynamic_with_excluded_loops)
-
-
-
     set_implementation = functools.partial(
         sdfg_util.set_implementation,
         implementation_name=gnn_implementation_name,
         backward=backward)
     dace_model.prepend_post_onnx_hook("set_implementation",
                                       set_implementation)
-
     if do_opt:
         print("---> Adding auto-opt hook.")
         if backward:
@@ -133,19 +149,20 @@ def create_dace_model(model: torch.nn.Module,
                                                  apply_dace_auto_opt_after_autodiff)
         else:
             dace_model.append_post_onnx_hook("dace_auto_optimize",
-                                         apply_dace_auto_optimize)
-
+                                             apply_dace_auto_optimize)
     fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(
         backward_sdfg, '__tmp3')
     dace_model.append_post_autodiff_hook("Set __tmp3 to register", fn)
 
     def simplify(sdfg: dace.SDFG):
         sdfg.simplify(verbose=True)
-    dace_model.append_post_autodiff_hook("simplify", sdfg_util.apply_to_both(simplify))
-    return dace_model
+
+    dace_model.append_post_autodiff_hook("simplify",
+                                         sdfg_util.apply_to_both(simplify))
 
 
-def register_replacement_overrides(implementation_name, layer_name, idx_dtype, val_dtype):
+def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
+                                   val_dtype):
     impl_class = get_impl_class(layer_name, implementation_name)
     input_spec = impl_class.input_spec
     if idx_dtype not in impl_class.allowed_idx_dtypes:
@@ -153,7 +170,8 @@ def register_replacement_overrides(implementation_name, layer_name, idx_dtype, v
             f"idx_dtype {idx_dtype} not allowed for {layer_name} with {implementation_name}. Allowed: {impl_class.allowed_idx_dtypes}")
     idx_dtype = TORCH_DTYPE_TO_TYPECLASS[idx_dtype]
     val_dtype = TORCH_DTYPE_TO_TYPECLASS[val_dtype]
-    map_dtype = {SpecialInputType.IDX_DTYPE: idx_dtype, SpecialInputType.VAL_DTYPE: val_dtype}
+    map_dtype = {SpecialInputType.IDX_DTYPE: idx_dtype,
+                 SpecialInputType.VAL_DTYPE: val_dtype}
     input_spec = {k: map_dtype.get(v, v) for k, v in input_spec.items()}
     if 'gcn' in layer_name:
         register_replacement('torch_geometric.nn.conv.gcn_conv.GCNConv',

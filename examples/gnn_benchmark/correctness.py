@@ -7,6 +7,7 @@ from examples.gnn_benchmark.util import register_replacement_overrides
 
 USE_GPU = torch.cuda.is_available()
 
+
 def check_equal(result, expected, name_result=None, name_expected=None,
                 verbose=True):
     name_result = name_result or 'result'
@@ -83,7 +84,7 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
 
     for name, experiment_info in dace_models.items():
         print(f"---> Checking correctness for {name}...")
-        model = experiment_info.model
+        model = experiment_info.model_eval
         args = experiment_info.data.to_input_list()
         register_replacement_overrides(experiment_info.impl_name,
                                        experiment_info.gnn_type,
@@ -102,12 +103,18 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
                                               name_result=f"Predictions for DaCe {name}",
                                               name_expected="Torch predictions")
         if backward:
+            model = experiment_info.model_train
+            dace_pred = model(*args)
             if USE_GPU:
                 torch.cuda.nvtx.range_push(name + ' backward correctness')
             backward_func(dace_pred)
             if USE_GPU:
                 torch.cuda.synchronize()
                 torch.cuda.nvtx.range_pop()
+            check_equal(dace_pred,
+                        torch_edge_list_pred,
+                        name_result=f"Predictions for DaCe {name}",
+                        name_expected="Torch predictions")
             experiment_info.correct_grads = check_gradients(model.model,
                                                             torch_model,
                                                             name_result=f"Gradients for DaCe {name}",

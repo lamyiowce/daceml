@@ -6,6 +6,7 @@ import logging
 import pathlib
 from pathlib import Path
 from typing import Sequence, Dict, Optional, Callable
+from collections import OrderedDict
 
 import numpy as np
 import torch
@@ -40,7 +41,8 @@ class ExperimentInfo:
     gnn_type: str
     implementation: ONNXForward
     convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix]
-    model: daceml.torch.DaceModule
+    model_eval: daceml.torch.DaceModule
+    model_train: daceml.torch.DaceModule
     idx_dtype: torch.dtype
     val_dtype: torch.dtype
     correct: Optional[bool] = None
@@ -66,6 +68,8 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
         from examples.gnn_benchmark.performance_measurement import \
             measure_performance_cpu as measure_performance
 
+    experiment_infos = OrderedDict(experiment_infos)
+
     funcs = [
         lambda: torch_model(*torch_csr_args),
         lambda: torch_model(*torch_edge_list_args),
@@ -74,11 +78,12 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
     ### Forward pass.
     torch_model.eval()
+
     def run_with_inputs(model, inputs):
         return model(*inputs)
 
     for experiment_info in experiment_infos.values():
-        model = experiment_info.model
+        model = experiment_info.model_eval
         # TODO: check eval and train modes
         inputs = experiment_info.data.to_input_list()
 
@@ -120,12 +125,19 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
         else:
             criterion = lambda pred, targets: torch.sum(pred)
 
-        def backward_fn(pred_fn):
-            pred = pred_fn()
+        def backward_fn(model, inputs):
+            pred = model(*inputs)
             loss = criterion(pred, targets)
             loss.backward()
 
-        backward_funcs = [functools.partial(backward_fn, f) for f in funcs]
+        backward_funcs = [
+            lambda: backward_fn(torch_model, torch_csr_args),
+            lambda: backward_fn(torch_model, torch_edge_list_args),
+        ]
+        for experiment_info in experiment_infos.values():
+            model = experiment_info.model_train
+            inputs = experiment_info.data.to_input_list()
+            backward_funcs.append(functools.partial(backward_fn, model, inputs))
 
         print(f"---> Benchmarking the BACKWARD pass...")
         times = measure_performance(backward_funcs,
@@ -220,7 +232,7 @@ def main():
         args.val_dtype).to(device)
     torch_model.eval()
 
-    dace_models = {}
+    dace_models = OrderedDict()
     available_implementations = name_to_impl_class[args.model]
     if args.impl == ['none']:
         available_implementations = {}
@@ -239,7 +251,7 @@ def main():
         else:
             convert_data = implementation_class.convert_data
             clean_impl_name = impl_name
-        dace_model = create_dace_model(torch_model,
+        dace_model_eval, dace_model_train = create_dace_model(torch_model,
                                        gnn_implementation_name=clean_impl_name,
                                        threadblock_dynamic=args.threadblock_dynamic,
                                        persistent_mem=args.persistent_mem,
@@ -249,7 +261,8 @@ def main():
                                        backward=args.backward)
         info = ExperimentInfo(impl_name=impl_name,
                               implementation=implementation_class,
-                              model=dace_model,
+                              model_eval=dace_model_eval,
+                              model_train=dace_model_train,
                               convert_data=convert_data,
                               gnn_type=args.model,
                               idx_dtype=args.idx_dtype,
