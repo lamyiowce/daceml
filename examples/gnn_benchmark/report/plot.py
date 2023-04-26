@@ -1,5 +1,10 @@
+import re
+from pathlib import Path
+
 import pandas as pd
 from matplotlib import pyplot as plt
+
+DATA_FOLDER = Path(__file__).parent / 'data'
 
 
 def get_colors(names: pd.Series):
@@ -24,15 +29,13 @@ def make_plot(full_df, name, label_map=None, bwd_df=None):
     df, std_df = prep_df(full_df)
     print(df)
     colors = get_colors(df.columns)
-    # labels = ['DaCeML CSR CuSPARSE', 'PyG CSR', 'PyG adjacency list']
-    # labels = ['DaCeML CSR CuSPARSE nomalloc', 'DaCeML CSR CuSPARSE',  'PyG CSR', 'PyG adjacency list']
-    # labels = ['DaCeML', 'DaCeML + optimizations', 'PyG adjacency list', 'PyG CSR']
     if bwd_df is None:
-        ax = df.plot(figsize=(6, 6), kind='barh', ylabel='Runtime [ms]', xlabel='Hidden size', color=colors,
+        ax = df.plot(figsize=(8, 8), kind='barh', ylabel='Runtime [ms]',
+                     xlabel='Hidden size', color=colors,
                      xerr=std_df, label='Forward')
     else:
         bwd_df, bwd_std_df = prep_df(bwd_df)
-        ax = bwd_df.plot(figsize=(6, 6),
+        ax = bwd_df.plot(figsize=(8, 8),
                          kind='barh',
                          color=colors,
                          xerr=bwd_std_df,
@@ -56,8 +59,12 @@ def make_plot(full_df, name, label_map=None, bwd_df=None):
     ax.set_ylabel("Hidden size")
     plt.title(name.upper())
 
-    label_map = label_map or {}
-    labels = [label_map.get(name, name) for name in df.columns]
+    default_label_map = {
+        'torch_csr': 'Torch CSR',
+        'torch_edge_list': 'Torch Edge List',
+    }
+    default_label_map.update(label_map or {})
+    labels = [default_label_map.get(name, name) for name in df.columns]
     plt.legend(labels, loc='upper left' if name == 'gcn' else 'lower right')
 
     plt.xticks(rotation=0)
@@ -87,14 +94,17 @@ def make_performance_plot(full_df, name):
 
     colors = ['mediumseagreen', 'indianred', 'lightcoral']
 
-    ax = df_flops.plot(figsize=(5, 5), kind='barh', ylabel='Runtime [ms]', xlabel='Hidden size', color=colors)
+    ax = df_flops.plot(figsize=(5, 5), kind='barh', ylabel='Runtime [ms]',
+                       xlabel='Hidden size', color=colors)
     ax.set_axisbelow(True)
     ax.yaxis.grid(color='lightgray', linestyle='--')
     ax.set_xlabel("Performance [TFLOP / s]")
     ax.set_ylabel("Hidden size")
     peak_v100 = 15.7  # Page 5: https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf
-    ax.plot([peak_v100, peak_v100], [-10, 10], color='black', linestyle='--', linewidth=1)
-    ax.text(peak_v100 * 0.95, 1, f'V100 peak: {peak_v100}', rotation=90, verticalalignment='center',
+    ax.plot([peak_v100, peak_v100], [-10, 10], color='black', linestyle='--',
+            linewidth=1)
+    ax.text(peak_v100 * 0.95, 1, f'V100 peak: {peak_v100}', rotation=90,
+            verticalalignment='center',
             horizontalalignment='left', fontsize=12)
     ax.set_xlim(xmax=peak_v100 * 1.1)
     plt.title(name.upper())
@@ -110,6 +120,28 @@ def make_performance_plot(full_df, name):
     plt.show()
 
 
+def read_many_dfs(filenames, name_to_replace, backward: bool = True,
+                  names=None):
+    dfs = []
+    bwd_dfs = []
+    names = names or filenames
+    assert len(names) == len(filenames)
+    regex = re.compile(name_to_replace)
+    for filename, name in zip(filenames, names):
+        df_temp = pd.read_csv(DATA_FOLDER / filename)
+        dace_rows = df_temp['Name'].str.contains(name_to_replace)
+        df_temp['Name'][dace_rows] = name
+        dfs.append(df_temp)
+        if backward:
+            bwd_path = DATA_FOLDER / filename.replace('.csv', '-bwd.csv')
+            df_temp = pd.read_csv(bwd_path)
+            dace_rows = df_temp['Name'].str.contains(name_to_replace)
+            df_temp.loc[dace_rows, 'Name'] = name
+            bwd_dfs.append(df_temp)
+
+    return pd.concat(dfs), pd.concat(bwd_dfs)
+
+
 def main():
     # tag = "11-04-gcn-csr-cora"
     # plot_block_sizes(tag)
@@ -118,45 +150,25 @@ def main():
     # plot_backward("data/24-04-gcn-reduce-gpuauto-simplify", model='GCN')
     # plot_backward("data/24-04-gcn-single-reduce-gpuauto-simplify", model='GCN Single layer')
 
-    dfs = []
-    for path, name in zip(['data/25-04-gcn-coo-cora.csv', 'data/25-04-gcn-coo-cora-single-stream.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
-        df_temp = pd.read_csv(path)
-        dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_coo'
-        df_temp['Name'][dace_rows] = name
-        dfs.append(df_temp)
-    df = pd.concat(dfs)
+    coo_df, coo_bwd_df = read_many_dfs(filenames=['25-04-gcn-coo-cora.csv',
+                                                  '25-04-gcn-coo-cora-single-stream.csv'],
+                                       name_to_replace='dace_autoopt_persistent_mem_coo',
+                                       names=['DaCe COO many streams',
+                                              'DaCe COO single stream'],
+                                       backward=True)
 
-    make_plot(df, "GCN COO Forward pass")
+    make_plot(coo_df, f"GCN COO Backward + forward pass", bwd_df=coo_bwd_df)
 
-    dfs = []
-    for path, name in zip(['data/25-04-gcn-coo-cora-bwd.csv', 'data/25-04-gcn-coo-cora-single-stream-bwd.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
-        df_temp = pd.read_csv(path)
-        dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_coo'
-        df_temp['Name'][dace_rows] = name
-        dfs.append(df_temp)
-    bwd_df = pd.concat(dfs)
-    make_plot(df, f"GCN COO Backward + forward pass", bwd_df=bwd_df)
+    csr_df, csr_bwd_df = read_many_dfs(filenames=['11-04-gcn-csr-cora-no-input-grad.csv',
+                                                  '26-04-gcn-csr-cora-single-stream.csv'],
+                                       name_to_replace='dace_autoopt_.*csr',
+                                       names=['DaCe CSR many streams',
+                                              'DaCe CSR single stream'])
 
+    make_plot(csr_df, f"GCN CSR Backward + forward pass", bwd_df=csr_bwd_df)
 
-    dfs = []
-    for path, name in zip(['data/25-04-gcn-csr-cora.csv', 'data/25-04-gcn-csr-cora-single-stream.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
-        df_temp = pd.read_csv(path)
-        dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_csr'
-        df_temp['Name'][dace_rows] = name
-        dfs.append(df_temp)
-    df = pd.concat(dfs)
-
-    make_plot(df, "GCN CSR Forward pass")
-
-    dfs = []
-    for path, name in zip(['data/25-04-gcn-csr-cora-bwd.csv', 'data/25-04-gcn-csr-cora-single-stream-bwd.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
-        df_temp = pd.read_csv(path)
-        dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_csr'
-        df_temp['Name'][dace_rows] = name
-        dfs.append(df_temp)
-    bwd_df = pd.concat(dfs)
-    make_plot(df, f"GCN CSR Backward + forward pass", bwd_df=bwd_df)
-
+    make_plot(pd.concat([csr_df, coo_df]), f"GCN bwd + fwd pass, Cora, V100",
+              bwd_df=pd.concat([csr_bwd_df, coo_bwd_df]))
 
     # dfs = []
     # for path, name in zip(['data/25-04-gcn-single-coo-cora.csv', 'data/25-04-gcn-single-coo-cora-single-stream.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
@@ -178,8 +190,6 @@ def main():
     # make_plot(df, f"GCN Single Layer COO Backward + forward pass", bwd_df=bwd_df)
 
 
-
-
 def plot_backward(tag, model, labels=None):
     df = pd.read_csv(tag + '.csv')
     default_labels = {
@@ -196,7 +206,8 @@ def plot_backward(tag, model, labels=None):
 
 def plot_adapt_matmul_order():
     dfs = []
-    for name in ['05-05-gcn-csr-cora-64-8-1.csv', '05-05-gcn-csr-adapt-cora-64-8-1.csv']:
+    for name in ['05-05-gcn-csr-cora-64-8-1.csv',
+                 '05-05-gcn-csr-adapt-cora-64-8-1.csv']:
         df_temp = pd.read_csv(name)
         dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_csr'
         df_temp['Name'][dace_rows] = name
@@ -208,7 +219,8 @@ def plot_adapt_matmul_order():
     }
     make_plot(df, "Adapt matmul order vs no adapt (forward)", adapt_labels)
     dfs = []
-    for name in ['05-05-gcn-csr-cora-64-8-1-bwd.csv', '05-05-gcn-csr-adapt-cora-64-8-1-bwd.csv']:
+    for name in ['05-05-gcn-csr-cora-64-8-1-bwd.csv',
+                 '05-05-gcn-csr-adapt-cora-64-8-1-bwd.csv']:
         df_temp = pd.read_csv(name)
         dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_csr'
         df_temp['Name'][dace_rows] = name
@@ -232,7 +244,8 @@ def plot_block_sizes(tag):
         'dace_autoopt_persistent_mem_csr-512-1-1': 'Block size 512,1,1',
         'dace_autoopt_persistent_mem_csr-128-8-1': 'Block size 128,8,1',
     }
-    make_plot(df, "Block size comparison (forward)", label_map=block_size_labels)
+    make_plot(df, "Block size comparison (forward)",
+              label_map=block_size_labels)
     dfs = []
     for sz in ['', '-64-8-1', '-512-1-1', '-128-8-1']:
         df_temp = pd.read_csv(tag + sz + '-bwd.csv')
@@ -240,7 +253,8 @@ def plot_block_sizes(tag):
         df_temp['Name'][dace_rows] = df_temp['Name'][dace_rows] + sz
         dfs.append(df_temp)
     df = pd.concat(dfs)
-    make_plot(df, "Block size comparison (fwd + bwd)", label_map=block_size_labels)
+    make_plot(df, "Block size comparison (fwd + bwd)",
+              label_map=block_size_labels)
 
 
 if __name__ == '__main__':
