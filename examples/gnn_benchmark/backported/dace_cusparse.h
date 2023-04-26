@@ -51,6 +51,8 @@ class CusparseHandle {
 
   void* Buffer(int device, int stream, size_t size) {
     // Lazily allocate and inflate buffers separately for streams as needed.
+    // Assumes the device is set already.
+    // TODO: Check if the device is the same.
     long long const key = ((long long)device<<32) + stream;
     auto f = buffers_.find(key);
     if (f == buffers_.end()) {

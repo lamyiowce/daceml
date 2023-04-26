@@ -42,6 +42,7 @@ class ExperimentInfo:
     convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix]
     model: daceml.torch.DaceModule
     idx_dtype: torch.dtype
+    val_dtype: torch.dtype
     correct: Optional[bool] = None
     correct_grads: Optional[bool] = None
     data: Optional[sparse.GraphMatrix] = None
@@ -54,7 +55,7 @@ def check_equal(result, expected, name_result=None, name_expected=None,
     if torch.allclose(expected, result, atol=1.0e-5):
         if verbose:
             print(
-                f"==== Correct: {name_result}.  ☆ ╰(o＾◡＾o)╯ ☆ ====")
+                f"==== Correct: {name_result}.  ☆ ╰(o＾◡＾o)╯ ☆  ({abs((expected - result)).max().item()}) ====")
     else:
         print(
             f"****** INCORRECT: {name_result}! (ノಥ﹏ಥ)ノ彡┻━┻ ******")
@@ -127,10 +128,11 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
         args = experiment_info.data.to_input_list()
         register_replacement_overrides(experiment_info.impl_name,
                                        experiment_info.gnn_type,
-                                       experiment_info.idx_dtype)
+                                       experiment_info.idx_dtype,
+                                       experiment_info.val_dtype)
 
         if use_gpu:
-            torch.cuda.nvtx.range_push(name + ' correctness')
+            torch.cuda.nvtx.range_push(name + ' forward correctness')
         dace_pred = model(*args)
         if use_gpu:
             torch.cuda.synchronize()
@@ -141,7 +143,12 @@ def check_correctness(dace_models: Dict[str, ExperimentInfo],
                                               name_result=f"Predictions for DaCe {name}",
                                               name_expected="Torch predictions")
         if backward:
+            if use_gpu:
+                torch.cuda.nvtx.range_push(name + ' backward correctness')
             backward_func(dace_pred)
+            if use_gpu:
+                torch.cuda.synchronize()
+                torch.cuda.nvtx.range_pop()
             experiment_info.correct_grads = check_gradients(model.model,
                                                             torch_model,
                                                             name_result=f"Gradients for DaCe {name}",
@@ -304,16 +311,19 @@ def main():
     parser.add_argument('--outfile', type=str, default=None)
     parser.add_argument('--name', type=str, default='dace')
     parser.add_argument('--idx-dtype', type=str, default='int32')
+    parser.add_argument('--val-dtype', type=str, default='float32')
     parser.add_argument('--no-gen-code', action='store_true')
     args = parser.parse_args()
 
     dtype_str_to_torch_type = {
         'float16': torch.float16,
         'float32': torch.float32,
+        'float64': torch.float64,
         'int32': torch.int32,
         'int64': torch.int64
     }
     args.idx_dtype = dtype_str_to_torch_type[args.idx_dtype]
+    args.val_dtype = dtype_str_to_torch_type[args.val_dtype]
 
     model_class = model_dict[args.model]
     num_hidden_features = args.hidden
@@ -322,7 +332,7 @@ def main():
     log = logging.getLogger(__name__)
     log.setLevel(logging.INFO)
 
-    data = get_dataset(args.data, device)
+    data = get_dataset(args.data, device, val_dtype=args.val_dtype)
 
     print("Num node features: ", data.num_node_features)
     num_classes = data.y.max().item() + 1
@@ -334,11 +344,12 @@ def main():
     print("Normalize: ", normalize)
     print("Implementation: ", args.impl)
     print("DaCe indices dtype: ", args.idx_dtype)
+    print("DaCe values dtype: ", args.val_dtype)
 
     # Define models.
     model_args = (data.num_node_features, num_hidden_features, num_classes,
                   normalize)
-    torch_model = model_class(*model_args, bias_init=torch.nn.init.uniform_).to(device)
+    torch_model = model_class(*model_args, bias_init=torch.nn.init.uniform_).to(args.val_dtype).to(device)
     torch_model.eval()
 
     dace_models = {}
@@ -373,7 +384,8 @@ def main():
                               model=dace_model,
                               convert_data=convert_data,
                               gnn_type=args.model,
-                              idx_dtype=torch.int32)
+                              idx_dtype=args.idx_dtype,
+                              val_dtype=args.val_dtype,)
         dace_models[impl_name] = info
 
     if 'gcn' in args.model:

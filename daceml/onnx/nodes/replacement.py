@@ -71,6 +71,8 @@ def make_schema_dict(name, inputs: Mapping[str, dace.typeclass],
             # not 'float32' which is not understood by ONNX.
             if t is dace.float32:
                 t = 'float32'
+            elif t is dace.float64:
+                t = 'float64'
             else:
                 t = typeclass_to_onnx_str(t)
             type_name = f'{name}_T'

@@ -74,10 +74,10 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
 class GCNConvSemesterThesis(GCNConvBase):
     convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CsrGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
-        'node_features': dace.float32,
+        'node_features': common.SpecialInputType.VAL_DTYPE,
         'rowptrs': common.SpecialInputType.IDX_DTYPE,
         'columns': common.SpecialInputType.IDX_DTYPE,
-        'edge_vals': dace.float32,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
     }
 
     @staticmethod
@@ -121,10 +121,10 @@ class GCNConvSemesterThesis(GCNConvBase):
 class GCNConvCSR(GCNConvBase):
     convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CsrGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
-        'node_features': dace.float32,
+        'node_features': common.SpecialInputType.VAL_DTYPE,
         'rowptrs': common.SpecialInputType.IDX_DTYPE,
         'columns': common.SpecialInputType.IDX_DTYPE,
-        'edge_vals': dace.float32,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
     }
 
     @staticmethod
@@ -176,10 +176,10 @@ class GCNConvCSR(GCNConvBase):
 class GCNConvCSC(GCNConvBase):
     convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CscGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
-        'node_features': dace.float32,
+        'node_features': common.SpecialInputType.VAL_DTYPE,
         'colptrs': common.SpecialInputType.IDX_DTYPE,
         'rows': common.SpecialInputType.IDX_DTYPE,
-        'edge_vals': dace.float32,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
     }
 
     @staticmethod
@@ -219,10 +219,10 @@ class GCNConvCSC(GCNConvBase):
 class GCNConvCOO(GCNConvBase):
     convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CooGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
-        'node_features': dace.float32,
+        'node_features': common.SpecialInputType.VAL_DTYPE,
         'rows': common.SpecialInputType.IDX_DTYPE,
         'columns': common.SpecialInputType.IDX_DTYPE,
-        'edge_vals': dace.float32,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
     }
 
     @staticmethod
@@ -267,9 +267,9 @@ class GCNConvEllpackTransposed(GCNConvBase):
     convert_data: Callable[
         [torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackTransposedGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
-        'node_features': dace.float32,
+        'node_features': common.SpecialInputType.VAL_DTYPE,
         'rows': common.SpecialInputType.IDX_DTYPE,
-        'edge_vals': dace.float32,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
     }
 
     @staticmethod
@@ -310,9 +310,9 @@ class GCNConvEllpackTransposed(GCNConvBase):
 class GCNConvEllpack(GCNConvBase):
     convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
-        'node_features': dace.float32,
+        'node_features': common.SpecialInputType.VAL_DTYPE,
         'columns': common.SpecialInputType.IDX_DTYPE,
-        'edge_vals': dace.float32,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
     }
 
     @staticmethod
@@ -357,9 +357,9 @@ class GCNConvEllpack(GCNConvBase):
 class GCNConvEllpack(GCNConvBase):
     convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix] = sparse.EllpackGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
-        'node_features': dace.float32,
+        'node_features': common.SpecialInputType.VAL_DTYPE,
         'columns': common.SpecialInputType.IDX_DTYPE,
-        'edge_vals': dace.float32,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
     }
     allowed_idx_dtypes = [torch.int32]
 

@@ -1,6 +1,6 @@
 import abc
 from enum import Enum
-from typing import Type, Dict
+from typing import Type, Dict, Union
 
 import dace
 import torch
@@ -12,6 +12,7 @@ from examples.gnn_benchmark import sparse
 class SpecialInputType(Enum):
     """ Types of special inputs that can be passed to a dace model. """
     IDX_DTYPE = 1  # Uses dtype specified in experiment info.
+    VAL_DTYPE = 2  # Uses dtype specified in experiment info.
 
 
 class SparseLayerBase(ONNXForward, metaclass=abc.ABCMeta):
@@ -25,7 +26,7 @@ class SparseLayerBase(ONNXForward, metaclass=abc.ABCMeta):
     @staticmethod
     @property
     @abc.abstractmethod
-    def input_spec() -> Dict[str, dace.typeclass]:
+    def input_spec() -> Dict[str, Union[dace.typeclass, SpecialInputType]]:
         raise NotImplementedError
 
     @staticmethod

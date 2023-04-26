@@ -145,25 +145,26 @@ def create_dace_model(model: torch.nn.Module,
     return dace_model
 
 
-def register_replacement_overrides(implementation_name, layer_name, idx_dtype):
+def register_replacement_overrides(implementation_name, layer_name, idx_dtype, val_dtype):
     impl_class = get_impl_class(layer_name, implementation_name)
     input_spec = impl_class.input_spec
     if idx_dtype not in impl_class.allowed_idx_dtypes:
         raise ValueError(
             f"idx_dtype {idx_dtype} not allowed for {layer_name} with {implementation_name}. Allowed: {impl_class.allowed_idx_dtypes}")
     idx_dtype = TORCH_DTYPE_TO_TYPECLASS[idx_dtype]
-    input_spec = {k: idx_dtype if v is SpecialInputType.IDX_DTYPE else v for
-                  k, v in input_spec.items()}
+    val_dtype = TORCH_DTYPE_TO_TYPECLASS[val_dtype]
+    map_dtype = {SpecialInputType.IDX_DTYPE: idx_dtype, SpecialInputType.VAL_DTYPE: val_dtype}
+    input_spec = {k: map_dtype.get(v, v) for k, v in input_spec.items()}
     if 'gcn' in layer_name:
         register_replacement('torch_geometric.nn.conv.gcn_conv.GCNConv',
                              inputs=input_spec,
-                             outputs={'output': dace.float32},
+                             outputs={'output': val_dtype},
                              shape_infer=replacement_entries.shape_infer_GCNConv,
                              shape_fn_from_module=replacement_entries.make_GCNConv_shape_fn)
     elif layer_name == 'gat':
         register_replacement('torch_geometric.nn.conv.gat_conv.GATConv',
                              inputs=input_spec,
-                             outputs={'output': dace.float32},
+                             outputs={'output': val_dtype},
                              shape_infer=replacement_entries.shape_infer_GATConv,
                              shape_fn_from_module=replacement_entries.make_GATConv_shape_fn)
 
