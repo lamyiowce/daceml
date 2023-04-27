@@ -13,7 +13,7 @@ def get_info(name, data, degree):
         name,
         data.x.shape[0],
         data.edge_index.shape[1],
-        data.edge_index.shape[1] / (data.x.shape[0] * data.x.shape[0]),
+        100 * data.edge_index.shape[1] / (data.x.shape[0] * data.x.shape[0]),
         data.x.shape[1],
         data.y.max().item() + 1,
         degree.mean(),
@@ -23,15 +23,16 @@ def get_info(name, data, degree):
 
 
 def print_info(rows):
-    headers = ['Name', 'Num Nodes', 'Num Edges', '% NNZ', 'Num node features', 'Num classes', 'avg degree', 'meidan degree', 'std degree']
+    headers = ['Name', 'Num Nodes', 'Num Edges', '% NNZ', 'Num node features',
+               'Num classes', 'avg degree', 'Median degree', 'Std degree']
     print(tabulate.tabulate(rows,
                             headers=headers,
-                            floatfmt='.4f',
+                            floatfmt='.6f',
                             tablefmt='github'))
 
 
 def visualize_single_dataset(ax, data):
-    dataset, num_node_features, num_classes = get_dataset(data, 'cpu')
+    dataset = get_dataset(data, 'cpu')
     print(dataset)
     degree = compute_degrees(dataset)
     print(degree.max())
@@ -45,11 +46,13 @@ def visualize_single_dataset(ax, data):
     ax.set_ylabel('Count')
     return get_info(data, dataset, degree)
 
+
 @click.command()
 @click.argument('datasets', nargs=-1)
 def visualize_datasets(datasets):
     # Crete a figure with margins
-    fig, axes = plt.subplots(len(datasets) // 2 + len(datasets) % 2, 2, figsize=(10, 10))
+    fig, axes = plt.subplots(len(datasets) // 2 + len(datasets) % 2, 2,
+                             figsize=(10, 10))
     rows = []
     for ax, data in zip(axes.flatten(), datasets):
         rows += [visualize_single_dataset(ax, data)]
