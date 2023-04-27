@@ -152,7 +152,7 @@ def find_backward_implementation(
 
         log.warning(
             f"Set backward_implementation {node.backward_implementation} on {node}, but it could not be"
-            f" applied. Falling back to default selection.")
+            f" applied. Falling back to default selection: {valid_impls[0][1] if valid_impls else None}")
     if valid_impls:
         return valid_impls[0][1]
     else:
