@@ -212,7 +212,7 @@ class GCNConvCSRReordered(GCNConvBase):
                 aggregated_features = dace.define_local((N, num_in_features),
                                                         dtype=dtype)
                 csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
-                                    aggregated_features, beta=1.0, transA=True)
+                                    aggregated_features, beta=0.0, transA=True)
                 output[:] = np.einsum('ij,kj->ik', aggregated_features,
                                       linDOTweight)
                 for i, j in dace.map[0:N, 0:num_out_features]:
@@ -232,7 +232,7 @@ class GCNConvCSRReordered(GCNConvBase):
                 aggregated_features = dace.define_local((N, num_in_features),
                                                         dtype=dtype)
                 csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
-                                    aggregated_features, beta=1.0, transA=True)
+                                    aggregated_features, beta=0.0, transA=True)
                 output[:] = np.einsum('ij,kj->ik', aggregated_features,
                                       linDOTweight)
 
