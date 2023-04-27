@@ -4,6 +4,8 @@ import faulthandler
 import functools
 import logging
 import pathlib
+import socket
+import subprocess
 from pathlib import Path
 from typing import Sequence, Dict, Optional, Callable
 from collections import OrderedDict
@@ -159,6 +161,10 @@ def write_stats_to_file(args, func_names, times, file_path: pathlib.Path):
     add_header = not file_path.exists()
     with open(file_path, 'a') as file:
         if add_header:
+            # Write out some system info.
+            file.write(
+                f"# HOST {socket.gethostname()}, GPU {torch.cuda.get_device_name()}\n")
+
             headers = [
                 'Name', 'Model', 'Size', 'Min', 'Mean',
                 'Median',
@@ -252,13 +258,13 @@ def main():
             convert_data = implementation_class.convert_data
             clean_impl_name = impl_name
         dace_model_eval, dace_model_train = create_dace_model(torch_model,
-                                       gnn_implementation_name=clean_impl_name,
-                                       threadblock_dynamic=args.threadblock_dynamic,
-                                       persistent_mem=args.persistent_mem,
-                                       do_opt=args.opt,
-                                       device=device,
-                                       gen_code=not args.no_gen_code,
-                                       backward=args.backward)
+                                                              gnn_implementation_name=clean_impl_name,
+                                                              threadblock_dynamic=args.threadblock_dynamic,
+                                                              persistent_mem=args.persistent_mem,
+                                                              do_opt=args.opt,
+                                                              device=device,
+                                                              gen_code=not args.no_gen_code,
+                                                              backward=args.backward)
         info = ExperimentInfo(impl_name=impl_name,
                               implementation=implementation_class,
                               model_eval=dace_model_eval,

@@ -133,16 +133,16 @@ def read_many_dfs(filenames, name_to_replace, backward: bool = True,
     assert len(names) == len(filenames)
     assert len(name_fns) == len(filenames)
     for filename, name, name_fn in zip(filenames, names, name_fns):
-        df_temp = pd.read_csv(DATA_FOLDER / filename)
+        df_temp = pd.read_csv(DATA_FOLDER / filename, comment='#')
         dace_rows = df_temp['Name'].str.contains(name_to_replace)
-        df_temp['Name'][dace_rows] = df_temp['Name'][dace_rows].apply(
+        df_temp.loc[dace_rows, 'Name'] = df_temp.loc[dace_rows, 'Name'].apply(
             name_fn) if name_fn else name
         dfs.append(df_temp)
         if backward:
             bwd_path = DATA_FOLDER / filename.replace('.csv', '-bwd.csv')
-            df_temp = pd.read_csv(bwd_path)
+            df_temp = pd.read_csv(bwd_path, comment='#')
             dace_rows = df_temp['Name'].str.contains(name_to_replace)
-            df_temp.loc[dace_rows, 'Name'] = df_temp['Name'][dace_rows].apply(
+            df_temp.loc[dace_rows, 'Name'] = df_temp.loc[dace_rows, 'Name'].apply(
                 name_fn) if name_fn else name
             bwd_dfs.append(df_temp)
 
@@ -163,7 +163,16 @@ def main():
         name_fns=[lambda s: s + "_single_stream",
                   lambda s: s + "_many_streams"],
         name_to_replace='dace_.*')
-    make_plot(df, f"GCN Backward + forward pass, Cora, V100", bwd_df=bwd_df)
+
+    labels = {
+        "dace_autoopt_persistent_mem_coo_single_stream": "DaCe COO single stream",
+        "dace_autoopt_persistent_mem_coo_many_streams": "DaCe COO many streams",
+        "dace_autoopt_persistent_mem_csr_single_stream": "DaCe CSR single stream",
+        "dace_autoopt_persistent_mem_csr_many_streams": "DaCe CSR many streams",
+    }
+
+    make_plot(df, f"GCN Backward + forward pass, Cora, V100", bwd_df=bwd_df,
+              label_map=labels)
 
     # coo_df, coo_bwd_df = read_many_dfs(filenames=['25-04-gcn-coo-cora.csv',
     #                                               '25-04-gcn-coo-cora-single-stream.csv'],
