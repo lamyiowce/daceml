@@ -1,8 +1,7 @@
 import copy
 import functools
-import re
 import statistics
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 import dace
 import torch
@@ -34,14 +33,6 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
 name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
 
 
-def get_impl_class(model: str, impl_name: str):
-    # Parse names like ellpack_t_4 as ellpack_t with block size 4.
-    if 'ellpack' in impl_name:
-        # Use regex to replace _[0-9]+ at the end with ''
-        impl_name = re.sub(r'_\d+$', '', impl_name)
-    return name_to_impl_class[model][impl_name]
-
-
 def stats_as_csv_entry(times, func_names, model, hidden_size):
     """ Print timing statistics.
     :param times: the result of time_funcs.
@@ -63,7 +54,8 @@ def stats_as_csv_entry(times, func_names, model, hidden_size):
 
 
 def create_dace_model(model: torch.nn.Module,
-                      gnn_implementation_name: str,
+                      implementation_name: str,
+                      backward_implementation_name: str,
                       do_opt: bool,
                       persistent_mem: bool,
                       threadblock_dynamic: bool,
@@ -71,14 +63,19 @@ def create_dace_model(model: torch.nn.Module,
                       backward: bool,
                       gen_code: bool = True
                       ) -> Tuple[dace.DaceModule, dace.DaceModule]:
-    sdfg_name = f"{model.__class__.__name__}_{gnn_implementation_name}"
+    sdfg_name = f"{model.__class__.__name__}_{implementation_name}"
+    if (implementation_name != backward_implementation_name
+            and backward_implementation_name is not None):
+        sdfg_name += f"_{backward_implementation_name}"
+
     dace_model_eval = DaceModule(copy.deepcopy(model),
                                  sdfg_name=sdfg_name + "_eval",
                                  backward=False,
                                  regenerate_code=gen_code,
                                  inputs_to_skip=['0', '1', '2', '3']).to(device)
     add_hooks(dace_model_eval, backward=False, device=device, do_opt=do_opt,
-              gnn_implementation_name=gnn_implementation_name,
+              implementation_name=implementation_name,
+              backward_implementation_name=backward_implementation_name,
               persistent_mem=persistent_mem,
               threadblock_dynamic=threadblock_dynamic)
 
@@ -91,15 +88,18 @@ def create_dace_model(model: torch.nn.Module,
                                       inputs_to_skip=['0', '1', '2', '3']).to(
             device)
         add_hooks(dace_model_train, backward=True, device=device, do_opt=do_opt,
-                  gnn_implementation_name=gnn_implementation_name,
+                  implementation_name=implementation_name,
+                  backward_implementation_name=backward_implementation_name,
                   persistent_mem=persistent_mem,
                   threadblock_dynamic=threadblock_dynamic)
 
     return dace_model_eval, dace_model_train
 
 
-def add_hooks(dace_model, backward, device, do_opt, gnn_implementation_name,
-              persistent_mem, threadblock_dynamic):
+def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
+              do_opt: bool, implementation_name: str,
+              backward_implementation_name: Optional[str],
+              persistent_mem: bool, threadblock_dynamic: bool):
     if device.type == 'cuda':
         dace_model.append_post_onnx_hook("set_reduce_to_gpuauto_post_onnx",
                                          lambda
@@ -139,7 +139,8 @@ def add_hooks(dace_model, backward, device, do_opt, gnn_implementation_name,
             make_maps_dynamic_with_excluded_loops)
     set_implementation = functools.partial(
         sdfg_util.set_implementation,
-        implementation_name=gnn_implementation_name,
+        implementation_name=implementation_name,
+        backward_implementation_name=backward_implementation_name,
         backward=backward)
     dace_model.prepend_post_onnx_hook("set_implementation",
                                       set_implementation)
@@ -164,7 +165,7 @@ def add_hooks(dace_model, backward, device, do_opt, gnn_implementation_name,
 
 def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
                                    val_dtype):
-    impl_class = get_impl_class(layer_name, implementation_name)
+    impl_class = name_to_impl_class[layer_name][implementation_name]
     input_spec = impl_class.input_spec
     if idx_dtype not in impl_class.allowed_idx_dtypes:
         raise ValueError(

@@ -1,5 +1,5 @@
 import logging
-from typing import Callable
+from typing import Callable, Optional
 
 import dace
 import torch
@@ -88,13 +88,14 @@ def make_maps_dynamic(module, exclude_loops=None):
 
 def set_implementation(module: daceml.torch.module.DaceModule,
                        implementation_name: str,
+                       backward_implementation_name: Optional[str] = None,
                        backward: bool = False):
     sdfg = module.sdfg
     for node, _ in sdfg.all_nodes_recursive():
         if isinstance(node,
                       dace.sdfg.nodes.LibraryNode) and implementation_name in node.implementations:
             if backward:
-                node.backward_implementation = implementation_name
+                node.backward_implementation = backward_implementation_name
             node.implementation = implementation_name
 
 

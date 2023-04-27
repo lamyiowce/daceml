@@ -24,7 +24,7 @@ from examples.gnn_benchmark.correctness import check_correctness
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
 from examples.gnn_benchmark.util import stats_as_csv_entry, create_dace_model, \
-    make_torch_args, name_to_impl_class, get_impl_class
+    make_torch_args, name_to_impl_class
 
 faulthandler.enable()
 donnx.default_implementation = "pure"
@@ -40,8 +40,8 @@ device = torch.device('cuda' if use_gpu else 'cpu')
 @dataclasses.dataclass
 class ExperimentInfo:
     impl_name: str
+    bwd_impl_name: str
     gnn_type: str
-    implementation: ONNXForward
     convert_data: Callable[[torch_geometric.data.Data], sparse.GraphMatrix]
     model_eval: daceml.torch.DaceModule
     model_train: daceml.torch.DaceModule
@@ -176,6 +176,21 @@ def write_stats_to_file(args, func_names, times, file_path: pathlib.Path):
                                args.hidden))
 
 
+def parse_impl_spec(impl_spec: str):
+    """We accept impl names of the form
+    'impl_name:impl_arg1:impl_arg2-bwd_impl_name:bwd_impl_arg1...'
+    where the bwd_impl_name and bwd_impl_args are optional. If no bwd_impl_name
+    is specified, the forward impl is used for the backward pass.
+    """
+    if '-' in impl_spec:
+        impl_spec, bwd_spec = impl_spec.split('-')
+    else:
+        bwd_spec = impl_spec
+    impl_name, *impl_args = impl_spec.split(':')
+    bwd_impl_name, *bwd_impl_args = bwd_spec.split(':')
+    return impl_name, impl_args, bwd_impl_name, bwd_impl_args
+
+
 def main():
     model_dict = {'gcn': models.GCN, 'linear': models.LinearModel,
                   'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer}
@@ -239,26 +254,25 @@ def main():
     torch_model.eval()
 
     dace_models = OrderedDict()
-    available_implementations = name_to_impl_class[args.model]
     if args.impl == ['none']:
-        available_implementations = {}
-    elif args.impl != ['all']:
-        available_implementations = {}
-        for impl in args.impl:
-            available_implementations[impl] = get_impl_class(args.model, impl)
+        args.impl = []
+    elif args.impl == ['all']:
+        args.impl = name_to_impl_class[args.model].keys()
 
-    for impl_name, implementation_class in available_implementations.items():
+    for impl_spec in args.impl:
+        impl_name, impl_args, bwd_impl_name, bwd_impl_args = parse_impl_spec(
+            impl_spec)
+        implementation_class = name_to_impl_class[args.model][impl_name]
         if 'ellpack' in impl_name:
-            block_size = impl_name.split('_')[-1]
-            clean_impl_name = impl_name.replace(f'_{block_size}', '')
+            block_size = impl_args[0]
             convert_data = functools.partial(
                 implementation_class.convert_data,
                 block_size=int(block_size))
         else:
             convert_data = implementation_class.convert_data
-            clean_impl_name = impl_name
         dace_model_eval, dace_model_train = create_dace_model(torch_model,
-                                                              gnn_implementation_name=clean_impl_name,
+                                                              implementation_name=impl_name,
+                                                              backward_implementation_name=bwd_impl_name,
                                                               threadblock_dynamic=args.threadblock_dynamic,
                                                               persistent_mem=args.persistent_mem,
                                                               do_opt=args.opt,
@@ -266,7 +280,7 @@ def main():
                                                               gen_code=not args.no_gen_code,
                                                               backward=args.backward)
         info = ExperimentInfo(impl_name=impl_name,
-                              implementation=implementation_class,
+                              bwd_impl_name=bwd_impl_name,
                               model_eval=dace_model_eval,
                               model_train=dace_model_train,
                               convert_data=convert_data,
