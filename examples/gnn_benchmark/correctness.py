@@ -64,10 +64,10 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
     torch_edge_list_pred = torch_model(*torch_edge_list_args)
     torch_csr_pred = torch_model_csr(*torch_csr_args)
     check_equal(torch_csr_pred.detach(), torch_edge_list_pred.detach(),
-                verbose=False)
+                verbose=False, name_result='Torch CSR', name_expected='Torch Edge List')
 
     def backward_func(pred):
-        loss = criterion(pred, targets)
+        loss = criterion(pred, targets.squeeze())
         loss.backward()
 
     if backward:
