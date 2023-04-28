@@ -93,10 +93,10 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
         name = "dace"
         if args.threadblock_dynamic:
             name += "_tb-dynamic"
-        if args.opt:
-            name += "_autoopt"
-        if args.persistent_mem:
-            name += "_persistent_mem"
+        if args.no_opt:
+            name += "_no_autoopt"
+        if args.no_persistent_mem:
+            name += "_no_persistent_mem"
         name += f"_{experiment_info.impl_name}"
         func_names.append(name)
 
@@ -202,8 +202,8 @@ def main():
                         required=True)
     parser.add_argument('--impl', type=str, nargs='+', required=True)
     parser.add_argument('--normalize', action='store_true')
-    parser.add_argument('--persistent-mem', action='store_true')
-    parser.add_argument('--opt', action='store_true')
+    parser.add_argument('--no-persistent-mem', action='store_true')
+    parser.add_argument('--no-opt', action='store_true')
     parser.add_argument('--threadblock-dynamic', action='store_true')
     parser.add_argument('--backward', action='store_true')
     parser.add_argument('--model', choices=model_dict.keys())
@@ -274,8 +274,8 @@ def main():
                                                               implementation_name=impl_name,
                                                               backward_implementation_name=bwd_impl_name,
                                                               threadblock_dynamic=args.threadblock_dynamic,
-                                                              persistent_mem=args.persistent_mem,
-                                                              do_opt=args.opt,
+                                                              persistent_mem=not args.no_persistent_mem,
+                                                              do_opt=not args.no_opt,
                                                               device=device,
                                                               gen_code=not args.no_gen_code,
                                                               backward=args.backward)
