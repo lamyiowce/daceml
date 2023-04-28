@@ -21,10 +21,12 @@ rm -rf ./.dacecache
 
 do_test=echo
 
+export DACE_compiler_cuda_max_concurrent_streams=-1
 outfile=./out-$(hostname -s)-$(date +%d.%m.%H.%M)-$SLURM_JOB_ID.csv
 model=gcn
 flags="--persistent-mem --opt"
 for dataset in cora ogbn-arxiv flickr reddit pubmed; do
+  echo "Running dataset " $dataset
   for format in csr coo csr_reorder; do
     echo "Running format " $format
     for hidden in 8 32 128 512; do

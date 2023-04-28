@@ -56,15 +56,18 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
                       torch_edge_list_args,
                       torch_csr_args,
                       targets: torch.Tensor,
-                      backward: bool) -> bool:
-    torch_model_csr = copy.deepcopy(torch_model)
-    torch_model.train()
-    torch_model_csr.train()
+                      backward: bool,
+                      skip_torch: bool) -> bool:
+    if not skip_torch:
+        torch_model_csr = copy.deepcopy(torch_model)
+        torch_model.train()
+        torch_model_csr.train()
 
-    torch_edge_list_pred = torch_model(*torch_edge_list_args)
-    torch_csr_pred = torch_model_csr(*torch_csr_args)
-    check_equal(torch_csr_pred.detach(), torch_edge_list_pred.detach(),
-                verbose=False, name_result='Torch CSR', name_expected='Torch Edge List')
+        torch_edge_list_pred = torch_model(*torch_edge_list_args)
+        torch_csr_pred = torch_model_csr(*torch_csr_args)
+        check_equal(torch_csr_pred.detach(), torch_edge_list_pred.detach(),
+                    verbose=False, name_result='Torch CSR',
+                    name_expected='Torch Edge List')
 
     def backward_func(pred):
         loss = criterion(pred, targets.squeeze())
@@ -76,11 +79,12 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
         else:
             criterion = lambda pred, targets: torch.sum(pred)
 
-        backward_func(torch_edge_list_pred)
-        backward_func(torch_csr_pred)
+        if not skip_torch:
+            backward_func(torch_edge_list_pred)
+            backward_func(torch_csr_pred)
 
-        check_gradients(torch_model_csr, torch_model, "CSR", "EdgeList",
-                        verbose=False)
+            check_gradients(torch_model_csr, torch_model, "CSR", "EdgeList",
+                            verbose=False)
 
     for name, experiment_info in dace_models.items():
         print(f"---> Checking correctness for {name}...")
@@ -98,10 +102,11 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
             torch.cuda.synchronize()
             torch.cuda.nvtx.range_pop()
 
-        experiment_info.correct = check_equal(dace_pred,
-                                              torch_edge_list_pred,
-                                              name_result=f"Predictions for DaCe {name}",
-                                              name_expected="Torch predictions")
+        if not skip_torch:
+            experiment_info.correct = check_equal(dace_pred,
+                                                  torch_edge_list_pred,
+                                                  name_result=f"Predictions for DaCe {name}",
+                                                  name_expected="Torch predictions")
         if backward:
             model = experiment_info.model_train
             dace_pred = model(*args)
@@ -111,18 +116,20 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
             if USE_GPU:
                 torch.cuda.synchronize()
                 torch.cuda.nvtx.range_pop()
-            check_equal(dace_pred,
-                        torch_edge_list_pred,
-                        name_result=f"Predictions for DaCe {name}",
-                        name_expected="Torch predictions")
-            experiment_info.correct_grads = check_gradients(model.model,
-                                                            torch_model,
-                                                            name_result=f"Gradients for DaCe {name}",
-                                                            name_expected="Torch gradients")
+
+            if not skip_torch:
+                check_equal(dace_pred,
+                            torch_edge_list_pred,
+                            name_result=f"Predictions for DaCe {name}",
+                            name_expected="Torch predictions")
+                experiment_info.correct_grads = check_gradients(model.model,
+                                                                torch_model,
+                                                                name_result=f"Gradients for DaCe {name}",
+                                                                name_expected="Torch gradients")
 
     correct_keys = [key for key, value in dace_models.items() if value.correct]
     incorrect_keys = [key for key, value in dace_models.items() if
-                      not value.correct]
+                      value.correct == False]
 
     print(f"\n☆ =================== SUMMARY ================== ☆")
     if len(correct_keys) > 0:
@@ -138,7 +145,7 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
         grads_correct_keys = [key for key, value in dace_models.items() if
                               value.correct_grads]
         grads_incorrect_keys = [key for key, value in dace_models.items() if
-                                not value.correct_grads]
+                                value.correct_grads == False]
         if len(grads_correct_keys) > 0:
             print(
                 f"==== Gradients correct for {', '.join(grads_correct_keys)}"

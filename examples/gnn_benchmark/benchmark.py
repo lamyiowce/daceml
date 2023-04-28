@@ -60,7 +60,8 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  targets: Optional[torch.Tensor],
                  backward: bool,
                  save_output: bool = True,
-                 small: bool = False):
+                 small: bool = False,
+                 skip_torch: bool = False):
     from examples.gnn_benchmark.performance_measurement import \
         print_time_statistics
     if use_gpu:
@@ -72,21 +73,24 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
     experiment_infos = OrderedDict(experiment_infos)
 
-    funcs = [
-        lambda: torch_model(*torch_csr_args),
-        lambda: torch_model(*torch_edge_list_args),
-    ]
-    func_names = ['torch_csr', 'torch_edge_list']
+    if not skip_torch:
+        torch_model.eval()
+        funcs = [
+            lambda: torch_model(*torch_csr_args),
+            lambda: torch_model(*torch_edge_list_args),
+        ]
+        func_names = ['torch_csr', 'torch_edge_list']
+    else:
+        funcs = []
+        func_names = []
 
     ### Forward pass.
-    torch_model.eval()
 
     def run_with_inputs(model, inputs):
         return model(*inputs)
 
     for experiment_info in experiment_infos.values():
         model = experiment_info.model_eval
-        # TODO: check eval and train modes
         inputs = experiment_info.data.to_input_list()
 
         funcs.append(functools.partial(run_with_inputs, model, inputs))
@@ -119,7 +123,6 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
     ### Backward pass.
     if backward:
-        torch_model.train()
         assert targets is not None
 
         if hasattr(torch_model, 'conv2'):
@@ -132,10 +135,15 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
             loss = criterion(pred, targets)
             loss.backward()
 
-        backward_funcs = [
-            lambda: backward_fn(torch_model, torch_csr_args),
-            lambda: backward_fn(torch_model, torch_edge_list_args),
-        ]
+        if not skip_torch:
+            torch_model.train()
+            backward_funcs = [
+                lambda: backward_fn(torch_model, torch_csr_args),
+                lambda: backward_fn(torch_model, torch_edge_list_args),
+            ]
+        else:
+            backward_funcs = []
+
         for experiment_info in experiment_infos.values():
             model = experiment_info.model_train
             inputs = experiment_info.data.to_input_list()
@@ -144,9 +152,9 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
         print(f"---> Benchmarking the BACKWARD pass...")
         times = measure_performance(backward_funcs,
                                     func_names=func_names,
-                                    warmups=10 if not small else 2,
-                                    num_iters=10 if not small else 2,
-                                    timing_iters=100 if not small else 3)
+                                    warmups=5 if not small else 2,
+                                    num_iters=5 if not small else 2,
+                                    timing_iters=20 if not small else 3)
         print()
         print(f"\n------ {args.model.upper()} BACKWARD RUNTIME [ms] ------")
         print_time_statistics(times, func_names)
@@ -213,6 +221,7 @@ def main():
     parser.add_argument('--idx-dtype', type=str, default='int32')
     parser.add_argument('--val-dtype', type=str, default='float32')
     parser.add_argument('--no-gen-code', action='store_true')
+    parser.add_argument('--no-torch', action='store_true')
     args = parser.parse_args()
 
     dtype_str_to_torch_type = {
@@ -308,14 +317,19 @@ def main():
                 torch.cuda.synchronize()
             print(f"Dace {dace_model_name}: ", result)
     else:
-        torch_csr_args, torch_edge_list_args = make_torch_args(data,
+        if not args.no_torch:
+            torch_csr_args, torch_edge_list_args = make_torch_args(data,
                                                                model_name=args.model)
+        else:
+            torch_csr_args, torch_edge_list_args = None, None
+
 
         results_correct = check_correctness(dace_models, torch_model,
                                             torch_edge_list_args,
                                             torch_csr_args,
                                             targets=data.y,
-                                            backward=args.backward)
+                                            backward=args.backward,
+                                            skip_torch=args.no_torch)
 
         if args.mode == 'benchmark' or args.mode == 'benchmark_small':
             do_benchmark(dace_models, torch_model, torch_csr_args,
@@ -323,7 +337,8 @@ def main():
                          backward=args.backward,
                          targets=data.y,
                          save_output=results_correct,
-                         small=args.mode == 'benchmark_small')
+                         small=args.mode == 'benchmark_small',
+                         skip_torch=args.no_torch)
 
 
 if __name__ == '__main__':
