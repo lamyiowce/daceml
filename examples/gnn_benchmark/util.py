@@ -54,6 +54,7 @@ def stats_as_csv_entry(times, func_names, model, hidden_size):
 
 
 def create_dace_model(model: torch.nn.Module,
+                      sdfg_tag: str,
                       implementation_name: str,
                       backward_implementation_name: str,
                       do_opt: bool,
@@ -63,7 +64,7 @@ def create_dace_model(model: torch.nn.Module,
                       backward: bool,
                       gen_code: bool = True
                       ) -> Tuple[dace.DaceModule, dace.DaceModule]:
-    sdfg_name = f"{model.__class__.__name__}_{implementation_name}"
+    sdfg_name = f"{model.__class__.__name__}_{sdfg_tag}"
     if (implementation_name != backward_implementation_name
             and backward_implementation_name is not None):
         sdfg_name += f"_{backward_implementation_name}"
@@ -189,15 +190,19 @@ def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
                              shape_fn_from_module=replacement_entries.make_GATConv_shape_fn)
 
 
-def make_torch_args(data, model_name):
-    """Create argument lists for torch models."""
-    x = data.x
+def make_torch_edge_list_args(data, add_edge_weights):
+    '''Create an argument list for the torch edge list model.'''
+    torch_edge_list_args = data.x, data.edge_index
+    if add_edge_weights:
+        torch_edge_list_args += (data.edge_weight,)
+    return torch_edge_list_args
+
+
+def make_torch_csr_args(data):
+    """Create argument lists for torch CSR models."""
     sparse_edge_index = SparseTensor.from_edge_index(
         data.edge_index, edge_attr=data.edge_weight)
 
     # pyg requires the sparse tensor input to be transposed.
-    torch_csr_args = x, sparse_edge_index.t()
-    torch_edge_list_args = x, data.edge_index
-    if hasattr(data, 'edge_weight') and 'gcn' in model_name:
-        torch_edge_list_args += (data.edge_weight,)
-    return torch_csr_args, torch_edge_list_args
+    torch_csr_args = data.x, sparse_edge_index.t()
+    return torch_csr_args

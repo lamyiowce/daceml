@@ -38,6 +38,7 @@ def get_dataset(dataset_name: str, device, val_dtype: torch.dtype = torch.float3
         dataset_class = get_dataset_class(dataset_name)
         dataset = dataset_class(root=data_path)
         data = dataset[0]
+        data.y = data.y.squeeze().contiguous()
         if device == torch.device('cuda'):
             data = data.pin_memory()
         data = data.to(device)

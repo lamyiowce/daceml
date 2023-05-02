@@ -17,14 +17,13 @@ from torch_geometric.transforms import GCNNorm
 
 import daceml
 from daceml import onnx as donnx
-from daceml.onnx import ONNXForward
 from daceml.torch.module import dace_module
-from examples.gnn_benchmark import sparse, models
+from examples.gnn_benchmark import sparse, models, util
 from examples.gnn_benchmark.correctness import check_correctness
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
 from examples.gnn_benchmark.util import stats_as_csv_entry, create_dace_model, \
-    make_torch_args, name_to_impl_class
+    name_to_impl_class
 
 faulthandler.enable()
 donnx.default_implementation = "pure"
@@ -89,7 +88,7 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
     def run_with_inputs(model, inputs):
         return model(*inputs)
 
-    for experiment_info in experiment_infos.values():
+    for impl_spec, experiment_info in experiment_infos.items():
         model = experiment_info.model_eval
         inputs = experiment_info.data.to_input_list()
 
@@ -101,7 +100,7 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
             name += "_no_autoopt"
         if args.no_persistent_mem:
             name += "_no_persistent_mem"
-        name += f"_{experiment_info.impl_name}"
+        name += f"_{impl_spec}"
         func_names.append(name)
 
     print(f"---> Benchmarking the forward pass...")
@@ -221,7 +220,7 @@ def main():
     parser.add_argument('--idx-dtype', type=str, default='int32')
     parser.add_argument('--val-dtype', type=str, default='float32')
     parser.add_argument('--no-gen-code', action='store_true')
-    parser.add_argument('--no-torch', action='store_true')
+    parser.add_argument('--torch', choices=['both', 'csr', 'edge_list', 'none'], default='both')
     args = parser.parse_args()
 
     dtype_str_to_torch_type = {
@@ -280,6 +279,7 @@ def main():
         else:
             convert_data = implementation_class.convert_data
         dace_model_eval, dace_model_train = create_dace_model(torch_model,
+                                                              sdfg_tag=impl_spec.replace(':', '_'),
                                                               implementation_name=impl_name,
                                                               backward_implementation_name=bwd_impl_name,
                                                               threadblock_dynamic=args.threadblock_dynamic,
@@ -295,8 +295,8 @@ def main():
                               convert_data=convert_data,
                               gnn_type=args.model,
                               idx_dtype=args.idx_dtype,
-                              val_dtype=args.val_dtype, )
-        dace_models[impl_name] = info
+                              val_dtype=args.val_dtype)
+        dace_models[impl_spec] = info
 
     if 'gcn' in args.model:
         gcn_norm = GCNNorm(add_self_loops=True)
@@ -317,28 +317,31 @@ def main():
                 torch.cuda.synchronize()
             print(f"Dace {dace_model_name}: ", result)
     else:
-        if not args.no_torch:
-            torch_csr_args, torch_edge_list_args = make_torch_args(data,
-                                                               model_name=args.model)
-        else:
-            torch_csr_args, torch_edge_list_args = None, None
 
+        torch_csr_args, torch_edge_list_args = None, None
+        if args.torch == 'csr' or args.torch == 'both':
+            torch_csr_args = util.make_torch_csr_args(data)
+        if args.torch == 'edge_list' or args.torch == 'both':
+            add_edge_weight = hasattr(data, 'edge_weight') and 'gcn' in args.model
+            torch_edge_list_args = util.make_torch_edge_list_args(data, add_edge_weight)
 
-        results_correct = check_correctness(dace_models, torch_model,
-                                            torch_edge_list_args,
-                                            torch_csr_args,
-                                            targets=data.y,
-                                            backward=args.backward,
-                                            skip_torch=args.no_torch)
+        check_correctness(dace_models, torch_model,
+                          torch_edge_list_args,
+                          torch_csr_args,
+                          targets=data.y,
+                          backward=args.backward,
+                          skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
+                          skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
 
         if args.mode == 'benchmark' or args.mode == 'benchmark_small':
             do_benchmark(dace_models, torch_model, torch_csr_args,
                          torch_edge_list_args, args,
                          backward=args.backward,
                          targets=data.y,
-                         save_output=results_correct,
+                         save_output=True,
                          small=args.mode == 'benchmark_small',
-                         skip_torch=args.no_torch)
+                          skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
+                          skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
 
 
 if __name__ == '__main__':

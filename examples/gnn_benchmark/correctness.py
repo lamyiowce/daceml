@@ -57,20 +57,27 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
                       torch_csr_args,
                       targets: torch.Tensor,
                       backward: bool,
-                      skip_torch: bool) -> bool:
-    if not skip_torch:
+                      skip_torch_csr: bool,
+                      skip_torch_edge_list: bool) -> bool:
+    torch_csr_pred = None
+    torch_edge_list_pred = None
+    torch_model_csr = None
+    if not skip_torch_csr:
         torch_model_csr = copy.deepcopy(torch_model)
-        torch_model.train()
         torch_model_csr.train()
-
-        torch_edge_list_pred = torch_model(*torch_edge_list_args)
         torch_csr_pred = torch_model_csr(*torch_csr_args)
+
+    if not skip_torch_edge_list:
+        torch_model.train()
+        torch_edge_list_pred = torch_model(*torch_edge_list_args)
+
+    if torch_csr_pred is not None and torch_edge_list_pred is not None:
         check_equal(torch_csr_pred.detach(), torch_edge_list_pred.detach(),
                     verbose=False, name_result='Torch CSR',
                     name_expected='Torch Edge List')
 
     def backward_func(pred):
-        loss = criterion(pred, targets.squeeze())
+        loss = criterion(pred, targets)
         loss.backward()
 
     if backward:
@@ -79,10 +86,13 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
         else:
             criterion = lambda pred, targets: torch.sum(pred)
 
-        if not skip_torch:
+        if not skip_torch_edge_list:
             backward_func(torch_edge_list_pred)
+
+        if not skip_torch_csr:
             backward_func(torch_csr_pred)
 
+        if torch_edge_list_pred is not None and torch_csr_pred is not None:
             check_gradients(torch_model_csr, torch_model, "CSR", "EdgeList",
                             verbose=False)
 
@@ -102,11 +112,14 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
             torch.cuda.synchronize()
             torch.cuda.nvtx.range_pop()
 
-        if not skip_torch:
+        if torch_edge_list_pred is not None:
             experiment_info.correct = check_equal(dace_pred,
                                                   torch_edge_list_pred,
                                                   name_result=f"Predictions for DaCe {name}",
-                                                  name_expected="Torch predictions")
+                                                  name_expected="Torch predictions (edge list)")
+        else:
+            print(f"Not checking correctness for {name} because no torch prediction was computed.")
+
         if backward:
             model = experiment_info.model_train
             dace_pred = model(*args)
@@ -117,7 +130,7 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
                 torch.cuda.synchronize()
                 torch.cuda.nvtx.range_pop()
 
-            if not skip_torch:
+            if torch_edge_list_pred is not None:
                 check_equal(dace_pred,
                             torch_edge_list_pred,
                             name_result=f"Predictions for DaCe {name}",
