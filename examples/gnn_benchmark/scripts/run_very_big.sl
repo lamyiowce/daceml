@@ -24,17 +24,19 @@ do_test=
 
 export DACE_compiler_cuda_max_concurrent_streams=-1
 model=gcn
-formats="csr coo"
 
 echo "Running model " $model
-for dataset in cora ogbn-arxiv; do
+for dataset in ogbn-arxiv; do
   echo "Running dataset " $dataset
   outfile=./$(date +%d.%m.%H.%M)-$model-$dataset-$SLURM_JOB_ID.csv
-  for hidden in 8 32 128 512 2048; do
-    echo "Hidden " $hidden
-    rm -rf .dacecache
-    $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none --backward
-    $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl $formats --no-torch --backward
-  done
+  hidden=2048
+  echo "Hidden " $hidden
+  rm -rf .dacecache
+  $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none
+  $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl csr --no-torch
+  $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl coo --no-torch
+  $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none --backward
+  $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl csr --no-torch --backward
+  $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl coo --no-torch --backward
 done
 
