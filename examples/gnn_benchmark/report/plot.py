@@ -124,7 +124,7 @@ def make_performance_plot(full_df, name):
     plt.show()
 
 
-def read_many_dfs(filenames, name_to_replace, backward: bool = True,
+def read_many_dfs(filenames, name_to_replace=None, backward: bool = True,
                   names=None, name_fns=None):
     dfs = []
     bwd_dfs = []
@@ -134,16 +134,18 @@ def read_many_dfs(filenames, name_to_replace, backward: bool = True,
     assert len(name_fns) == len(filenames)
     for filename, name, name_fn in zip(filenames, names, name_fns):
         df_temp = pd.read_csv(DATA_FOLDER / filename, comment='#')
-        dace_rows = df_temp['Name'].str.contains(name_to_replace)
-        df_temp.loc[dace_rows, 'Name'] = df_temp.loc[dace_rows, 'Name'].apply(
-            name_fn) if name_fn else name
+        if name_to_replace:
+            dace_rows = df_temp['Name'].str.contains(name_to_replace)
+            df_temp.loc[dace_rows, 'Name'] = df_temp.loc[dace_rows, 'Name'].apply(
+                name_fn) if name_fn else name
         dfs.append(df_temp)
         if backward:
             bwd_path = DATA_FOLDER / filename.replace('.csv', '-bwd.csv')
             df_temp = pd.read_csv(bwd_path, comment='#')
-            dace_rows = df_temp['Name'].str.contains(name_to_replace)
-            df_temp.loc[dace_rows, 'Name'] = df_temp.loc[dace_rows, 'Name'].apply(
-                name_fn) if name_fn else name
+            if name_to_replace:
+                dace_rows = df_temp['Name'].str.contains(name_to_replace)
+                df_temp.loc[dace_rows, 'Name'] = df_temp.loc[dace_rows, 'Name'].apply(
+                    name_fn) if name_fn else name
             bwd_dfs.append(df_temp)
 
     return pd.concat(dfs), pd.concat(bwd_dfs)
@@ -157,75 +159,56 @@ def main():
     # plot_backward("data/24-04-gcn-reduce-gpuauto-simplify", model='GCN')
     # plot_backward("data/24-04-gcn-single-reduce-gpuauto-simplify", model='GCN Single layer')
 
+    arxiv_df, arxiv_bwd_df = read_many_dfs(
+        filenames=['01.05.11.34-gcn-ogbn-arxiv-183528.csv',
+                   '01.05.12.33-gcn-ogbn-arxiv-183567.csv']
+    )
+    plot_backward(tag='arxiv', plot_title='GCN, OGBN Arxiv', df=arxiv_df, bwd_df=arxiv_bwd_df)
+
+    plot_backward("01.05.11.17-gcn-cora-183528", plot_title='GCN, Cora')
+
+    # plot_stream_comparison()
+
+
+
+def plot_stream_comparison():
     df, bwd_df = read_many_dfs(
         filenames=['26-04-gcn-csr-coo-cora-single-stream.csv',
                    '26-04-gcn-csr-coo-cora-many-streams.csv'],
         name_fns=[lambda s: s + "_single_stream",
                   lambda s: s + "_many_streams"],
         name_to_replace='dace_.*')
-
     labels = {
         "dace_autoopt_persistent_mem_coo_single_stream": "DaCe COO single stream",
         "dace_autoopt_persistent_mem_coo_many_streams": "DaCe COO many streams",
         "dace_autoopt_persistent_mem_csr_single_stream": "DaCe CSR single stream",
         "dace_autoopt_persistent_mem_csr_many_streams": "DaCe CSR many streams",
     }
-
     make_plot(df, f"GCN Backward + forward pass, Cora, V100", bwd_df=bwd_df,
               label_map=labels)
 
-    # coo_df, coo_bwd_df = read_many_dfs(filenames=['25-04-gcn-coo-cora.csv',
-    #                                               '25-04-gcn-coo-cora-single-stream.csv'],
-    #                                    name_to_replace='dace_autoopt_persistent_mem_coo',
-    #                                    names=['DaCe COO many streams',
-    #                                           'DaCe COO single stream'],
-    #                                    backward=True)
-    #
-    # make_plot(coo_df, f"GCN COO Backward + forward pass", bwd_df=coo_bwd_df)
-    #
-    # csr_df, csr_bwd_df = read_many_dfs(filenames=['11-04-gcn-csr-cora-no-input-grad.csv',
-    #                                               '26-04-gcn-csr-cora-single-stream.csv'],
-    #                                    name_to_replace='dace_autoopt_.*csr',
-    #                                    names=['DaCe CSR many streams',
-    #                                           'DaCe CSR single stream'])
-    #
-    # make_plot(csr_df, f"GCN CSR Backward + forward pass", bwd_df=csr_bwd_df)
-    #
-    # make_plot(pd.concat([csr_df, coo_df]), f"GCN bwd + fwd pass, Cora, V100",
-    #           bwd_df=pd.concat([csr_bwd_df, coo_bwd_df]))
 
-    # dfs = []
-    # for path, name in zip(['data/25-04-gcn-single-coo-cora.csv', 'data/25-04-gcn-single-coo-cora-single-stream.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
-    #     df_temp = pd.read_csv(path)
-    #     dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_coo'
-    #     df_temp['Name'][dace_rows] = name
-    #     dfs.append(df_temp)
-    # df = pd.concat(dfs)
-    #
-    # make_plot(df, "GCN Single Layer COO Forward pass")
-    #
-    # dfs = []
-    # for path, name in zip(['data/25-04-gcn-single-coo-cora-bwd.csv', 'data/25-04-gcn-single-coo-cora-single-stream-bwd.csv'], ['DaCe COO many streams', 'DaCe COO single stream']):
-    #     df_temp = pd.read_csv(path)
-    #     dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_coo'
-    #     df_temp['Name'][dace_rows] = name
-    #     dfs.append(df_temp)
-    # bwd_df = pd.concat(dfs)
-    # make_plot(df, f"GCN Single Layer COO Backward + forward pass", bwd_df=bwd_df)
-
-
-def plot_backward(tag, model, labels=None):
-    df = pd.read_csv(tag + '.csv')
+def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None):
+    if df is None:
+        df = pd.read_csv(DATA_FOLDER / (tag + '.csv'), comment='#')
     default_labels = {
         'dace_autoopt_persistent_mem_csr': 'DaCe CSR',
+        'dace_csr': 'DaCe CSR',
+        'dace_coo': 'DaCe COO',
         'torch_csr': 'PyG CSR',
         'torch_edge_list': 'PyG edge list',
     }
     default_labels.update(labels or {})
     labels = default_labels
-    make_plot(df, "Forward pass", labels)
-    bwd_df = pd.read_csv(tag + '-bwd.csv')
-    make_plot(df, f"{model} Backward + forward pass", labels, bwd_df=bwd_df)
+    make_plot(df, f"{plot_title}: forward pass", labels)
+    if bwd_df is None:
+        bwd_path = DATA_FOLDER / (tag + '-bwd.csv')
+        if bwd_path.exists():
+            bwd_df = pd.read_csv(bwd_path, comment='#')
+        else:
+            print(f"Could not find backward file {bwd_path}.")
+    if bwd_df is not None:
+        make_plot(df, f"{plot_title}:  Backward + forward pass", labels, bwd_df=bwd_df)
 
 
 def plot_adapt_matmul_order():
