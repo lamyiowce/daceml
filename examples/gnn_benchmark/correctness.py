@@ -122,6 +122,8 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
 
         if backward:
             model = experiment_info.model_train
+            if USE_GPU:
+                torch.cuda.synchronize()
             dace_pred = model(*args)
             if USE_GPU:
                 torch.cuda.synchronize()
@@ -137,7 +139,7 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
                             name_result=f"Backward predictions for DaCe {name}",
                             name_expected="Torch predictions")
                 experiment_info.correct_grads = check_gradients(model.model,
-                                                                torch_model,
+                                                                torch_model_csr,
                                                                 name_result=f"Gradients for DaCe {name}",
                                                                 name_expected="Torch gradients")
 
