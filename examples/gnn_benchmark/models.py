@@ -40,9 +40,9 @@ class GCN(torch.nn.Module):
         self.log_softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, x, *edge_info):
-        x = self.conv1(x, *edge_info)
-        x = self.act(x)
-        x = self.conv2(x, *edge_info)
+        x = self.conv1(x, *edge_info)  # Size: `hidden size`
+        x = self.act(x)  # ReLU
+        x = self.conv2(x, *edge_info)  # Size: `num_classes`
 
         return self.log_softmax(x)
 
