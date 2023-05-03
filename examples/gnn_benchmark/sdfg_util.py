@@ -112,12 +112,12 @@ def apply_to_both(fn: Callable[[dace.SDFG], None]):
         fn(backward_sdfg)
     return wrapper
 
-def set_reduce_to_gpuauto(sdfg: dace.SDFG):
+def set_reduce_implementation(sdfg: dace.SDFG, implementation_name: str = 'GPUAuto'):
     counter = 0
     for node, _ in sdfg.all_nodes_recursive():
         if isinstance(node, dace.nodes.LibraryNode) and isinstance(node, dace.libraries.standard.nodes.Reduce):
-            print(f"Setting impl {node} from {node.implementation} to GPUAuto.")
-            node.implementation = 'GPUAuto'
+            print(f"Setting impl {node} from {node.implementation} to {implementation_name}.")
+            node.implementation = implementation_name
             counter += 1
-    print(f"Set {counter} reduce nodes to GPUAuto")
+    print(f"Set {counter} reduce nodes to {implementation_name}")
 

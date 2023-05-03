@@ -99,14 +99,13 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
               backward_implementation_name: Optional[str],
               persistent_mem: bool, threadblock_dynamic: bool):
     if device.type == 'cuda':
-        dace_model.append_post_onnx_hook("set_reduce_to_gpuauto_post_onnx",
-                                         lambda
-                                             model: sdfg_util.set_reduce_to_gpuauto(
-                                             model.sdfg))
+        set_reduce_implementation = functools.partial(
+            sdfg_util.set_reduce_implementation, implementation_name='GPUAuto')
+        dace_model.append_post_onnx_hook("set_reduce_implementation_post_onnx",
+                                         lambda model: set_reduce_implementation(model.sdfg))
 
-        dace_model.append_post_autodiff_hook("set_reduce_to_gpuauto",
-                                             sdfg_util.apply_to_both(
-                                                 sdfg_util.set_reduce_to_gpuauto))
+        dace_model.append_post_autodiff_hook("set_reduce_implementation_post_autodiff",
+                                             sdfg_util.apply_to_both(set_reduce_implementation))
     if persistent_mem:
         print("---> Adding persistent memory hook.")
         specialize_mem_onnx(dace_model)
