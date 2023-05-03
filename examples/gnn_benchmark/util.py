@@ -65,9 +65,6 @@ def create_dace_model(model: torch.nn.Module,
                       gen_code: bool = True
                       ) -> Tuple[dace.DaceModule, dace.DaceModule]:
     sdfg_name = f"{model.__class__.__name__}_{sdfg_tag}"
-    if (implementation_name != backward_implementation_name
-            and backward_implementation_name is not None):
-        sdfg_name += f"_{backward_implementation_name}"
 
     dace_model_eval = DaceModule(copy.deepcopy(model),
                                  sdfg_name=sdfg_name + "_eval",

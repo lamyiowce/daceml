@@ -48,6 +48,12 @@ def measure_performance(funcs,
         timer.end()
         torch.cuda.nvtx.range_pop()
 
+        # Single run for profiling.
+        torch.cuda.nvtx.range_push(fname + ' single run.')
+        f()
+        torch._C._cuda_synchronize()
+        torch.cuda.nvtx.range_pop()
+
         iter_times = timer.get_times()
         for t in iter_times:
             times[i].append(t / timing_iters)

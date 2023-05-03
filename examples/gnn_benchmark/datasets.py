@@ -1,5 +1,4 @@
 import functools
-from typing import Tuple
 
 import torch
 import torch_geometric
@@ -42,4 +41,10 @@ def get_dataset(dataset_name: str, device, val_dtype: torch.dtype = torch.float3
         if device == torch.device('cuda'):
             data = data.pin_memory()
         data = data.to(device)
+        data.x = data.x.to(val_dtype)
+        if data.edge_weight is not None:
+            data.edge_weight = data.edge_weight.to(val_dtype)
+        if data.edge_attr is not None:
+            data.edge_attr = data.edge_attr.to(val_dtype)
+        print(data)
     return data
