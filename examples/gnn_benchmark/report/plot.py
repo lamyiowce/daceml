@@ -30,17 +30,19 @@ def make_plot(full_df, name, label_map=None, bwd_df=None):
     df, std_df = prep_df(full_df)
     print(df)
     colors = get_colors(df.columns)
+    bar_width = 0.75
     if bwd_df is None:
-        ax = df.plot(figsize=(8, 8), kind='barh', ylabel='Runtime [ms]',
+        ax = df.plot(figsize=(6, 8), kind='barh', ylabel='Runtime [ms]',
                      xlabel='Hidden size', color=colors,
-                     xerr=std_df, label='Forward')
+                     xerr=std_df, label='Forward', width=bar_width)
     else:
         bwd_df, bwd_std_df = prep_df(bwd_df)
-        ax = bwd_df.plot(figsize=(8, 8),
+        ax = bwd_df.plot(figsize=(6, 8),
                          kind='barh',
                          color=colors,
                          xerr=bwd_std_df,
-                         label='Backward')
+                         label='Backward',
+                         width=bar_width)
         df.plot(kind='barh',
                 ylabel='Runtime [ms]',
                 xlabel='Hidden size',
@@ -48,7 +50,8 @@ def make_plot(full_df, name, label_map=None, bwd_df=None):
                 alpha=0.3,
                 xerr=std_df,
                 ax=ax,
-                label='Forward')
+                label='Forward',
+                width=bar_width)
 
     ax.set_axisbelow(True)
     ax.xaxis.grid(color='lightgray', linestyle='--')
@@ -161,12 +164,24 @@ def main():
 
     arxiv_df, arxiv_bwd_df = read_many_dfs(
         filenames=['01.05.11.34-gcn-ogbn-arxiv-183528.csv',
-                   '01.05.12.33-gcn-ogbn-arxiv-183567.csv']
+                   '01.05.12.33-gcn-ogbn-arxiv-183567.csv',
+                   '03.05.17.23-gcn-ogbn-arxiv-csc-185561.csv',
+                   '03.05.18.24-gcn-ogbn-arxiv-alt-sizes-185598.csv',
+                   '03.05.19.41-gcn-ogbn-arxiv-alt-sizes-185634.csv']
     )
+    plot_backward(tag='arxiv', sizes=[16, 64, 256, 1024], plot_title='GCN, OGBN Arxiv', df=arxiv_df, bwd_df=arxiv_bwd_df)
     plot_backward(tag='arxiv', plot_title='GCN, OGBN Arxiv', df=arxiv_df, bwd_df=arxiv_bwd_df)
 
-    plot_backward("01.05.11.17-gcn-cora-183528", plot_title='GCN, Cora')
+    cora_df, cora_bwd_df = read_many_dfs(
+        filenames=['01.05.11.17-gcn-cora-183528.csv',
+                   '03.05.17.14-gcn-cora-csc-185561.csv',
+                   '03.05.18.04-gcn-cora-alt-sizes-185598.csv'])
+    plot_backward(tag="cora", sizes=[16, 64, 256, 1024], plot_title='GCN, Cora', df=cora_df, bwd_df=cora_bwd_df)
+    plot_backward(tag="cora", plot_title='GCN, Cora', df=cora_df, bwd_df=cora_bwd_df)
 
+    # plot_backward('03.05.09.52-gcn-pubmed-185244', plot_title='GCN, Pubmed')
+    # plot_backward('03.05.10.26-gcn-flickr-185244', plot_title='GCN, Flickr')
+    # plot_backward('03.05.10.09-gcn-citeseer-185244', plot_title='GCN, Citeseer')
     # plot_stream_comparison()
 
 
@@ -188,13 +203,16 @@ def plot_stream_comparison():
               label_map=labels)
 
 
-def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None):
+def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None, sizes=None):
     if df is None:
         df = pd.read_csv(DATA_FOLDER / (tag + '.csv'), comment='#')
+    if sizes is not None:
+        df = df[df['Size'].isin(sizes)]
     default_labels = {
         'dace_autoopt_persistent_mem_csr': 'DaCe CSR',
         'dace_csr': 'DaCe CSR',
         'dace_coo': 'DaCe COO',
+        'dace_csc': 'DaCe CSC',
         'torch_csr': 'PyG CSR',
         'torch_edge_list': 'PyG edge list',
     }
@@ -208,6 +226,9 @@ def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None):
         else:
             print(f"Could not find backward file {bwd_path}.")
     if bwd_df is not None:
+        if sizes is not None:
+            bwd_df = bwd_df[bwd_df['Size'].isin(sizes)]
+
         make_plot(df, f"{plot_title}:  Backward + forward pass", labels, bwd_df=bwd_df)
 
 
