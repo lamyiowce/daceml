@@ -60,7 +60,8 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  backward: bool,
                  save_output: bool = True,
                  small: bool = False,
-                 skip_torch: bool = False):
+                 skip_torch_csr: bool = False,
+                 skip_torch_edge_list: bool = False):
     from examples.gnn_benchmark.performance_measurement import \
         print_time_statistics
     if use_gpu:
@@ -72,16 +73,17 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
     experiment_infos = OrderedDict(experiment_infos)
 
-    if not skip_torch:
+    funcs = []
+    func_names = []
+
+    if not skip_torch_csr:
         torch_model.eval()
-        funcs = [
-            lambda: torch_model(*torch_csr_args),
-            lambda: torch_model(*torch_edge_list_args),
-        ]
-        func_names = ['torch_csr', 'torch_edge_list']
-    else:
-        funcs = []
-        func_names = []
+        funcs.append(lambda: torch_model(*torch_csr_args))
+        func_names.append('torch_csr')
+    if not skip_torch_edge_list:
+        torch_model.eval()
+        funcs.append(lambda: torch_model(*torch_edge_list_args))
+        func_names.append('torch_edge_list')
 
     ### Forward pass.
 
@@ -134,14 +136,13 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
             loss = criterion(pred, targets)
             loss.backward()
 
-        if not skip_torch:
+        backward_funcs = []
+        if not skip_torch_csr:
             torch_model.train()
-            backward_funcs = [
-                lambda: backward_fn(torch_model, torch_csr_args),
-                lambda: backward_fn(torch_model, torch_edge_list_args),
-            ]
-        else:
-            backward_funcs = []
+            backward_funcs.append(lambda: backward_fn(torch_model, torch_csr_args))
+        if not skip_torch_edge_list:
+            torch_model.train()
+            backward_funcs.append(lambda: backward_fn(torch_model, torch_edge_list_args))
 
         for experiment_info in experiment_infos.values():
             model = experiment_info.model_train
@@ -185,16 +186,16 @@ def write_stats_to_file(args, func_names, times, file_path: pathlib.Path):
 
 def parse_impl_spec(impl_spec: str):
     """We accept impl names of the form
-    'impl_name:impl_arg1:impl_arg2-bwd_impl_name:bwd_impl_arg1...'
+    'impl_name-impl_arg1-impl_arg2:bwd_impl_name-bwd_impl_arg1...'
     where the bwd_impl_name and bwd_impl_args are optional. If no bwd_impl_name
     is specified, the forward impl is used for the backward pass.
     """
-    if '-' in impl_spec:
-        impl_spec, bwd_spec = impl_spec.split('-')
+    if ':' in impl_spec:
+        impl_spec, bwd_spec = impl_spec.split(':')
     else:
         bwd_spec = impl_spec
-    impl_name, *impl_args = impl_spec.split(':')
-    bwd_impl_name, *bwd_impl_args = bwd_spec.split(':')
+    impl_name, *impl_args = impl_spec.split('-')
+    bwd_impl_name, *bwd_impl_args = bwd_spec.split('-')
     return impl_name, impl_args, bwd_impl_name, bwd_impl_args
 
 
@@ -279,7 +280,7 @@ def main():
         else:
             convert_data = implementation_class.convert_data
         dace_model_eval, dace_model_train = create_dace_model(torch_model,
-                                                              sdfg_tag=impl_spec.replace(':', '_'),
+                                                              sdfg_tag=impl_spec.replace(':', '_').replace('-', '_'),
                                                               implementation_name=impl_name,
                                                               backward_implementation_name=bwd_impl_name,
                                                               threadblock_dynamic=args.threadblock_dynamic,
@@ -317,7 +318,6 @@ def main():
                 torch.cuda.synchronize()
             print(f"Dace {dace_model_name}: ", result)
     else:
-
         torch_csr_args, torch_edge_list_args = None, None
         if args.torch == 'csr' or args.torch == 'both':
             torch_csr_args = util.make_torch_csr_args(data)
@@ -340,8 +340,8 @@ def main():
                          targets=data.y,
                          save_output=True,
                          small=args.mode == 'benchmark_small',
-                          skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
-                          skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
+                         skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
+                         skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
 
 
 if __name__ == '__main__':
