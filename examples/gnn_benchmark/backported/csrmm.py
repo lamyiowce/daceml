@@ -417,7 +417,11 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         opt['layout'] = 'CUSPARSE_ORDER_ROW'
 
         opt['compute'] = f'CUDA_R_{to_cublas_computetype(dtype)}'
-        opt['idx_dtype'] = 'CUSPARSE_INDEX_32I' if idx_dtype == dace.int32 else 'CUSPARSE_INDEX_64I'
+        idx_dtype_to_cusparse_dtype = {
+            dace.int32: 'CUSPARSE_INDEX_32I',
+            dace.int64: 'CUSPARSE_INDEX_64I'
+        }
+        opt['idx_dtype'] = idx_dtype_to_cusparse_dtype[idx_dtype]
         opt['handle'] = '__dace_cusparse_handle'
 
         opt['alpha'] = alpha
