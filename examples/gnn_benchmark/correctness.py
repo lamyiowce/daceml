@@ -92,6 +92,8 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
         if not skip_torch_csr:
             backward_func(torch_csr_pred)
 
+        if USE_GPU:
+            torch.cuda.synchronize()
         if torch_edge_list_pred is not None and torch_csr_pred is not None:
             check_gradients(torch_model_csr, torch_model, "Torch CSR", "Torch Edge List",
                             verbose=True)
@@ -107,6 +109,7 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
 
         if USE_GPU:
             torch.cuda.nvtx.range_push(name + ' forward correctness')
+            torch.cuda.synchronize()
         dace_pred = model(*args)
         if USE_GPU:
             torch.cuda.synchronize()
@@ -123,15 +126,18 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
         if backward:
             model = experiment_info.model_train
             if USE_GPU:
+                torch.cuda.nvtx.range_push(name + ' backward correctness (pred)')
                 torch.cuda.synchronize()
             dace_pred = model(*args)
             if USE_GPU:
+                torch.cuda.nvtx.range_pop()
                 torch.cuda.synchronize()
-                torch.cuda.nvtx.range_push(name + ' backward correctness')
+                torch.cuda.nvtx.range_push(name + ' backward correctness (grad)')
+                torch.cuda.synchronize()
             backward_func(dace_pred)
             if USE_GPU:
-                torch.cuda.synchronize()
                 torch.cuda.nvtx.range_pop()
+                torch.cuda.synchronize()
 
             if torch_csr_pred is not None:
                 check_equal(dace_pred,
