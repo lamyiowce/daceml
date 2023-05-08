@@ -22,6 +22,7 @@ from examples.gnn_benchmark import sparse, models, util
 from examples.gnn_benchmark.correctness import check_correctness
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
+from examples.gnn_benchmark.torch_profile import torch_profile
 from examples.gnn_benchmark.util import stats_as_csv_entry, create_dace_model, \
     name_to_impl_class
 
@@ -61,7 +62,8 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  save_output: bool = True,
                  small: bool = False,
                  skip_torch_csr: bool = False,
-                 skip_torch_edge_list: bool = False):
+                 skip_torch_edge_list: bool = False,
+                 ):
     from examples.gnn_benchmark.performance_measurement import \
         print_time_statistics
     if use_gpu:
@@ -206,7 +208,7 @@ def main():
     parser = argparse.ArgumentParser(description='benchmark')
     parser.add_argument('--data', required=True)
     parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace',
-                                           'benchmark_small'],
+                                           'benchmark_small', 'torch_profile'],
                         required=True)
     parser.add_argument('--impl', type=str, nargs='+', required=True)
     parser.add_argument('--normalize', action='store_true')
@@ -342,6 +344,17 @@ def main():
                          small=args.mode == 'benchmark_small',
                          skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
                          skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
+        if args.mode == 'torch_profile':
+            torch_profile(dace_models,
+                          torch_model,
+                          torch_csr_args,
+                         torch_edge_list_args,
+                          args,
+                         backward=args.backward,
+                         targets=data.y,
+                         skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
+                         skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
+
 
 
 if __name__ == '__main__':
