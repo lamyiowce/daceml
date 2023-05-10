@@ -31,6 +31,9 @@ def prep_df(full_df):
     full_df = full_df.drop_duplicates(subset=['Size', 'Model', 'Name'])
     df = full_df.pivot(index='Size', columns='Name', values='Mean')
     std_df = full_df.pivot(index='Size', columns='Name', values='Stdev')
+    sorted_cols = sorted(df.columns, key=lambda x: 'torch' in x)
+    df = df.reindex(sorted_cols, axis=1)
+    std_df = std_df.reindex(sorted_cols, axis=1)
     return df, std_df
 
 
@@ -74,6 +77,7 @@ def make_plot(full_df, name, label_map=None, bwd_df=None):
     default_label_map = {
         'torch_csr': 'Torch CSR',
         'torch_edge_list': 'Torch Edge List',
+        'compiled_torch_edge_list': 'Torch Edge List (compiled)',
     }
     default_label_map.update(label_map or {})
     labels = [default_label_map.get(name, name) for name in df.columns]
@@ -240,18 +244,33 @@ def main():
     # plot_backward("data/24-04-gcn-reduce-gpuauto-simplify", model='GCN')
     # plot_backward("data/24-04-gcn-single-reduce-gpuauto-simplify", model='GCN Single layer')
 
-    cora_single_df, _ = read_many_dfs(
-        filenames=['04.05.10.07-gcn_single_layer-cora-186177.csv',]
+    arxiv_df, arxiv_bwd_df = read_many_dfs(
+        filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
+                   '10.05.08.35-fix-contiguous-gcn-ogbn-arxiv-191411.csv',
+                   '10.05.16.28-gcn-ogbn-arxiv-191708.csv']
     )
-    make_performance_plot(full_df=cora_single_df, name='gcn-single-cora', title="Single GCN layer performance, Cora")
+    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv', plot_title="OGB Arxiv")
 
-    arxiv_single_df, _ = read_many_dfs(
-        filenames=['04.05.10.25-gcn_single_layer-ogbn-arxiv-186177.csv',]
+    cora_df, cora_bwd_df = read_many_dfs(
+        filenames=['10.05.09.03-fix-contiguous-gcn-cora-191411.csv',
+                   '10.05.15.40-pyg-gcn-cora-191680.csv',
+                   '10.05.16.08-gcn-cora-191708.csv']
     )
-    make_performance_plot(full_df=arxiv_single_df, name='gcn-single-ogbn-arxiv', title="Single GCN layer performance, OGB Arxiv")
+    plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-ogbn-cora', plot_title="Cora")
 
-    make_roofline_plot(cora_single_df, name='gcn-single-cora',)
-    make_roofline_plot(arxiv_single_df, name='gcn-single-ogbn-arxiv',)
+
+    # cora_single_df, _ = read_many_dfs(
+    #     filenames=['04.05.10.07-gcn_single_layer-cora-186177.csv',]
+    # )
+    # make_performance_plot(full_df=cora_single_df, name='gcn-single-cora', title="Single GCN layer performance, Cora")
+    #
+    # arxiv_single_df, _ = read_many_dfs(
+    #     filenames=['04.05.10.25-gcn_single_layer-ogbn-arxiv-186177.csv',]
+    # )
+    # make_performance_plot(full_df=arxiv_single_df, name='gcn-single-ogbn-arxiv', title="Single GCN layer performance, OGB Arxiv")
+
+    # make_roofline_plot(cora_single_df, name='gcn-single-cora',)
+    # make_roofline_plot(arxiv_single_df, name='gcn-single-ogbn-arxiv',)
     # plot_midthesis_main_datasets()
     # plot_midthesis_additional_datasets()
     # plot_stream_comparison()
