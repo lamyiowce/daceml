@@ -4,7 +4,6 @@ from typing import Dict, Tuple, Optional
 
 import dace
 import torch
-from torch_sparse import SparseTensor
 
 from daceml.onnx import register_replacement, TORCH_DTYPE_TO_TYPECLASS
 from daceml.onnx.nodes import replacement_entries
@@ -81,10 +80,13 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
         set_reduce_implementation = functools.partial(
             sdfg_util.set_reduce_implementation, implementation_name='GPUAuto')
         dace_model.append_post_onnx_hook("set_reduce_implementation_post_onnx",
-                                         lambda model: set_reduce_implementation(model.sdfg))
+                                         lambda
+                                             model: set_reduce_implementation(
+                                             model.sdfg))
 
-        dace_model.append_post_autodiff_hook("set_reduce_implementation_post_autodiff",
-                                             sdfg_util.apply_to_both(set_reduce_implementation))
+        dace_model.append_post_autodiff_hook(
+            "set_reduce_implementation_post_autodiff",
+            sdfg_util.apply_to_both(set_reduce_implementation))
     if persistent_mem:
         print("---> Adding persistent memory hook.")
         specialize_mem_onnx(dace_model)
@@ -163,21 +165,3 @@ def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
                              outputs={'output': val_dtype},
                              shape_infer=replacement_entries.shape_infer_GATConv,
                              shape_fn_from_module=replacement_entries.make_GATConv_shape_fn)
-
-
-def make_torch_edge_list_args(data, add_edge_weights):
-    '''Create an argument list for the torch edge list model.'''
-    torch_edge_list_args = data.x.contiguous(), data.edge_index.contiguous()
-    if add_edge_weights:
-        torch_edge_list_args += (data.edge_weight.contiguous(),)
-    return torch_edge_list_args
-
-
-def make_torch_csr_args(data):
-    """Create argument lists for torch CSR models."""
-    sparse_edge_index = SparseTensor.from_edge_index(
-        data.edge_index, edge_attr=data.edge_weight)
-
-    # pyg requires the sparse tensor input to be transposed.
-    torch_csr_args = data.x.contiguous(), sparse_edge_index.t()
-    return torch_csr_args

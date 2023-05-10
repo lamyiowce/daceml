@@ -3,7 +3,7 @@ import functools
 import pathlib
 import socket
 import statistics
-from typing import Sequence, Dict, Optional
+from typing import Sequence, Dict, Optional, Tuple
 from collections import OrderedDict
 
 import torch
@@ -11,28 +11,9 @@ import torch
 from examples.gnn_benchmark.experiment_info import ExperimentInfo
 
 
-def write_stats_to_file(func_names, times, model_name, hidden_size, file_path: pathlib.Path):
-    add_header = not file_path.exists()
-    with open(file_path, 'a') as file:
-        if add_header:
-            # Write out some system info.
-            file.write(
-                f"# HOST {socket.gethostname()}, GPU {torch.cuda.get_device_name()}\n")
-
-            headers = [
-                'Name', 'Model', 'Size', 'Min', 'Mean',
-                'Median',
-                'Stdev', 'Max'
-            ]
-            file.write(','.join(headers) + '\n')
-        file.write(
-            stats_as_csv_entry(times, func_names, model_name, hidden_size))
-
 
 def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
-                 torch_model: torch.nn.Module,
-                 torch_csr_args: Sequence[torch.Tensor],
-                 torch_edge_list_args: Sequence[torch.Tensor],
+                 torch_experiments: Sequence[Tuple[str, torch.nn.Module, Sequence[torch.Tensor]]],
                  dace_tag: str,
                  targets: Optional[torch.Tensor],
                  backward: bool,
@@ -58,19 +39,15 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
     funcs = []
     func_names = []
 
-    if not skip_torch_csr:
-        torch_model.eval()
-        funcs.append(lambda: torch_model(*torch_csr_args))
-        func_names.append('torch_csr')
-    if not skip_torch_edge_list:
-        torch_model.eval()
-        funcs.append(lambda: torch_model(*torch_edge_list_args))
-        func_names.append('torch_edge_list')
-
     ### Forward pass.
 
     def run_with_inputs(model, inputs):
         return model(*inputs)
+
+    for torch_name, torch_model, torch_inputs in torch_experiments:
+        torch_model.eval()
+        funcs.append(functools.partial(run_with_inputs, torch_model, torch_inputs))
+        func_names.append(torch_name)
 
     for impl_spec, experiment_info in experiment_infos.items():
         model = experiment_info.model_eval
@@ -106,12 +83,11 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
             loss.backward()
 
         backward_funcs = []
-        if not skip_torch_csr:
+
+        for torch_name, torch_model, torch_inputs in torch_experiments:
             torch_model.train()
-            backward_funcs.append(lambda: backward_fn(torch_model, torch_csr_args))
-        if not skip_torch_edge_list:
-            torch_model.train()
-            backward_funcs.append(lambda: backward_fn(torch_model, torch_edge_list_args))
+            backward_funcs.append(
+                functools.partial(backward_fn, torch_model, torch_inputs))
 
         for experiment_info in experiment_infos.values():
             model = experiment_info.model_train
@@ -132,6 +108,24 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
         if outfile is not None:
             path = outfile.with_name(outfile.stem + "-bwd.csv")
             write_stats_to_file(func_names, times, model_name, hidden_size, path)
+
+
+def write_stats_to_file(func_names, times, model_name, hidden_size, file_path: pathlib.Path):
+    add_header = not file_path.exists()
+    with open(file_path, 'a') as file:
+        if add_header:
+            # Write out some system info.
+            file.write(
+                f"# HOST {socket.gethostname()}, GPU {torch.cuda.get_device_name()}\n")
+
+            headers = [
+                'Name', 'Model', 'Size', 'Min', 'Mean',
+                'Median',
+                'Stdev', 'Max'
+            ]
+            file.write(','.join(headers) + '\n')
+        file.write(
+            stats_as_csv_entry(times, func_names, model_name, hidden_size))
 
 
 def stats_as_csv_entry(times, func_names, model, hidden_size):

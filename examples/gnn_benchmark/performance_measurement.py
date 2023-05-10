@@ -7,6 +7,43 @@ import tabulate
 import torch
 import torch.cuda
 
+class CudaTimer:
+    """ Time CUDA kernels with CUDA events.
+
+        :param n:
+    """
+    def __init__(self, n: int):
+        self.events = []
+        for _ in range(n + 1):
+            self.events.append(torch.cuda.Event(enable_timing=True))
+        self.cur = 0
+
+    def start(self):
+        """ Start timing the first region. """
+        self.events[0].record()
+        self.cur = 1
+
+    def next(self):
+        """ Start timing for the next region. """
+        if self.cur >= len(self.events):
+            raise RuntimeError('Trying to time too many regions')
+        self.events[self.cur].record()
+        self.cur += 1
+
+    def end(self):
+        """ Finish timing. """
+        if self.cur != len(self.events):
+            raise RuntimeError('Called end too early')
+        self.events[-1].synchronize()
+
+    def get_times(self):
+        """ Return measured time for each region. """
+        times = []
+        for i in range(1, len(self.events)):
+            times.append(self.events[i - 1].elapsed_time(self.events[i]))
+        return times
+
+
 
 def measure_performance(funcs,
                         func_names=None,
@@ -23,11 +60,10 @@ def measure_performance(funcs,
         :param launch_wait: if True, launches a wait kernel before measuring to hide kernel launch latency.
         :return: the time, in ms, of each function in funcs on each iteration.
     """
-    from daceml.testing.profiling import binary_utils
-    from daceml.testing.profiling.event_profiler import CudaTimer
+    # from daceml.testing.profiling import binary_utils
 
     times = [list() for _ in range(len(funcs))]
-    binary_utils.start_cuda_profiling()
+    # binary_utils.start_cuda_profiling()
     torch.cuda.init()
     for i, (f, fname) in enumerate(zip(funcs, func_names)):
         torch.cuda.nvtx.range_push(fname + ' Warmup')
@@ -57,7 +93,7 @@ def measure_performance(funcs,
         iter_times = timer.get_times()
         for t in iter_times:
             times[i].append(t / timing_iters)
-    binary_utils.stop_cuda_profiling()
+    # binary_utils.stop_cuda_profiling()
     return times
 
 

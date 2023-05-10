@@ -5,9 +5,8 @@ from torch_geometric.nn import GCNConv, GATConv
 
 class GCNSingleLayer(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes,
-                 normalize, bias_init=torch.nn.init.zeros_):
+                 bias_init=torch.nn.init.zeros_):
         del num_classes
-        del normalize
         super().__init__()
         self.conv = GCNConv(num_node_features,
                             num_hidden_features,
@@ -23,15 +22,15 @@ class GCNSingleLayer(torch.nn.Module):
 
 class GCN(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes,
-                 normalize, bias_init=torch.nn.init.zeros_):
+                 bias_init=torch.nn.init.zeros_):
         super().__init__()
         self.conv1 = GCNConv(num_node_features,
                              num_hidden_features,
-                             normalize=normalize,
+                             normalize=False,
                              add_self_loops=False)
         self.conv2 = GCNConv(num_hidden_features,
                              num_classes,
-                             normalize=normalize,
+                             normalize=False,
                              add_self_loops=False)
         bias_init(self.conv1.bias)
         bias_init(self.conv2.bias)
