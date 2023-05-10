@@ -1,0 +1,212 @@
+import argparse
+import faulthandler
+import functools
+import logging
+import pathlib
+import socket
+from collections import OrderedDict
+from pathlib import Path
+
+import numpy as np
+import torch
+from torch_geometric.transforms import GCNNorm
+
+from daceml import onnx as donnx
+
+from examples.gnn_benchmark import models, util
+from examples.gnn_benchmark.benchmark import do_benchmark, stats_as_csv_entry
+from examples.gnn_benchmark.experiment_info import ExperimentInfo
+from examples.gnn_benchmark.correctness import check_correctness
+from examples.gnn_benchmark.data_optimizer import optimize_data
+from examples.gnn_benchmark.datasets import get_dataset
+from examples.gnn_benchmark.util import name_to_impl_class, create_dace_model
+
+faulthandler.enable()
+donnx.default_implementation = "pure"
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
+
+torch.manual_seed(42)
+np.random.seed(42)
+use_gpu = torch.cuda.is_available()
+device = torch.device('cuda' if use_gpu else 'cpu')
+
+def parse_impl_spec(impl_spec: str):
+    """We accept impl names of the form
+    'impl_name-impl_arg1-impl_arg2:bwd_impl_name-bwd_impl_arg1...'
+    where the bwd_impl_name and bwd_impl_args are optional. If no bwd_impl_name
+    is specified, the forward impl is used for the backward pass.
+    """
+    if ':' in impl_spec:
+        impl_spec, bwd_spec = impl_spec.split(':')
+    else:
+        bwd_spec = impl_spec
+    impl_name, *impl_args = impl_spec.split('-')
+    bwd_impl_name, *bwd_impl_args = bwd_spec.split('-')
+    return impl_name, impl_args, bwd_impl_name, bwd_impl_args
+
+
+
+def main():
+    model_dict = {'gcn': models.GCN, 'linear': models.LinearModel,
+                  'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer}
+
+    parser = argparse.ArgumentParser(description='benchmark')
+    parser.add_argument('--data', required=True)
+    parser.add_argument('--mode', choices=['benchmark', 'dry', 'onlydace',
+                                           'benchmark_small'],
+                        required=True)
+    parser.add_argument('--impl', type=str, nargs='+', required=True)
+    parser.add_argument('--normalize', action='store_true')
+    parser.add_argument('--no-persistent-mem', action='store_true')
+    parser.add_argument('--no-opt', action='store_true')
+    parser.add_argument('--threadblock-dynamic', action='store_true')
+    parser.add_argument('--backward', action='store_true')
+    parser.add_argument('--model', choices=model_dict.keys(), required=True)
+    parser.add_argument('--hidden', type=int, default=None, required=True)
+    parser.add_argument('--outfile', type=str, default=None)
+    parser.add_argument('--name', type=str, default='dace')
+    parser.add_argument('--idx-dtype', type=str, default='int32')
+    parser.add_argument('--val-dtype', type=str, default='float32')
+    parser.add_argument('--no-gen-code', action='store_true')
+    parser.add_argument('--torch', choices=['both', 'csr', 'edge_list', 'none'], default='both')
+    args = parser.parse_args()
+
+    dtype_str_to_torch_type = {
+        'float16': torch.float16,
+        'float32': torch.float32,
+        'float64': torch.float64,
+        'int32': torch.int32,
+        'int64': torch.int64
+    }
+    args.idx_dtype = dtype_str_to_torch_type[args.idx_dtype]
+    args.val_dtype = dtype_str_to_torch_type[args.val_dtype]
+
+    model_class = model_dict[args.model]
+    num_hidden_features = args.hidden
+    args.outfile = Path(args.outfile) if args.outfile is not None else None
+
+    log = logging.getLogger(__name__)
+    log.setLevel(logging.INFO)
+
+    data = get_dataset(args.data, device, val_dtype=args.val_dtype)
+
+    print("Num node features: ", data.num_node_features)
+    num_classes = data.y.max().item() + 1
+    print("Num classes: ", num_classes)
+    print("Num hidden features: ", num_hidden_features)
+    print("Num nodes:", data.num_nodes)
+    print("Num non zero:", data.num_edges)
+    normalize = args.normalize
+    print("Normalize: ", normalize)
+    print("Implementation: ", args.impl)
+    print("DaCe indices dtype: ", args.idx_dtype)
+    print("DaCe values dtype: ", args.val_dtype)
+
+    # Define models.
+    torch_model = model_class(data.num_node_features, num_hidden_features, num_classes,
+                  normalize, bias_init=torch.nn.init.uniform_).to(
+        args.val_dtype).to(device)
+    torch_model.eval()
+
+    dace_models = create_experiments(args, torch_model)
+
+    # Normalize data for GCN.
+    if 'gcn' in args.model:
+        gcn_norm = GCNNorm(add_self_loops=True)
+        data = gcn_norm(data)
+
+    torch_model, dace_models = optimize_data(torch_model, dace_models, data)
+
+    for k, v in dace_models.items():
+        print(f"Impl: {k}")
+        print(v)
+
+    torch_csr_args, torch_edge_list_args = None, None
+    if args.torch == 'csr' or args.torch == 'both':
+        torch_csr_args = util.make_torch_csr_args(data)
+    if args.torch == 'edge_list' or args.torch == 'both':
+        add_edge_weight = hasattr(data, 'edge_weight') and 'gcn' in args.model
+        torch_edge_list_args = util.make_torch_edge_list_args(data, add_edge_weight)
+
+    if 'single_layer' in args.model:
+        loss_fn = lambda pred, targets: torch.sum(pred)
+    else:
+        loss_fn = torch.nn.NLLLoss()
+
+    check_correctness(dace_models, torch_model,
+                      torch_edge_list_args,
+                      torch_csr_args,
+                      targets=data.y,
+                      backward=args.backward,
+                      skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
+                      skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
+
+    if args.mode == 'benchmark' or args.mode == 'benchmark_small':
+        dace_tag = "dace"
+        if args.threadblock_dynamic:
+            dace_tag += "_tb-dynamic"
+        if args.no_opt:
+            dace_tag += "_no_autoopt"
+        if args.no_persistent_mem:
+            dace_tag += "_no_persistent_mem"
+
+        do_benchmark(dace_models, torch_model, torch_csr_args,
+                     torch_edge_list_args,
+                     backward=args.backward,
+                     loss_fn=loss_fn,
+                     targets=data.y,
+                     hidden_size=args.hidden,
+                     model_name=args.model,
+                     dace_tag=dace_tag,
+                     use_gpu=use_gpu,
+                     small=args.mode == 'benchmark_small',
+                     skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
+                     skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
+
+
+def create_experiments(args, torch_model):
+    dace_models = OrderedDict()
+
+    impl_specs = args.impl
+    if impl_specs == ['none']:
+        impl_specs = []
+    elif impl_specs == ['all']:
+        impl_specs = name_to_impl_class[args.model].keys()
+    for impl_spec in impl_specs:
+        impl_name, impl_args, bwd_impl_name, bwd_impl_args = parse_impl_spec(
+            impl_spec)
+        implementation_class = name_to_impl_class[args.model][impl_name]
+        if 'ellpack' in impl_name:
+            block_size = impl_args[0]
+            convert_data = functools.partial(
+                implementation_class.convert_data,
+                block_size=int(block_size))
+        else:
+            convert_data = implementation_class.convert_data
+        dace_model_eval, dace_model_train = create_dace_model(torch_model,
+                                                              sdfg_tag=impl_spec.replace(':', '_').replace('-', '_'),
+                                                              implementation_name=impl_name,
+                                                              backward_implementation_name=bwd_impl_name,
+                                                              threadblock_dynamic=args.threadblock_dynamic,
+                                                              persistent_mem=not args.no_persistent_mem,
+                                                              do_opt=not args.no_opt,
+                                                              device=device,
+                                                              gen_code=not args.no_gen_code,
+                                                              backward=args.backward)
+        info = ExperimentInfo(impl_name=impl_name,
+                              bwd_impl_name=bwd_impl_name,
+                              model_eval=dace_model_eval,
+                              model_train=dace_model_train,
+                              convert_data=convert_data,
+                              gnn_type=args.model,
+                              idx_dtype=args.idx_dtype,
+                              val_dtype=args.val_dtype)
+        dace_models[impl_spec] = info
+
+    return dace_models
+
+
+if __name__ == '__main__':
+    main()
+

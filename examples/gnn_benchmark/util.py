@@ -1,6 +1,5 @@
 import copy
 import functools
-import statistics
 from typing import Dict, Tuple, Optional
 
 import dace
@@ -31,26 +30,6 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
             "semester_thesis": gat_implementations.GATConvSemesterThesis}
 }
 name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
-
-
-def stats_as_csv_entry(times, func_names, model, hidden_size):
-    """ Print timing statistics.
-    :param times: the result of time_funcs.
-    :param func_names: a name to use for each function timed.
-    """
-
-    out = ''
-    for name, func_time, in zip(func_names, times):
-        row = [
-            name, model, hidden_size,
-            min(func_time),
-            statistics.mean(func_time),
-            statistics.median(func_time),
-            statistics.stdev(func_time) if len(func_time) > 1 else 0.0,
-            max(func_time)
-        ]
-        out += ','.join(map(str, row)) + '\n'
-    return out
 
 
 def create_dace_model(model: torch.nn.Module,
