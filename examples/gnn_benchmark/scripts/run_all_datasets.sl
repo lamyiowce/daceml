@@ -28,7 +28,7 @@ formats="csr coo csc"
 datasets="cora ogbn-arxiv"
 
 #hidden_sizes="8 32 128 512 2048"
-hidden_sizes="16 64 256 1024"
+hidden_sizes="8 16 32 64 128 256 512 1024"
 echo "Running model " $model
 for dataset in $datasets; do
   echo "Running dataset " $dataset
@@ -36,8 +36,8 @@ for dataset in $datasets; do
   for hidden in $hidden_sizes; do
     echo "Hidden " $hidden
     rm -rf .dacecache
-    $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none --backward
-    $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl $formats --torch none --backward
+    $do_test python main.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none --backward
+    $do_test python main.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl $formats --torch none --backward
   done
 done
 
