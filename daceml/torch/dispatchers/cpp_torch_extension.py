@@ -128,12 +128,11 @@ def argument_codegen(
         if isinstance(arglist[name], data.Array) or dt.can_access(
                 dt.ScheduleType.GPU_Device, arglist[name].storage):
             if name in guard_contiguous:
-                if logging.root.level <= logging.DEBUG:
-                    ptr_init_code += f"""
-                    if (!{name}_.is_contiguous()) {{
-                        fprintf(stderr, "{name} was not contiguous!");
-                    }}
-                    """
+                ptr_init_code += f"""
+                if (!{name}_.is_contiguous()) {{
+                    fprintf(stderr, "{name} was not contiguous!\\n");
+                }}
+                """
                 ptr_init_code += '\n' + f"Tensor {name} = {name}_.contiguous();"
 
             ptr_init_code += '\n' + f"{dctype} *{name}_ptr = reinterpret_cast<{dctype}*>({name}.data_ptr<{tctype}>());"
