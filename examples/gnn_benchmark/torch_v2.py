@@ -11,6 +11,7 @@ from torch_geometric.transforms import GCNNorm
 import examples.gnn_benchmark.torch_util
 from examples.gnn_benchmark import models
 from examples.gnn_benchmark.benchmark import do_benchmark
+from examples.gnn_benchmark.correctness import check_correctness
 from examples.gnn_benchmark.datasets import get_dataset
 from examples.gnn_benchmark.torch_profile import torch_profile
 
@@ -89,7 +90,7 @@ def main():
 
     # Define models.
     torch_model = model_class(data.num_node_features, num_hidden_features, num_classes,
-                  bias_init=torch.nn.init.uniform_).to(
+                              bias_init=torch.nn.init.uniform_).to(
         args.val_dtype).to(device)
     compiled_torch_model = torch_geometric.compile(torch_model)
     compiled_torch_model.eval()
@@ -102,10 +103,6 @@ def main():
 
     torch_experiments = []
     torch_csr_args, torch_edge_list_args = None, None
-    if args.torch == 'csr' or args.torch == 'both':
-        torch_csr_args = examples.gnn_benchmark.torch_util.make_torch_csr_args(
-            data)
-        torch_experiments += [('torch_csr', torch_model, torch_csr_args)]
     if args.torch == 'edge_list' or args.torch == 'both':
         add_edge_weight = hasattr(data, 'edge_weight') and 'gcn' in args.model
         torch_edge_list_args = examples.gnn_benchmark.torch_util.make_torch_edge_list_args(
@@ -114,12 +111,21 @@ def main():
             ('torch_edge_list', torch_model, torch_edge_list_args)]
         torch_experiments += [
             ('compiled_torch_edge_list', compiled_torch_model, torch_edge_list_args)]
+    if args.torch == 'csr' or args.torch == 'both':
+        torch_csr_args = examples.gnn_benchmark.torch_util.make_torch_csr_args(
+            data)
+        torch_experiments += [('torch_csr', torch_model, torch_csr_args)]
 
     if 'single_layer' in args.model:
         loss_fn = lambda pred, targets: torch.sum(pred)
     else:
         loss_fn = torch.nn.NLLLoss()
 
+    check_correctness(dace_models=dict(),
+                      torch_experiments=torch_experiments,
+                      loss_fn=loss_fn,
+                      targets=data.y,
+                      backward=args.backward)
     if args.mode == 'benchmark' or args.mode == 'benchmark_small':
         do_benchmark(dict(),
                      torch_experiments=torch_experiments,
@@ -130,6 +136,7 @@ def main():
                      model_name=args.model,
                      dace_tag=None,
                      use_gpu=use_gpu,
+                     outfile=args.outfile,
                      small=args.mode == 'benchmark_small')
     elif args.mode == 'torch_profile':
         torch_profile(dict(),

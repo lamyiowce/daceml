@@ -159,6 +159,7 @@ def main():
                      model_name=args.model,
                      dace_tag=dace_tag,
                      use_gpu=use_gpu,
+                     outfile=args.outfile,
                      small=args.mode == 'benchmark_small',
                      torch_experiments=torch_experiments,
                      )
