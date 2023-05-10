@@ -46,7 +46,7 @@ class GATConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
 
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
                    name="csr_semester_thesis")
-class GATConvCSR(GATConvBase):
+class GATConvSemesterThesis(GATConvBase):
     graph_format = sparse.CsrGraph
     input_spec = {
         "node_features": dace.float32,
