@@ -188,9 +188,9 @@ def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
 
 def make_torch_edge_list_args(data, add_edge_weights):
     '''Create an argument list for the torch edge list model.'''
-    torch_edge_list_args = data.x, data.edge_index
+    torch_edge_list_args = data.x.contiguous(), data.edge_index.contiguous()
     if add_edge_weights:
-        torch_edge_list_args += (data.edge_weight,)
+        torch_edge_list_args += (data.edge_weight.contiguous(),)
     return torch_edge_list_args
 
 
@@ -200,5 +200,5 @@ def make_torch_csr_args(data):
         data.edge_index, edge_attr=data.edge_weight)
 
     # pyg requires the sparse tensor input to be transposed.
-    torch_csr_args = data.x, sparse_edge_index.t()
+    torch_csr_args = data.x.contiguous(), sparse_edge_index.t()
     return torch_csr_args

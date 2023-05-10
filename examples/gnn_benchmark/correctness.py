@@ -102,6 +102,8 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
         print(f"---> Checking correctness for {name}...")
         model = experiment_info.model_eval
         args = experiment_info.data.to_input_list()
+        for i, array in enumerate(args):
+            assert array.is_contiguous(), f"{i}th input not contiguous!"
         register_replacement_overrides(experiment_info.impl_name,
                                        experiment_info.gnn_type,
                                        experiment_info.idx_dtype,

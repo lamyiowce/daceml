@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 import torch
 import torch_geometric
@@ -6,7 +6,7 @@ import torch_sparse
 
 
 class GraphMatrix:
-    def to_input_list(self):
+    def to_input_list(self) -> List[torch.Tensor]:
         raise NotImplementedError
 
 
@@ -16,7 +16,7 @@ class SparseGraph(GraphMatrix):
                  node_features: torch.Tensor,
                  *args, **kwargs
                  ):
-        self.node_features = node_features
+        self.node_features = node_features.contiguous()
 
     @classmethod
     def from_pyg_data(cls, data: torch_geometric.data.Data, idx_dtype='keep'):
@@ -48,9 +48,9 @@ class CsrGraph(SparseGraph):
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
         sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols)
         rowptrs, columns, edge_vals = sparse.csr()
-        self.edge_vals = edge_vals
-        self.rowptrs = rowptrs.to(idx_dtype)
-        self.columns = columns.to(idx_dtype)
+        self.edge_vals = edge_vals.contiguous()
+        self.rowptrs = rowptrs.to(idx_dtype).contiguous()
+        self.columns = columns.to(idx_dtype).contiguous()
         super().__init__(node_features)
 
     def data_list(self):
@@ -88,9 +88,9 @@ class CscGraph(SparseGraph):
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
         sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols)
         colptrs, rows, edge_vals = sparse.csc()
-        self.edge_vals = edge_vals
-        self.colptrs = colptrs.to(idx_dtype)
-        self.rows = rows.to(idx_dtype)
+        self.edge_vals = edge_vals.contiguous()
+        self.colptrs = colptrs.to(idx_dtype).contiguous()
+        self.rows = rows.to(idx_dtype).contiguous()
         super().__init__(node_features)
 
     def data_list(self):
@@ -106,7 +106,7 @@ class EllpackGraph(GraphMatrix):
                  block_size: int,
                  idx_dtype='keep'
                  ):
-        self.node_features = node_features
+        self.node_features = node_features.contiguous()
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
         device = rows.device
 
