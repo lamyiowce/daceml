@@ -102,6 +102,8 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
 
         for (name, model, _,), pred in zip(torch_experiments[1:],
                                            torch_preds[1:]):
+            if hasattr(model, '_orig_mod'):
+                model = model._orig_mod
             check_gradients(model, reference_model, name, reference_name,
                             verbose=True)
 

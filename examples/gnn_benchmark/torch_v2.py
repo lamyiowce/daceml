@@ -1,4 +1,5 @@
 import argparse
+import copy
 import faulthandler
 import logging
 from pathlib import Path
@@ -92,7 +93,7 @@ def main():
     torch_model = model_class(data.num_node_features, num_hidden_features, num_classes,
                               bias_init=torch.nn.init.uniform_).to(
         args.val_dtype).to(device)
-    compiled_torch_model = torch_geometric.compile(torch_model)
+    compiled_torch_model = torch_geometric.compile(copy.deepcopy(torch_model))
     compiled_torch_model.eval()
     torch_model.eval()
 
