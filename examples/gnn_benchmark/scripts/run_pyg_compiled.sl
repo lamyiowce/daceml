@@ -34,8 +34,9 @@ for dataset in $datasets; do
   for hidden in $hidden_sizes; do
     echo "Hidden " $hidden
     rm -rf .dacecache
-    $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none --backward --torch csr
-    $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none --backward --torch edge_list
+    $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --backward --torch csr
+    $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --backward --torch edge_list
   done
 done
 
+echo "Done :)"
