@@ -2,8 +2,6 @@ import argparse
 import faulthandler
 import functools
 import logging
-import pathlib
-import socket
 from collections import OrderedDict
 from pathlib import Path
 
@@ -13,13 +11,12 @@ from torch_geometric.transforms import GCNNorm
 
 import examples.gnn_benchmark.torch_util
 from daceml import onnx as donnx
-
-from examples.gnn_benchmark import models, util
-from examples.gnn_benchmark.benchmark import do_benchmark, stats_as_csv_entry
-from examples.gnn_benchmark.experiment_info import ExperimentInfo
+from examples.gnn_benchmark import models
+from examples.gnn_benchmark.benchmark import do_benchmark
 from examples.gnn_benchmark.correctness import check_correctness
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
+from examples.gnn_benchmark.experiment_info import ExperimentInfo
 from examples.gnn_benchmark.torch_profile import torch_profile
 from examples.gnn_benchmark.util import name_to_impl_class, create_dace_model
 
@@ -139,13 +136,11 @@ def main():
     else:
         loss_fn = torch.nn.NLLLoss()
 
-    check_correctness(dace_models, torch_model,
-                      torch_edge_list_args,
-                      torch_csr_args,
+    check_correctness(dace_models,
+                      torch_experiments=torch_experiments,
+                      loss_fn=loss_fn,
                       targets=data.y,
-                      backward=args.backward,
-                      skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
-                      skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
+                      backward=args.backward)
 
     if args.mode == 'benchmark' or args.mode == 'benchmark_small':
         dace_tag = "dace"
@@ -177,7 +172,7 @@ def main():
                       targets=data.y,
                       skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
                       skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
-    else:
+    elif args.mode != 'dry':
         raise ValueError(f"Invalid mode {args.mode}.")
 
 

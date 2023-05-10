@@ -130,9 +130,7 @@ def main():
                      model_name=args.model,
                      dace_tag=None,
                      use_gpu=use_gpu,
-                     small=args.mode == 'benchmark_small',
-                     skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
-                     skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
+                     small=args.mode == 'benchmark_small')
     elif args.mode == 'torch_profile':
         torch_profile(dict(),
                       torch_model,
@@ -143,7 +141,7 @@ def main():
                       targets=data.y,
                       skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
                       skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
-    else:
+    elif args.mode != 'dry':
         raise ValueError(f"Invalid mode {args.mode}.")
 
 

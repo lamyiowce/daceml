@@ -11,10 +11,10 @@ import torch
 from examples.gnn_benchmark.experiment_info import ExperimentInfo
 
 
-
 def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
-                 torch_experiments: Sequence[Tuple[str, torch.nn.Module, Sequence[torch.Tensor]]],
-                 dace_tag: str,
+                 torch_experiments: Sequence[
+                     Tuple[str, torch.nn.Module, Sequence[torch.Tensor]]],
+                 dace_tag: Optional[str],
                  targets: Optional[torch.Tensor],
                  backward: bool,
                  loss_fn: torch.nn.Module,
@@ -22,9 +22,7 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  model_name: str,
                  hidden_size: int,
                  outfile: Optional[pathlib.Path] = None,
-                 small: bool = False,
-                 skip_torch_csr: bool = False,
-                 skip_torch_edge_list: bool = False):
+                 small: bool = False):
     from examples.gnn_benchmark.performance_measurement import \
         print_time_statistics
     if use_gpu:
@@ -46,7 +44,8 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
     for torch_name, torch_model, torch_inputs in torch_experiments:
         torch_model.eval()
-        funcs.append(functools.partial(run_with_inputs, torch_model, torch_inputs))
+        funcs.append(
+            functools.partial(run_with_inputs, torch_model, torch_inputs))
         func_names.append(torch_name)
 
     for impl_spec, experiment_info in experiment_infos.items():
@@ -107,10 +106,12 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
         if outfile is not None:
             path = outfile.with_name(outfile.stem + "-bwd.csv")
-            write_stats_to_file(func_names, times, model_name, hidden_size, path)
+            write_stats_to_file(func_names, times, model_name, hidden_size,
+                                path)
 
 
-def write_stats_to_file(func_names, times, model_name, hidden_size, file_path: pathlib.Path):
+def write_stats_to_file(func_names, times, model_name, hidden_size,
+                        file_path: pathlib.Path):
     add_header = not file_path.exists()
     with open(file_path, 'a') as file:
         if add_header:

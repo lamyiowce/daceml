@@ -1,5 +1,5 @@
 import copy
-from typing import Dict
+from typing import Dict, Sequence, Tuple
 
 import torch
 
@@ -44,6 +44,12 @@ def check_gradients(result_model: torch.nn.Module,
     all_correct = True
     for name, parameter in expected_model.named_parameters():
         result_grad = result_parameters[name].grad
+        if parameter.grad is None:
+            print(f"No gradient computed for {name} in {name_result}.")
+            all_correct = False
+        if result_grad is None:
+            print(f"No gradient computed for {name} in {name_expected}.")
+            all_correct = False
         all_correct &= check_equal(result_grad, parameter.grad,
                                    name_expected=name_expected + ": " + name,
                                    name_result=name_result + ": " + name,
@@ -52,50 +58,53 @@ def check_gradients(result_model: torch.nn.Module,
 
 
 def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
-                      torch_model: torch.nn.Module,
-                      torch_edge_list_args,
-                      torch_csr_args,
+                      torch_experiments: Sequence[
+                          Tuple[str, torch.nn.Module, Sequence[torch.Tensor]]],
                       targets: torch.Tensor,
                       backward: bool,
-                      skip_torch_csr: bool,
-                      skip_torch_edge_list: bool) -> bool:
-    torch_csr_pred = None
-    torch_edge_list_pred = None
-    torch_model_csr = None
-    if not skip_torch_csr:
-        torch_model_csr = copy.deepcopy(torch_model)
-        torch_model_csr.train()
-        torch_csr_pred = torch_model_csr(*torch_csr_args)
+                      loss_fn: torch.nn.Module) -> bool:
+    model_set = set()
 
-    if not skip_torch_edge_list:
-        torch_model.train()
-        torch_edge_list_pred = torch_model(*torch_edge_list_args)
+    def copy_if_duplicate(
+            entry: Tuple[str, torch.nn.Module, Sequence[torch.Tensor]]):
+        name, model, inputs = entry
+        if model in model_set:
+            model = copy.deepcopy(model)
+        model_set.add(model)
+        return name, model, inputs
 
-    if torch_csr_pred is not None and torch_edge_list_pred is not None:
-        check_equal(torch_csr_pred.detach(), torch_edge_list_pred.detach(),
-                    verbose=False, name_result='Torch CSR',
-                    name_expected='Torch Edge List')
+    torch_experiments = [copy_if_duplicate(entry) for entry in
+                         torch_experiments]
+
+    torch_preds = []
+    for name, model, inputs in torch_experiments:
+        model.train()
+        torch_preds.append(model(*inputs))
+
+    if torch_preds:
+        reference_pred = torch_preds[0]
+        reference_name, reference_model, _ = torch_experiments[0]
+        for (name, model, _,), pred in zip(torch_experiments[1:],
+                                           torch_preds[1:]):
+            check_equal(pred, reference_pred, name_result=name,
+                        name_expected=reference_name)
+    else:
+        reference_pred = None
 
     def backward_func(pred):
-        loss = criterion(pred, targets)
+        loss = loss_fn(pred, targets)
         loss.backward()
 
     if backward:
-        if hasattr(torch_model, 'conv2'):
-            criterion = torch.nn.NLLLoss()
-        else:
-            criterion = lambda pred, targets: torch.sum(pred)
-
-        if not skip_torch_edge_list:
-            backward_func(torch_edge_list_pred)
-
-        if not skip_torch_csr:
-            backward_func(torch_csr_pred)
+        for pred in torch_preds:
+            backward_func(pred)
 
         if USE_GPU:
             torch.cuda.synchronize()
-        if torch_edge_list_pred is not None and torch_csr_pred is not None:
-            check_gradients(torch_model_csr, torch_model, "Torch CSR", "Torch Edge List",
+
+        for (name, model, _,), pred in zip(torch_experiments[1:],
+                                           torch_preds[1:]):
+            check_gradients(model, reference_model, name, reference_name,
                             verbose=True)
 
     for name, experiment_info in dace_models.items():
@@ -117,39 +126,42 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
             torch.cuda.synchronize()
             torch.cuda.nvtx.range_pop()
 
-        if torch_csr_pred is not None:
+        if reference_pred is not None:
             experiment_info.correct = check_equal(dace_pred,
-                                                  torch_csr_pred,
+                                                  reference_pred,
                                                   name_result=f"Forward predictions for DaCe {name}",
-                                                  name_expected="Torch predictions (edge list)")
+                                                  name_expected=reference_name)
         else:
-            print(f"Not checking correctness for {name} because no torch prediction was computed.")
+            print(
+                f"Not checking correctness for {name} because no torch prediction was computed.")
 
         if backward:
             model = experiment_info.model_train
             if USE_GPU:
-                torch.cuda.nvtx.range_push(name + ' backward correctness (pred)')
+                torch.cuda.nvtx.range_push(
+                    name + ' backward correctness (pred)')
                 torch.cuda.synchronize()
             dace_pred = model(*args)
             if USE_GPU:
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.synchronize()
-                torch.cuda.nvtx.range_push(name + ' backward correctness (grad)')
+                torch.cuda.nvtx.range_push(
+                    name + ' backward correctness (grad)')
                 torch.cuda.synchronize()
             backward_func(dace_pred)
             if USE_GPU:
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.synchronize()
 
-            if torch_csr_pred is not None:
+            if reference_pred is not None:
                 check_equal(dace_pred,
-                            torch_csr_pred,
+                            reference_pred,
                             name_result=f"Backward predictions for DaCe {name}",
-                            name_expected="Torch predictions")
+                            name_expected=reference_name)
                 experiment_info.correct_grads = check_gradients(model.model,
-                                                                torch_model_csr,
+                                                                reference_model,
                                                                 name_result=f"Gradients for DaCe {name}",
-                                                                name_expected="Torch gradients")
+                                                                name_expected=reference_name + "gradients")
 
     correct_keys = [key for key, value in dace_models.items() if value.correct]
     incorrect_keys = [key for key, value in dace_models.items() if
