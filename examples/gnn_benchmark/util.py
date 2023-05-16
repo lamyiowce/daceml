@@ -19,9 +19,9 @@ from examples.gnn_benchmark.sdfg_util import apply_dace_auto_optimize, \
 
 name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
     "gcn": {"csr": gcn_implementations.GCNConvCSR,
-            "csr_reorder": gcn_implementations.GCNConvCSRReordered,
+            "csr_adapt": gcn_implementations.GCNConvCSRAdapt,
             "coo": gcn_implementations.GCNConvCOO,
-            "coo_adapt": gcn_implementations.GCNConvCOO,
+            "coo_adapt": gcn_implementations.GCNConvCOOAdapt,
             "csc": gcn_implementations.GCNConvCSC,
             "ellpack_t": gcn_implementations.GCNConvEllpackTransposed,
             "ellpack": gcn_implementations.GCNConvEllpack,

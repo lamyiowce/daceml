@@ -180,8 +180,8 @@ class GCNConvCSR(GCNConvBase):
 
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
-                   name="csr_reorder")
-class GCNConvCSRReordered(GCNConvBase):
+                   name="csr_adapt")
+class GCNConvCSRAdapt(GCNConvBase):
     convert_data: Callable[[
         torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CsrGraph.from_pyg_data
     input_spec: Dict[str, dace.dtypes.typeclass] = {
@@ -208,15 +208,24 @@ class GCNConvCSRReordered(GCNConvBase):
 
                 Compute X' = A.t @ X @ W.t + b
                 """
+                if num_in_features > num_out_features:
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] = bias[j]
+                    features = dace.define_local((N, num_out_features), dtype=dtype)
+                    features[:] = np.einsum('ij,kj->ik', node_features,
+                                            linDOTweight)
+                    csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features,
+                                        output, beta=1.0, transA=True)
+                else:
+                    aggregated_features = dace.define_local((N, num_in_features),
+                                                            dtype=dtype)
+                    csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
+                                        aggregated_features, beta=0.0, transA=True)
+                    output[:] = np.einsum('ij,kj->ik', aggregated_features,
+                                          linDOTweight)
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] += bias[j]
 
-                aggregated_features = dace.define_local((N, num_in_features),
-                                                        dtype=dtype)
-                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
-                                    aggregated_features, beta=0.0, transA=True)
-                output[:] = np.einsum('ij,kj->ik', aggregated_features,
-                                      linDOTweight)
-                for i, j in dace.map[0:N, 0:num_out_features]:
-                    output[i, j] += bias[j]
 
         else:
             def gcn_op(node_features, rowptrs, columns, edge_vals,
@@ -229,13 +238,19 @@ class GCNConvCSRReordered(GCNConvBase):
                 linDOTweight: F x M
                 output: N x F
                 """
-                aggregated_features = dace.define_local((N, num_in_features),
-                                                        dtype=dtype)
-                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
-                                    aggregated_features, beta=0.0, transA=True)
-                output[:] = np.einsum('ij,kj->ik', aggregated_features,
-                                      linDOTweight)
-
+                if num_in_features > num_out_features:
+                    features = dace.define_local((N, num_out_features), dtype=dtype)
+                    features[:] = np.einsum('ij,kj->ik', node_features,
+                                            linDOTweight)
+                    csrmm_libnode.csrmm(rowptrs, columns, edge_vals, features,
+                                        output, beta=1.0, transA=True)
+                else:
+                    aggregated_features = dace.define_local((N, num_in_features),
+                                                            dtype=dtype)
+                    csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
+                                        aggregated_features, beta=0.0, transA=True)
+                    output[:] = np.einsum('ij,kj->ik', aggregated_features,
+                                          linDOTweight)
         return gcn_op
 
 

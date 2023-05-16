@@ -85,8 +85,8 @@ class GCNConvBackward(BackwardImplementation):
 
 
 @autoregister_params(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
-                     name="csr_reorder")
-class GCNConvBackwardCSRReorder(BackwardImplementation):
+                     name="csr_adapt")
+class GCNConvBackwardCSRAdapt(BackwardImplementation):
     @staticmethod
     def backward(
             forward_node: nd.Node, context: BackwardContext,
@@ -96,10 +96,10 @@ class GCNConvBackwardCSRReorder(BackwardImplementation):
         output_shape = autodiff_utils.forward_out_desc_with_name(
             forward_node, context, "output").shape
 
-        N, F = output_shape
+        N, F_out = output_shape
         node_features_desc = autodiff_utils.forward_in_desc_with_name(
             forward_node, context, "node_features")
-        M = node_features_desc.shape[1]
+        F_in = node_features_desc.shape[1]
         val_dtype = node_features_desc.dtype
 
 
@@ -118,9 +118,9 @@ class GCNConvBackwardCSRReorder(BackwardImplementation):
             bias: F
             output: N x F
 
-            node_features_grad: N x M
-            linDOTweight_grad: F x M
-            output_grad: N x F
+            node_features_grad: N x F_in
+            linDOTweight_grad: F_out x F_in
+            output_grad: N x F_out
             """
 
             # Compute the values of the gradient of weights and node_features.
@@ -128,23 +128,42 @@ class GCNConvBackwardCSRReorder(BackwardImplementation):
             # The gradient of the adjacency matrix is not computed.
 
             # Compute the gradient of the GCN layer.
-            # Grad W = Grad C^T @ A^t @ X
-            temp = dace.define_local((N, M), dtype=val_dtype)
-            csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
-                                temp, transA=True)
-            linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp)
-            bias_grad[:] = np.sum(output_grad, axis=0)
+            if F_out > F_in:
+                # Grad W = Grad Y.t @ (A.t @ X)
+                temp = dace.define_local((N, F_in), dtype=val_dtype)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
+                                    temp, transA=True)
+                bias_grad[:] = np.sum(output_grad, axis=0)
+                linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp)
+            else:
+                # Grad W = (A @ Grad Y).t @ X
+                temp = dace.define_local((N, F_out), dtype=val_dtype)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, output_grad,
+                                    temp, transA=False)
+                bias_grad[:] = np.sum(output_grad, axis=0)
+                linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
 
         def gcn_backward_with_node_features(node_features, rowptrs, columns,
                                             edge_vals,
                                             linDOTweight, node_features_grad,
                                             linDOTweight_grad, bias_grad,
                                             output_grad):
-            # Grad X = A @ Grad G @ W
-            temp = dace.define_local((N, F), dtype=val_dtype)
-            csrmm_libnode.csrmm(rowptrs, columns, edge_vals, output_grad,
-                                temp)
-            node_features_grad[:] = temp @ linDOTweight
+            if F_out > F_in:
+                # Grad X = A @ (Grad Y @ W)
+                temp = dace.define_local((N, F_in), dtype=val_dtype)
+                temp[:] = output_grad @ linDOTweight
+
+                # `columns` and `rows` are switched because transA=False doesn't work here
+                # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, temp,
+                                    node_features_grad)
+            else:
+                # Grad X = (A @ Grad Y) @ W
+                temp = dace.define_local((N, F_out), dtype=val_dtype)
+                csrmm_libnode.csrmm(rowptrs, columns, edge_vals, output_grad,
+                                    temp)
+                node_features_grad[:] = temp @ linDOTweight
+
             gcn_backward(node_features, rowptrs, columns, edge_vals,
                          linDOTweight,
                          linDOTweight_grad, bias_grad, output_grad)
@@ -347,13 +366,6 @@ class GCNConvBackwardCOOAdapt(BackwardImplementation):
             # The gradient of the adjacency matrix is not computed.
 
             # Compute the gradient of the GCN layer.
-            # Grad W = Grad C^T @ A^t @ X
-            # temp = dace.define_local((N, F_in), dtype=val_dtype)
-            # coomm(rows, columns, edge_vals, node_features, temp, transA=True,
-            #       beta=0.0)
-            # linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp)
-            #
-            # bias_grad[:] = np.sum(output_grad, axis=0)
             if F_out > F_in:
                 # Grad W = Grad Y.t @ (A.t @ X)
                 temp = dace.define_local((N, F_in), dtype=val_dtype)
