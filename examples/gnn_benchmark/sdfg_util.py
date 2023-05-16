@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 import dace
 import torch
@@ -99,11 +99,13 @@ def set_implementation(module: daceml.torch.module.DaceModule,
             node.implementation = implementation_name
 
 
-def set_memory_to_register(sdfg: dace.SDFG, array_name: str):
+def set_memory_to_register(sdfg: dace.SDFG, array_name: str, expected_shape: Tuple[int, ...] = None):
     for node, _ in sdfg.all_nodes_recursive():
         if isinstance(node, dace.nodes.AccessNode) and node.data == array_name:
             arr = sdfg.arrays[node.data]
-            arr.storage = dace.dtypes.StorageType.Register
+            if expected_shape is None or arr.shape == expected_shape:
+                print(f"Setting storage for {node} to register.")
+                arr.storage = dace.dtypes.StorageType.Register
 
 
 def apply_to_both(fn: Callable[[dace.SDFG], None]):

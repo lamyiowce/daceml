@@ -335,6 +335,77 @@ class GCNConvCOO(GCNConvBase):
         return gcn_op
 
 
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="coo_adapt")
+class GCNConvCOOAdapt(GCNConvBase):
+    convert_data: Callable[[
+        torch_geometric.data.Data], sparse.GraphMatrix] = sparse.CooGraph.from_pyg_data
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': common.SpecialInputType.VAL_DTYPE,
+        'rows': common.SpecialInputType.IDX_DTYPE,
+        'columns': common.SpecialInputType.IDX_DTYPE,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
+    }
+
+    @staticmethod
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
+                do_bias: bool):
+        if do_bias:
+            # Y = A.t @ X @ W.t + b
+            def gcn_op(node_features, rows, columns, edge_vals,
+                       linDOTweight, bias, output):
+                """
+                node_features: input features, N x M
+                row: row idxs (COO format), num_entries
+                columns: col, num_entries
+                edge_vals: values, num_entries
+                linDOTweight: F x M
+                output: N x F
+                """
+                if num_in_features > num_out_features:
+                    # Y = A.t @ (X @ W.t) + b
+                    features = dace.define_local((N, num_out_features), dtype=dtype)
+                    features[:] = np.einsum('ij,kj->ik', node_features,
+                                            linDOTweight)
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] = bias[j]
+                    coomm(rows, columns, edge_vals, features, output, beta=1.0,
+                          transA=True)
+                else:
+                    # Y = (A.t @ X) @ W.t + b
+                    temp = dace.define_local((N, num_in_features), dtype=dtype)
+                    coomm(rows, columns, edge_vals, node_features, temp, beta=0.0,
+                          transA=True)
+                    output[:] = np.einsum('nm,fm->nf', temp,
+                                            linDOTweight)
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] += bias[j]
+        else:
+            def gcn_op(node_features, rows, columns, edge_vals,
+                       linDOTweight, output):
+                """
+                node_features: input features, N x M
+                row: row idxs (COO format), num_entries
+                columns: col, num_entries
+                edge_vals: values, num_entries
+                linDOTweight: F x M
+                output: N x F
+                """
+                if num_in_features > num_out_features:
+                    features = dace.define_local((N, num_out_features), dtype=dtype)
+                    features[:] = np.einsum('ij,kj->ik', node_features,
+                                            linDOTweight)
+                    coomm(rows, columns, edge_vals, features, output, beta=1.0,
+                          transA=True)
+                else:
+                    temp = dace.define_local((N, num_out_features), dtype=dtype)
+                    coomm(rows, columns, edge_vals, node_features, temp, beta=0.0,
+                          transA=True)
+                    output[:] = np.einsum('ij,kj->ik', temp,
+                                            linDOTweight)
+        return gcn_op
+
+
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="ellpack_t")
 class GCNConvEllpackTransposed(GCNConvBase):

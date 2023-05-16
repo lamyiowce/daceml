@@ -21,6 +21,7 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
     "gcn": {"csr": gcn_implementations.GCNConvCSR,
             "csr_reorder": gcn_implementations.GCNConvCSRReordered,
             "coo": gcn_implementations.GCNConvCOO,
+            "coo_adapt": gcn_implementations.GCNConvCOO,
             "csc": gcn_implementations.GCNConvCSC,
             "ellpack_t": gcn_implementations.GCNConvEllpackTransposed,
             "ellpack": gcn_implementations.GCNConvEllpack,
@@ -132,6 +133,10 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
     fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(
         backward_sdfg, '__tmp3')
     dace_model.append_post_autodiff_hook("Set __tmp3 to register", fn)
+
+    fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(
+        backward_sdfg, '__tmp1', expected_shape=(1, 1))
+    dace_model.append_post_autodiff_hook("Set __tmp1 to register", fn)
 
     def simplify(sdfg: dace.SDFG):
         sdfg.simplify(verbose=True)
