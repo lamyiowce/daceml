@@ -58,7 +58,7 @@ def main():
     parser.add_argument('--outfile', type=str, default=None)
     parser.add_argument('--idx-dtype', type=str, default='int32')
     parser.add_argument('--val-dtype', type=str, default='float32')
-    parser.add_argument('--torch', choices=['both', 'csr', 'edge_list', 'none'], default='both')
+    parser.add_argument('--torch', choices=['both', 'csr', 'edge_list', 'none', 'compiled_edge_list'], default='both')
     args = parser.parse_args()
 
     dtype_str_to_torch_type = {
@@ -110,6 +110,13 @@ def main():
             data, add_edge_weight)
         torch_experiments += [
             ('torch_edge_list', torch_model, torch_edge_list_args)]
+        torch_experiments += [
+            ('compiled_torch_edge_list', compiled_torch_model, torch_edge_list_args)]
+    if args.torch == 'compiled_edge_list':
+        del torch_model
+        add_edge_weight = hasattr(data, 'edge_weight') and 'gcn' in args.model
+        torch_edge_list_args = examples.gnn_benchmark.torch_util.make_torch_edge_list_args(
+            data, add_edge_weight)
         torch_experiments += [
             ('compiled_torch_edge_list', compiled_torch_model, torch_edge_list_args)]
     if args.torch == 'csr' or args.torch == 'both':
