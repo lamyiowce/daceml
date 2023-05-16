@@ -62,7 +62,6 @@ class GAT(torch.nn.Module):
                  num_node_features,
                  features_per_head,
                  num_classes,
-                 _unsued,
                  num_heads=8,
                  bias_init=torch.nn.init.zeros_):
         super().__init__()

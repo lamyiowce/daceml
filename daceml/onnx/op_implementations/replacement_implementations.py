@@ -155,8 +155,8 @@ class GATConvBase(ONNXForward):
 
 
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
-                   name="semester_thesis")
-class GATConvSemesterThesis(GATConvBase):
+                   name="pure")
+class GATConv(GATConvBase):
     @staticmethod
     def get_input_spec():
         return {

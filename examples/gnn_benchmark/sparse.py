@@ -40,7 +40,7 @@ class CsrGraph(SparseGraph):
 
     def __init__(self,
                  node_features: torch.Tensor,
-                 edge_vals: torch.Tensor,
+                 edge_vals: Optional[torch.Tensor],
                  rows: torch.Tensor,
                  cols: torch.Tensor,
                  idx_dtype='keep'
@@ -48,32 +48,37 @@ class CsrGraph(SparseGraph):
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
         sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols)
         rowptrs, columns, edge_vals = sparse.csr()
-        self.edge_vals = edge_vals.contiguous()
+        self.edge_vals = edge_vals.contiguous() if edge_vals is not None else None
         self.rowptrs = rowptrs.to(idx_dtype).contiguous()
         self.columns = columns.to(idx_dtype).contiguous()
         super().__init__(node_features)
 
     def data_list(self):
-        return self.rowptrs, self.columns, self.edge_vals
+        data_list = self.rowptrs, self.columns
+        return data_list + (self.edge_vals,) if self.edge_vals is not None else data_list
 
 
 class CooGraph(SparseGraph):
 
     def __init__(self,
                  node_features: torch.Tensor,
-                 edge_vals: torch.Tensor,
+                 edge_vals: Optional[torch.Tensor],
                  rows: torch.Tensor,
                  cols: torch.Tensor,
                  idx_dtype='keep'
                  ):
         idx_dtype = rows.dtype if idx_dtype == 'keep' else idx_dtype
-        self.edge_vals = edge_vals.contiguous()
+        if edge_vals is not None:
+            self.edge_vals = edge_vals.contiguous()
+        else:
+            self.edge_vals = None
         self.cols = cols.to(idx_dtype).contiguous()
         self.rows = rows.to(idx_dtype).contiguous()
         super().__init__(node_features)
 
     def data_list(self):
-        return self.rows, self.cols, self.edge_vals
+        data_list = self.rows, self.cols
+        return data_list + (self.edge_vals,) if self.edge_vals is not None else data_list
 
 
 class CscGraph(SparseGraph):
