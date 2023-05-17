@@ -27,10 +27,12 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
             "ellpack": gcn_implementations.GCNConvEllpack,
             "semester_thesis": gcn_implementations.GCNConvSemesterThesis},
     "gat": {"semester_thesis": gat_implementations.GATConvSemesterThesis,
-            "csr": gat_implementations.GATConvCSR, }
+            "csr": gat_implementations.GATConvCSR,
+            "coo": gat_implementations.GATConvCOO,}
 
 }
 name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
+name_to_impl_class['gat_single_layer'] = name_to_impl_class['gat']
 
 
 def create_dace_model(model: torch.nn.Module,

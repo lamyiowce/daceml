@@ -75,7 +75,8 @@ class GAT(torch.nn.Module):
                              heads=1,
                              add_self_loops=False,
                              bias=True)
-
+        bias_init(self.conv1.bias)
+        bias_init(self.conv2.bias)
         self.act = nn.ELU()
         self.log_softmax = nn.LogSoftmax(dim=1)
 
@@ -85,3 +86,21 @@ class GAT(torch.nn.Module):
         x = self.conv2(x, *edge_info)
 
         return self.log_softmax(x)
+
+
+class GATSingleLayer(torch.nn.Module):
+    def __init__(self, num_node_features, features_per_head, num_classes,
+                 num_heads=8, bias_init=torch.nn.init.zeros_):
+        del num_classes
+        super().__init__()
+        self.conv = GATConv(num_node_features,
+                            features_per_head,
+                            heads=num_heads,
+                            add_self_loops=False,
+                            bias=True)
+        bias_init(self.conv.bias)
+
+    def forward(self, x, *edge_info):
+        x = self.conv(x, *edge_info)
+
+        return x

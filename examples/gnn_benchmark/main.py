@@ -48,7 +48,7 @@ def parse_impl_spec(impl_spec: str):
 
 def main():
     model_dict = {'gcn': models.GCN, 'linear': models.LinearModel,
-                  'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer}
+                  'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer, 'gat_single_layer': models.GATSingleLayer}
 
     parser = argparse.ArgumentParser(description='benchmark')
     parser.add_argument('--data', required=True)
@@ -63,6 +63,7 @@ def main():
     parser.add_argument('--backward', action='store_true')
     parser.add_argument('--model', choices=model_dict.keys(), required=True)
     parser.add_argument('--hidden', type=int, default=None, required=True)
+    parser.add_argument('--heads', type=int, default=8)
     parser.add_argument('--outfile', type=str, default=None)
     parser.add_argument('--name', type=str, default='dace')
     parser.add_argument('--idx-dtype', type=str, default='int32')
@@ -103,8 +104,10 @@ def main():
     print("DaCe values dtype: ", args.val_dtype)
 
     # Define models.
+    additional_kwargs = {} if 'gcn' in args.model else {'num_heads': args.heads}
     torch_model = model_class(data.num_node_features, num_hidden_features, num_classes,
-                  bias_init=torch.nn.init.uniform_).to(
+                  bias_init=torch.nn.init.uniform_, **additional_kwargs)
+    torch_model = torch_model.to(
         args.val_dtype).to(device)
     torch_model.eval()
 
