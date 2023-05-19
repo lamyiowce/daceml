@@ -2,6 +2,16 @@ import torch
 from torch import nn
 from torch_geometric.nn import GCNConv, GATConv
 
+try:
+    from torch_geometric.nn import CuGraphGATConv
+except ImportError:
+    CuGraphGATConv = None
+
+try:
+    from torch_geometric.nn import FusedGATConv
+except ImportError:
+    FusedGATConv = None
+
 
 class GCNSingleLayer(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes,
@@ -57,7 +67,9 @@ class LinearModel(torch.nn.Module):
         return x
 
 
-class GAT(torch.nn.Module):
+class GATBase(torch.nn.Module):
+    additional_kwargs = {}
+
     def __init__(self,
                  num_node_features,
                  features_per_head,
@@ -65,16 +77,16 @@ class GAT(torch.nn.Module):
                  num_heads=8,
                  bias_init=torch.nn.init.zeros_):
         super().__init__()
-        self.conv1 = GATConv(num_node_features,
-                             features_per_head,
-                             heads=num_heads,
-                             add_self_loops=False,
-                             bias=True)
-        self.conv2 = GATConv(features_per_head * num_heads,
-                             num_classes,
-                             heads=1,
-                             add_self_loops=False,
-                             bias=True)
+        self.conv1 = self.gat_layer(num_node_features,
+                               features_per_head,
+                               heads=num_heads,
+                               bias=True,
+                               **self.additional_kwargs)
+        self.conv2 = self.gat_layer(features_per_head * num_heads,
+                               num_classes,
+                               heads=1,
+                               bias=True,
+                               **self.additional_kwargs)
         bias_init(self.conv1.bias)
         bias_init(self.conv2.bias)
         self.act = nn.ELU()
@@ -86,6 +98,20 @@ class GAT(torch.nn.Module):
         x = self.conv2(x, *edge_info)
 
         return self.log_softmax(x)
+
+
+class GAT(GATBase):
+    gat_layer = GATConv
+    additional_kwargs = {"add_self_loops": False}
+
+
+class CuGraphGAT(GATBase):
+    gat_layer = CuGraphGATConv
+
+
+class FusedGAT(GATBase):
+    gat_layer = FusedGATConv
+    additional_kwargs = {"add_self_loops": False}
 
 
 class GATSingleLayer(torch.nn.Module):
