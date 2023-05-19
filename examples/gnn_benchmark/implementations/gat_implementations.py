@@ -144,6 +144,7 @@ class GATConvCSR(GATConvBase):
     def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
                 dtype: dace.dtypes.Typeclasses, negative_slope: float,
                 do_bias: bool):
+        @dace.program
         def gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
                    att_src, att_dst, output):
             """
@@ -169,11 +170,13 @@ class GATConvCSR(GATConvBase):
             # Compute node attention coefficients.
             # This doesn't work because this einsum is not supported by dace.
             # if heads == 1:
-            #     alpha_src = np.einsum('nf,f->n', features[:, 0, :], att_src[0, 0])
-            #     alpha_dst = np.einsum('nf,f->n', features[:, 0, :], att_dst[0, 0])
+            #     # alpha_src = np.einsum('nf,f->n', features[:, 0, :], att_src[0, 0])
+            #     # alpha_dst = np.einsum('nf,f->n', features[:, 0, :], att_dst[0, 0])
+            #     alpha_src = np.sum(features * att_src, axis=-1)  # shape: N x H
+            #     alpha_dst = np.sum(features * att_dst, axis=-1)  # N x H
             # else:
-            #     alpha_src = np.einsum('hf,nhf->nh', att_src[0], features)
-            #     alpha_dst = np.einsum('hf,nhf->nh', att_dst[0], features)
+            #     alpha_src = np.einsum('nhf,hf->nh', features, att_src[0])
+            #     alpha_dst = np.einsum('nhf,hf->nh', features, att_dst[0])
             alpha_src = np.sum(features * att_src, axis=-1)  # shape: N x H
             alpha_dst = np.sum(features * att_dst, axis=-1)  # N x H
 
@@ -208,6 +211,18 @@ class GATConvCSR(GATConvBase):
                         output[colv] += np.reshape(
                             np.reshape(e[v], (heads, 1)) * features[l],
                             (heads * num_out_features,))
+
+            # for l, k in dace.map[0:N, 0:num_out_features]:
+            #     for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+            #         colv = columns[v]
+            #         if heads == 1:
+            #             output[colv] += e[v] * features[l]
+            #         else:
+            #             # TODO wrong assignment
+            #             output[colv, k:k+heads] += features[l, :, k] * e[v]
+            #                 # np.reshape(
+            #                 # np.reshape(e[v], (heads, 1)) * features[l],
+            #                 # (heads * num_out_features,))
 
         if do_bias:
             def bias_prog(node_features, rowptrs, columns, lin_srcDOTweight,
@@ -264,6 +279,14 @@ class GATConvCOO(GATConvBase):
             # Calculate attention weights.
             e = np.zeros((num_entries, heads), dtype=dtype)
             softmax_sum = np.zeros((N, heads), dtype=dtype)
+
+            e[:] = 0
+            softmax_sum[:] = 0
+
+            # def leaky_relu(x):
+            #     return np.maximum(negative_slope * x, x)
+            #
+            # e[:] = np.exp(leaky_relu(alpha_src[rows] + alpha_dst[columns]))
 
             # TODO: Below loop can be flipped.
             for i in dace.map[0:num_entries]:
