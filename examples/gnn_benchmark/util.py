@@ -28,6 +28,7 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
         "ellpack": gcn_implementations.GCNConvEllpack,
         "semester_thesis": gcn_implementations.GCNConvSemesterThesis,
         "csr_coo": gcn_implementations.GCNConvCSRCOO,
+        "csr_coo_adapt": gcn_implementations.GCNConvCSRCOOAdapt,
     },
     "gat": {
         "semester_thesis": gat_implementations.GATConvSemesterThesis,
@@ -52,11 +53,14 @@ def create_dace_model(model: torch.nn.Module,
                       ) -> Tuple[dace.DaceModule, dace.DaceModule]:
     sdfg_name = f"{model.__class__.__name__}_{sdfg_tag}"
 
+    # Hack: model inputs will have names 0, 1, 2, 3... and we want to skip
+    # calculating the gradients for all of them.
+    inputs_to_skip = [str(i) for i in range(20)]
     dace_model_eval = DaceModule(copy.deepcopy(model),
                                  sdfg_name=sdfg_name + "_eval",
                                  backward=False,
                                  regenerate_code=gen_code,
-                                 inputs_to_skip=['0', '1', '2', '3']).to(device)
+                                 inputs_to_skip=inputs_to_skip).to(device)
     add_hooks(dace_model_eval, backward=False, device=device, do_opt=do_opt,
               implementation_name=implementation_name,
               backward_implementation_name=backward_implementation_name,
@@ -69,7 +73,7 @@ def create_dace_model(model: torch.nn.Module,
                                       sdfg_name=sdfg_name + "_train",
                                       backward=True,
                                       regenerate_code=gen_code,
-                                      inputs_to_skip=['0', '1', '2', '3']).to(
+                                      inputs_to_skip=inputs_to_skip).to(
             device)
         add_hooks(dace_model_train, backward=True, device=device, do_opt=do_opt,
                   implementation_name=implementation_name,
