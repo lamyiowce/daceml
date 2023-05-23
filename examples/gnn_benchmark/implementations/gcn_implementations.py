@@ -60,14 +60,16 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
         dtype = features_desc.dtype
         weights_desc = in_desc_with_name(node, state, sdfg, "linDOTweight")
         num_out_features = weights_desc.shape[0]
-        try:
-            col_desc = in_desc_with_name(node, state, sdfg, "columns")
-            num_entries = col_desc.shape[-1]
-        except ValueError:
-            # In the CSC format there is no `columns` array, but the `rows`
-            # array.
-            row_desc = in_desc_with_name(node, state, sdfg, "rows")
-            num_entries = row_desc.shape[-1]
+
+        arrays_of_len_num_entries = ["columns", "rows", "coo_rows"]
+        for array_name in arrays_of_len_num_entries:
+            try:
+                desc = in_desc_with_name(node, state, sdfg, array_name)
+                num_entries = desc.shape[-1]
+                break
+            except ValueError:
+                continue
+
         do_bias = 'bias' in [inp.name for inp in node.schema.inputs]
         return N, do_bias, dtype, num_entries, num_in_features, num_out_features
 
@@ -576,4 +578,70 @@ class GCNConvEllpack(GCNConvBase):
                     output[i, j] += bias[j]
 
             return bias_prog
+        return gcn_op
+
+
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csr_coo")
+class GCNConvCSRCOO(GCNConvBase):
+    convert_data: Callable[[
+        torch_geometric.data.Data], sparse.GraphMatrix] = sparse.HybridCsrCooGraph.from_pyg_data
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': common.SpecialInputType.VAL_DTYPE,
+        'csr_rowptrs': common.SpecialInputType.IDX_DTYPE,
+        'csr_columns': common.SpecialInputType.IDX_DTYPE,
+        'csr_edge_vals': common.SpecialInputType.VAL_DTYPE,
+        'coo_rows': common.SpecialInputType.IDX_DTYPE,
+        'coo_columns': common.SpecialInputType.IDX_DTYPE,
+        'coo_edge_vals': common.SpecialInputType.VAL_DTYPE,
+    }
+
+    @staticmethod
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
+                do_bias: bool):
+        if do_bias:
+            # Y = A_coo.t @ (X @ W.t) + A_csr.t @ (X @ W.t) + b
+
+            def gcn_op(node_features,
+                       csr_rowptrs, csr_columns, csr_edge_vals,
+                       coo_rows, coo_columns, coo_edge_vals,
+                       linDOTweight, bias, output):
+                """
+                node_features: input features, N x M
+                ...
+                linDOTweight: F x M
+                output: N x F
+                """
+
+                features = dace.define_local((N, num_out_features), dtype=dtype)
+                features[:] = np.einsum('ij,kj->ik', node_features,
+                                        linDOTweight)
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] = bias[j]
+                coomm(coo_rows, coo_columns, coo_edge_vals, features, output, beta=1.0,
+                      transA=True)
+                csrmm_libnode.csrmm(csr_rowptrs, csr_columns, csr_edge_vals, features,
+                                    output, beta=1.0, transA=True)
+
+        else:
+            def gcn_op(node_features,
+                       csr_rowptrs, csr_columns, csr_edge_vals,
+                       coo_rows, coo_columns, coo_edge_vals,
+                       linDOTweight, output):
+                """
+                node_features: input features, N x M
+                row: row idxs (COO format), num_entries
+                columns: col, num_entries
+                edge_vals: values, num_entries
+                linDOTweight: F x M
+                output: N x F
+                """
+                features = dace.define_local((N, num_out_features), dtype=dtype)
+                features[:] = np.einsum('ij,kj->ik', node_features,
+                                        linDOTweight)
+                output[:] = 0
+                coomm(coo_rows, coo_columns, coo_edge_vals, features, output, beta=1.0,
+                      transA=True)
+                csrmm_libnode.csrmm(csr_rowptrs, csr_columns, csr_edge_vals, features,
+                                    output, beta=1.0, transA=True)
         return gcn_op

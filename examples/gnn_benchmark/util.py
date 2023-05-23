@@ -18,18 +18,22 @@ from examples.gnn_benchmark.sdfg_util import apply_dace_auto_optimize, \
     specialize_mem_onnx, make_maps_dynamic, apply_dace_auto_opt_after_autodiff
 
 name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
-    "gcn": {"csr": gcn_implementations.GCNConvCSR,
-            "csr_adapt": gcn_implementations.GCNConvCSRAdapt,
-            "coo": gcn_implementations.GCNConvCOO,
-            "coo_adapt": gcn_implementations.GCNConvCOOAdapt,
-            "csc": gcn_implementations.GCNConvCSC,
-            "ellpack_t": gcn_implementations.GCNConvEllpackTransposed,
-            "ellpack": gcn_implementations.GCNConvEllpack,
-            "semester_thesis": gcn_implementations.GCNConvSemesterThesis},
-    "gat": {"semester_thesis": gat_implementations.GATConvSemesterThesis,
-            "csr": gat_implementations.GATConvCSR,
-            "coo": gat_implementations.GATConvCOO,}
-
+    "gcn": {
+        "csr": gcn_implementations.GCNConvCSR,
+        "csr_adapt": gcn_implementations.GCNConvCSRAdapt,
+        "coo": gcn_implementations.GCNConvCOO,
+        "coo_adapt": gcn_implementations.GCNConvCOOAdapt,
+        "csc": gcn_implementations.GCNConvCSC,
+        "ellpack_t": gcn_implementations.GCNConvEllpackTransposed,
+        "ellpack": gcn_implementations.GCNConvEllpack,
+        "semester_thesis": gcn_implementations.GCNConvSemesterThesis,
+        "csr_coo": gcn_implementations.GCNConvCSRCOO,
+    },
+    "gat": {
+        "semester_thesis": gat_implementations.GATConvSemesterThesis,
+        "csr": gat_implementations.GATConvCSR,
+        "coo": gat_implementations.GATConvCOO,
+    }
 }
 name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
 name_to_impl_class['gat_single_layer'] = name_to_impl_class['gat']
