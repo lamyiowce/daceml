@@ -10,8 +10,16 @@ class GraphMatrix:
     def to_input_list(self) -> List[torch.Tensor]:
         raise NotImplementedError
 
+    @staticmethod
+    def parse_args(args_list):
+        raise NotImplementedError
+
 
 class SparseGraph(GraphMatrix):
+    @staticmethod
+    def parse_args(args_list):
+        if len(args_list) > 0:
+            raise ValueError(f'Unexpected arguments: {args_list}')
 
     def __init__(self,
                  node_features: torch.Tensor,
@@ -20,14 +28,15 @@ class SparseGraph(GraphMatrix):
         self.node_features = node_features.contiguous() if node_features is not None else None
 
     @classmethod
-    def from_pyg_data(cls, data: torch_geometric.data.Data, idx_dtype=None):
+    def from_pyg_data(cls, data: torch_geometric.data.Data, idx_dtype=None, **kwargs):
         edge_index = data.edge_index
         edge_weight = data.edge_weight
         sparse_matrix = cls(node_features=data.x,
                             edge_vals=edge_weight,
                             rows=edge_index[0],
                             cols=edge_index[1],
-                            idx_dtype=idx_dtype)
+                            idx_dtype=idx_dtype,
+                            **kwargs)
         return sparse_matrix
 
     def to_input_list(self):
@@ -110,12 +119,19 @@ class CscGraph(SparseGraph):
 
 
 class HybridCsrCooGraph(SparseGraph):
+    @staticmethod
+    def parse_args(args):
+        if 0 < len(args) <= 1:
+            return {"csr_cutoff": float(args[0])}
+        else:
+            return {}
+
     def __init__(self,
                  node_features: Optional[torch.Tensor],
                  edge_vals: torch.Tensor,
                  rows: torch.Tensor,
                  cols: torch.Tensor,
-                 csr_cutoff: float = 0.5,
+                 csr_cutoff: float,
                  idx_dtype: Optional[torch.dtype] = None
                  ):
         idx_dtype = idx_dtype or rows.dtype
@@ -173,6 +189,12 @@ class HybridCsrCooGraph(SparseGraph):
 
 
 class EllpackGraph(GraphMatrix):
+    @staticmethod
+    def parse_args(args):
+        if len(args) != 1:
+            raise ValueError(f'EllpackGraph requires exactly one argument: block size.')
+        return {"block_size": int(args[0])}
+
     def __init__(self,
                  node_features: torch.Tensor,
                  edge_vals: torch.Tensor,

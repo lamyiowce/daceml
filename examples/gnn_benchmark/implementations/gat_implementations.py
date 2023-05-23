@@ -46,7 +46,7 @@ class GATConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
                    name="semester_thesis")
 class GATConvSemesterThesis(GATConvBase):
-    convert_data = sparse.CsrGraph.from_pyg_data
+    graph_format = sparse.CsrGraph
     input_spec = {
         "node_features": SpecialInputType.VAL_DTYPE,
         "rowptrs": SpecialInputType.IDX_DTYPE,
@@ -133,7 +133,7 @@ class GATConvSemesterThesis(GATConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
                    name="csr")
 class GATConvCSR(GATConvBase):
-    convert_data = sparse.CsrGraph.from_pyg_data
+    graph_format = sparse.CsrGraph
     input_spec = {
         "node_features": SpecialInputType.VAL_DTYPE,
         "rowptrs": SpecialInputType.IDX_DTYPE,
@@ -239,7 +239,7 @@ class GATConvCSR(GATConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
                    name="coo")
 class GATConvCOO(GATConvBase):
-    convert_data = sparse.CooGraph.from_pyg_data
+    graph_format = sparse.CooGraph
     input_spec: typing.Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
         'rows': common.SpecialInputType.IDX_DTYPE,

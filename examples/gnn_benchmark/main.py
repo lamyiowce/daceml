@@ -30,6 +30,7 @@ np.random.seed(42)
 use_gpu = torch.cuda.is_available()
 device = torch.device('cuda' if use_gpu else 'cpu')
 
+
 def parse_impl_spec(impl_spec: str):
     """We accept impl names of the form
     'impl_name-impl_arg1-impl_arg2:bwd_impl_name-bwd_impl_arg1...'
@@ -45,10 +46,10 @@ def parse_impl_spec(impl_spec: str):
     return impl_name, impl_args, bwd_impl_name, bwd_impl_args
 
 
-
 def main():
     model_dict = {'gcn': models.GCN, 'linear': models.LinearModel,
-                  'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer, 'gat_single_layer': models.GATSingleLayer}
+                  'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer,
+                  'gat_single_layer': models.GATSingleLayer}
 
     parser = argparse.ArgumentParser(description='benchmark')
     parser.add_argument('--data', required=True)
@@ -106,7 +107,7 @@ def main():
     # Define models.
     additional_kwargs = {} if 'gcn' in args.model else {'num_heads': args.heads}
     torch_model = model_class(data.num_node_features, num_hidden_features, num_classes,
-                  bias_init=torch.nn.init.uniform_, **additional_kwargs)
+                              bias_init=torch.nn.init.uniform_, **additional_kwargs)
     torch_model = torch_model.to(
         args.val_dtype).to(device)
     torch_model.eval()
@@ -131,7 +132,8 @@ def main():
         torch_experiments += [('torch_csr', torch_model, torch_csr_args)]
     if args.torch == 'edge_list' or args.torch == 'both':
         add_edge_weight = hasattr(data, 'edge_weight') and 'gcn' in args.model
-        torch_edge_list_args = examples.gnn_benchmark.torch_util.make_torch_edge_list_args(data, add_edge_weight)
+        torch_edge_list_args = examples.gnn_benchmark.torch_util.make_torch_edge_list_args(data,
+                                                                                           add_edge_weight)
         torch_experiments += [('torch_edge_list', torch_model, torch_edge_list_args)]
 
     if 'single_layer' in args.model:
@@ -192,15 +194,10 @@ def create_experiments(args, torch_model):
         impl_name, impl_args, bwd_impl_name, bwd_impl_args = parse_impl_spec(
             impl_spec)
         implementation_class = name_to_impl_class[args.model][impl_name]
-        if 'ellpack' in impl_name:
-            block_size = impl_args[0]
-            convert_data = functools.partial(
-                implementation_class.convert_data,
-                block_size=int(block_size))
-        else:
-            convert_data = implementation_class.convert_data
+        format_args = implementation_class.graph_format.parse_args(impl_args)
+        sdfg_tag = impl_spec.replace(':', '__').replace('-', '_').replace('.', '_')
         dace_model_eval, dace_model_train = create_dace_model(torch_model,
-                                                              sdfg_tag=impl_spec.replace(':', '_').replace('-', '_'),
+                                                              sdfg_tag=sdfg_tag,
                                                               implementation_name=impl_name,
                                                               backward_implementation_name=bwd_impl_name,
                                                               threadblock_dynamic=args.threadblock_dynamic,
@@ -213,7 +210,8 @@ def create_experiments(args, torch_model):
                               bwd_impl_name=bwd_impl_name,
                               model_eval=dace_model_eval,
                               model_train=dace_model_train,
-                              convert_data=convert_data,
+                              graph_format=implementation_class.graph_format,
+                              graph_format_args=format_args,
                               gnn_type=args.model,
                               idx_dtype=args.idx_dtype,
                               val_dtype=args.val_dtype)
@@ -224,4 +222,3 @@ def create_experiments(args, torch_model):
 
 if __name__ == '__main__':
     main()
-

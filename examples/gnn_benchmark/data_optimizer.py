@@ -17,11 +17,15 @@ def optimize_data(model: torch.nn.Module,
     # Assuming data is in the adjacency list format.
     model, data = normalize(model, data)
 
-    # TODO: Not sure if this would work in for data formats with parameters.
     target_formats = {}
     for impl_name, experiment_info in dace_models.items():
-        data_fn = experiment_info.convert_data
-        if data_fn not in target_formats:
-            target_formats[data_fn] = experiment_info.convert_data(data, idx_dtype=experiment_info.idx_dtype)
-        experiment_info.data = target_formats[data_fn]
+        format = experiment_info.graph_format
+        format_args = experiment_info.graph_format_args
+        format_args_hashable = tuple([v for k, v in sorted(format_args.items())])
+        data_idx = (format, format_args_hashable)
+        if data_idx not in target_formats:
+            target_formats[data_idx] = format.from_pyg_data(data,
+                                                            idx_dtype=experiment_info.idx_dtype,
+                                                            **format_args)
+        experiment_info.data = target_formats[data_idx]
     return model, dace_models
