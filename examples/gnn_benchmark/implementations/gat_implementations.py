@@ -247,6 +247,11 @@ class GATConvCSR(GATConvBase):
             # output: N x H * F'
             # e: num_entries x H
             # features: N x H x F'
+            # output = A_e @ features
+
+            # OUTPUT: N * H x F'
+            # e: num_entries * H
+            # features: N * H x F'
             output[:] = 0
             for l in dace.map[0:N]:
                 for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
@@ -254,6 +259,16 @@ class GATConvCSR(GATConvBase):
                     output[colv] += np.reshape(
                         np.reshape(e[v], (heads, 1)) * features[l],
                         (heads * num_out_features,))
+
+            # output_perm = np.empty((heads, N, num_out_features), dtype=dtype) # H x N x F'
+            # features_perm = np.transpose(features, (1, 0, 2)) # H x N x F'
+            # e_perm = np.transpose(e, (1, 0)) # H x num_entries
+            # for h in dace.map[0:heads]:
+            #     csrmm(rowptrs, columns, e_perm[h], features_perm[h], output_perm[h])
+            #
+            # output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)), (N, heads * num_out_features))
+
+
 
             # for l, k in dace.map[0:N, 0:num_out_features]:
             #     for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
