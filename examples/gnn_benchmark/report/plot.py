@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 import numpy as np
@@ -12,18 +11,33 @@ DEFAULT_LABEL_MAP = {
     'torch_csr': 'Torch CSR',
     'torch_edge_list': 'Torch Edge List',
     'dace_csr': 'Dace CSR',
+    'dace_csr_adapt': 'Dace CSR (adapt MM order)',
     'dace_coo': 'Dace COO',
+    'dace_coo_adapt': 'Dace COO (adapt MM order)',
     'dace_csc': 'Dace CSC',
+    'dace_csr_coo_adapt': 'Dace CSR/COO adapt, CSR 50%',
+    'dace_csr_coo': 'Dace CSR/COO, CSR 50%',
 }
+DEFAULT_LABEL_MAP.update(
+    {f'dace_csr_coo_adapt-0.{i}': f'Dace CSR/COO adapt, CSR {i}0%' for i in
+     range(3, 9)})
+
 
 def get_colors(names: pd.Series):
-    reds = ['indianred', 'lightcoral', 'darkred', 'red']
-    greens = ['lightgreen', 'mediumseagreen', 'mediumaquamarine', 'darkgreen']
+    reds_intense = ['orangered']
+    reds = ['indianred', 'lightcoral', 'lightsalmon', 'pink']
+    greens = ['olivedrab', 'yellowgreen', 'forestgreen', 'limegreen', 'seagreen', 'mediumseagreen',
+              'lightseagreen', 'mediumturquoise', 'paleturquoise', 'steelblue', 'lightskyblue']
     # Get unique names. If 'torch' is in the name, use red, otherwise green.
     unique_names = names.unique()
     color_dict = {}
     for name in unique_names:
-        color_dict[name] = reds.pop(0) if 'torch' in name else greens.pop(0)
+        if 'compile' in name:
+            color_dict[name] = reds_intense.pop(0)
+        elif 'torch' in name:
+            color_dict[name] = reds.pop(0)
+        else:
+            color_dict[name] = greens.pop(0)
     return names.map(color_dict)
 
 
@@ -31,24 +45,29 @@ def prep_df(full_df):
     full_df = full_df.drop_duplicates(subset=['Size', 'Model', 'Name'])
     df = full_df.pivot(index='Size', columns='Name', values='Mean')
     std_df = full_df.pivot(index='Size', columns='Name', values='Stdev')
-    sorted_cols = sorted(df.columns, key=lambda x: 'torch' in x)
+    print(df)
+    sorted_cols = sorted(df.columns, key=lambda x: ('torch' in x, 'edge_list' in x))
     df = df.reindex(sorted_cols, axis=1)
     std_df = std_df.reindex(sorted_cols, axis=1)
+    print(df)
     return df, std_df
 
 
-def make_plot(full_df, name, label_map=None, bwd_df=None):
+def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False):
     df, std_df = prep_df(full_df)
-    print(df)
     colors = get_colors(df.columns)
     bar_width = 0.75
+    figsize = (6, 2 + len(df) * 1.2)
     if bwd_df is None:
-        ax = df.plot(figsize=(6, 8), kind='barh', ylabel='Runtime [ms]',
+        ax = df.plot(figsize=figsize, kind='barh', ylabel='Runtime [ms]',
                      xlabel='Hidden size', color=colors,
                      xerr=std_df, label='Forward', width=bar_width)
     else:
         bwd_df, bwd_std_df = prep_df(bwd_df)
-        ax = bwd_df.plot(figsize=(6, 8),
+        if len(bwd_df.columns) != len(df.columns):
+            print('Warning: bwd_df and df have different lengths')
+            print('Differing columns: ', set(bwd_df.columns) ^ set(df.columns))
+        ax = bwd_df.plot(figsize=figsize,
                          kind='barh',
                          color=colors,
                          xerr=bwd_std_df,
@@ -81,7 +100,11 @@ def make_plot(full_df, name, label_map=None, bwd_df=None):
     }
     default_label_map.update(label_map or {})
     labels = [default_label_map.get(name, name) for name in df.columns]
-    plt.legend(labels, loc='upper left' if name == 'gcn' else 'lower right')
+
+    if legend_outside:
+        plt.legend(labels, loc='center left', bbox_to_anchor=(1, 0.5))
+    else:
+        plt.legend(labels, loc='upper left' if name == 'gcn' else 'lower right')
 
     plt.xticks(rotation=0)
 
@@ -130,7 +153,8 @@ def make_performance_plot(full_df, name, labels=None, title=None):
             ax.bar_label(container, fmt="%.2f")
 
     plt.tight_layout()
-    plt.savefig(PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {name}-performance.pdf', bbox_inches='tight')
+    plt.savefig(PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {name}-performance.pdf',
+                bbox_inches='tight')
     plt.show()
 
 
@@ -158,55 +182,17 @@ def get_flops_df(full_df, name):
         df_flops[col] = flop / (df[col] / 1000)
     print(df_flops)
 
-
-    mem = 4 * (4*num_nodes * df.index + num_nodes * num_nodes + 4 * df.index * num_edges + df.index) / 1000 / 1000 / 1000
+    mem = 4 * (
+            4 * num_nodes * df.index + num_nodes * num_nodes + 4 * df.index * num_edges + df.index) / 1000 / 1000 / 1000
     op_int = np.zeros((len(df.index), len(df.columns)))
     for i, col in enumerate(df_flops.columns):
-        op_int[:, i] = df_flops[col] * 1000 / mem # FLOPS / B
+        op_int[:, i] = df_flops[col] * 1000 / mem  # FLOPS / B
 
     df_op_int = pd.DataFrame(op_int, index=df.index, columns=df.columns)
     print(op_int)
     print("FLOPS", df_flops)
     print("Op INT", df_op_int)
     return df, df_flops, df_op_int
-
-
-def make_roofline_plot(df, name):
-    """Make a roofline plot for V100-PCIE-16GB."""
-    _, df_flops, df_op_int = get_flops_df(df, name)
-    df_flops = df_flops * 1000 # GFLOPS
-    ax = plt.figure(figsize=(8, 5))
-    # Set both axes to logarithmic scaling.
-    plt.xscale('log')
-    plt.yscale('log')
-
-    # Set axis limits.
-    # plt.xlim(1e-1, 1e2)
-    plt.ylim(1e-1, 1e5)
-
-    # Set axis labels.
-    plt.xlabel('Operational Intensity [FLOP/Byte]')
-    plt.ylabel('Performance [GFLOP/s]')
-
-    # Plot the theoretical performance peak for V100.
-    peak_v100 = 14 * 1000  # https://images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf
-    plt.plot([1e-1, 1e2], [peak_v100, peak_v100], color='black')
-    plt.text(1, peak_v100 * 1.1, f'Theoretical FP32: {peak_v100/1000} TFLOP/s', rotation=0,
-            verticalalignment='bottom',
-            horizontalalignment='left', fontsize=12)
-
-    # Plot the memory bound.
-    mem_bound = 900 # gb / s
-    plt.plot([1/mem_bound, peak_v100 / mem_bound], [1, peak_v100], color='black')
-    plt.text(1, mem_bound * 1.1, f'HBM bandwidth: {mem_bound} GB/s', rotation=32, rotation_mode='anchor',
-             fontsize=12)
-
-    for col in df_flops.columns:
-        plt.plot(df_op_int[col], df_flops[col], label=col)
-
-    plt.legend()
-    plt.show()
-
 
 
 def read_many_dfs(filenames, name_to_replace=None, backward: bool = True,
@@ -233,8 +219,19 @@ def read_many_dfs(filenames, name_to_replace=None, backward: bool = True,
                     name_fn) if name_fn else name
             bwd_dfs.append(df_temp)
 
-    return pd.concat(dfs), pd.concat(bwd_dfs)
+    return pd.concat(dfs), pd.concat(bwd_dfs) if backward else None
 
+
+def plot_compare_csr_coo_cutoffs():
+    arxiv_df, arxiv_bwd_df = read_many_dfs(
+        filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
+                   '11.05-pyg-arxiv-1024.csv',
+                   '16.05.12.53-gcn-ogbn-arxiv-196721.csv',
+                   '16.05.13.59-gcn-csr_adapt-ogbn-arxiv-196780.csv',
+                   '23.05.13.27-gcn-ogbn-arxiv-202455.csv']
+    )
+    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv', plot_title="OGB Arxiv, cutoff comparison",
+                  drop_names=['torch_edge_list', 'torch_csr'], sizes=[16, 256], legend_outside=True)
 
 def main():
     # tag = "11-04-gcn-csr-cora"
@@ -244,20 +241,35 @@ def main():
     # plot_backward("data/24-04-gcn-reduce-gpuauto-simplify", model='GCN')
     # plot_backward("data/24-04-gcn-single-reduce-gpuauto-simplify", model='GCN Single layer')
 
+    plot_compare_csr_coo_cutoffs()
+
     arxiv_df, arxiv_bwd_df = read_many_dfs(
         filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
                    '10.05.08.35-fix-contiguous-gcn-ogbn-arxiv-191411.csv',
-                   '10.05.16.28-gcn-ogbn-arxiv-191708.csv']
+                   '10.05.16.28-gcn-ogbn-arxiv-191708.csv',
+                   '11.05-pyg-arxiv-1024.csv',
+                   '16.05.12.53-gcn-ogbn-arxiv-196721.csv',
+                   '16.05.13.59-gcn-csr_adapt-ogbn-arxiv-196780.csv',
+                   '23.05.14.02-gcn-ogbn-arxiv-202457.csv']
     )
-    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv', plot_title="OGB Arxiv")
+    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv', plot_title="OGB Arxiv", drop_names=['dace_csc', 'dace_coo', 'dace_csr'])
 
     cora_df, cora_bwd_df = read_many_dfs(
         filenames=['10.05.09.03-fix-contiguous-gcn-cora-191411.csv',
                    '10.05.15.40-pyg-gcn-cora-191680.csv',
-                   '10.05.16.08-gcn-cora-191708.csv']
+                   '10.05.16.08-gcn-cora-191708.csv',
+                   '16.05.12.40-gcn-cora-196721.csv',
+                   '16.05.13.45-gcn-csr_adapt-cora-196780.csv',
+                   '23.05.12.56-gcn-cora-202421.csv']
     )
-    plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-ogbn-cora', plot_title="Cora")
+    plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-ogbn-cora', plot_title="Cora", drop_names=['dace_csc', 'dace_coo', 'dace_csr'])
 
+    #
+    # gat_arxiv_df, gat_arxiv_bwd_df = read_many_dfs(['18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv'], backward=True)
+    # plot_backward(df=gat_arxiv_df, bwd_df=gat_arxiv_bwd_df, tag='', plot_title="GAT Arxiv")
+    #
+    # gatcoradf, gatcorabwd_df = read_many_dfs(['18.05.14.43-pyg-gat-cora-198393.csv'], backward=True)
+    # plot_backward(df=gatcoradf, bwd_df=gatcorabwd_df, tag='', plot_title="GAT Cora")
 
     # cora_single_df, _ = read_many_dfs(
     #     filenames=['04.05.10.07-gcn_single_layer-cora-186177.csv',]
@@ -297,7 +309,8 @@ def plot_midthesis_main_datasets():
         filenames=['01.05.11.17-gcn-cora-183528.csv',
                    '03.05.17.14-gcn-cora-csc-185561.csv',
                    '03.05.18.04-gcn-cora-alt-sizes-185598.csv'])
-    plot_backward(tag="cora", sizes=[16, 64, 256, 1024], plot_title='GCN, Cora', df=cora_df, bwd_df=cora_bwd_df)
+    plot_backward(tag="cora", sizes=[16, 64, 256, 1024], plot_title='GCN, Cora', df=cora_df,
+                  bwd_df=cora_bwd_df)
     plot_backward(tag="cora", plot_title='GCN, Cora', df=cora_df, bwd_df=cora_bwd_df)
 
 
@@ -314,15 +327,18 @@ def plot_stream_comparison():
         "dace_autoopt_persistent_mem_csr_single_stream": "DaCe CSR single stream",
         "dace_autoopt_persistent_mem_csr_many_streams": "DaCe CSR many streams",
     }
-    make_plot(df, f"GCN Backward + forward pass, Cora, V100", bwd_df=bwd_df,
+    make_plot(df, f"GCN Backward + forward, Cora, V100", bwd_df=bwd_df,
               label_map=labels)
 
 
-def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None, sizes=None):
+def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None, sizes=None, drop_names=None,
+                  legend_outside=False):
     if df is None:
         df = pd.read_csv(DATA_FOLDER / (tag + '.csv'), comment='#')
     if sizes is not None:
         df = df[df['Size'].isin(sizes)]
+    if drop_names is not None:
+        df = df[~df['Name'].isin(drop_names)]
 
     default_labels = DEFAULT_LABEL_MAP.copy()
     default_labels.update(labels or {})
@@ -337,8 +353,11 @@ def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None, sizes=None
     if bwd_df is not None:
         if sizes is not None:
             bwd_df = bwd_df[bwd_df['Size'].isin(sizes)]
+        if drop_names is not None:
+            bwd_df = bwd_df[~bwd_df['Name'].isin(drop_names)]
 
-        make_plot(df, f"{plot_title}:  Backward + forward pass", labels, bwd_df=bwd_df)
+        make_plot(df, f"{plot_title}:  BWD + FWD", labels, bwd_df=bwd_df,
+                  legend_outside=legend_outside)
 
 
 def plot_adapt_matmul_order():
