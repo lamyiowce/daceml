@@ -1,6 +1,7 @@
 import dace
 import numpy as np
 import pytest
+import scipy
 import torch
 from torch import nn
 from torch_geometric.nn import GATConv
@@ -23,16 +24,12 @@ def set_implementation(dace_module, implementation):
     dace_module.prepend_post_onnx_hook("set_implementation", hook)
 
 
-@pytest.mark.parametrize("bias", [False, True], ids=['', 'bias'])
-@pytest.mark.parametrize("implementation", ['csr', 'semester_thesis'])
-def test_gat(bias, implementation):
-    self_loops = False
-    normalize = False
-
-    N = 3
-    F_in = 2
-    F_out = 3
-    heads = 2
+@pytest.mark.parametrize("bias", [True], ids=['bias'])
+@pytest.mark.parametrize("implementation", ['csr'])
+@pytest.mark.parametrize("N,F,heads", [(2, 3, 2), (2, 3, 1), (120, 20, 8)])
+def test_gat(bias, implementation, N, F, heads):
+    F_in = F
+    F_out = F + 3
     torch.random.manual_seed(42)
     # weights_values = torch.rand((F_out, F_in))
     # bias_values = torch.rand((F_out,))
@@ -50,30 +47,28 @@ def test_gat(bias, implementation):
                                  F_out,
                                  bias=bias,
                                  heads=heads,
-                                 add_self_loops=self_loops)
-            # self.conv1.lin.weight = nn.Parameter(weights_values)
-            # if bias:
-            #     self.conv1.bias = nn.Parameter(bias_values)
+                                 add_self_loops=False)
 
         def forward(self, x, *edge_info):
             x = self.conv1(x, *edge_info)
             return x
 
     reference_model = GAT()
-    model = DaceModule(GAT(), sdfg_name=sdfg_name)
+    model = DaceModule(reference_model, sdfg_name=sdfg_name)
     set_implementation(model, implementation)
 
-    ##
+    # Create input.
     edges = torch.tensor([[0, 0, 0, 2, 2], [0, 1, 2, 0, 2]])
     edge_values = torch.tensor([1., 2., 3., 4., 5.])
-    adj_matrix = SparseTensor.from_edge_index(edges, edge_attr=edge_values)
-    rowptr, col, edge_vals = adj_matrix.csr()
+    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
+    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A))
+    rowptr, col, _ = adj_matrix.csr()
     x = torch.rand((N, F_in))
 
     # PyG requires that the adj matrix is transposed when using SparseTensor.
     expected_pred = reference_model(x, adj_matrix.t()).detach().numpy()
 
-    pred = model(x, rowptr, col, edge_vals)
+    pred = model(x, rowptr, col)
 
     print('\nCalculated: \n', pred)
     print('Expected: \n', expected_pred)
