@@ -59,6 +59,31 @@ def test_spmm_pure():
     assert np.allclose(C, expected_C)
 
 
+def test_batched_spmm(transA):
+    batch_size = 3
+    N = 2
+    M = 4
+    F = 5
+    A = torch.rand((batch_size, N, M), dtype=torch.float32)
+    B = torch.rand((batch_size, M, F), dtype=torch.float32)
+    C = torch.empty((batch_size, N, F), dtype=torch.float32)
+    A_sparse = SparseTensor.from_dense(A)
+    A_rowptrs, A_columns, A_vals = A_sparse.csr()
+    if not transA:
+        expected_C = A @ B + beta * C
+    else:
+        expected_C = A.T @ B + beta * C
+
+    @dace.program
+    def spmm(A_rowptrs, A_columns, A_vals, B, C):
+        csrmm(A_rowptrs, A_columns, A_vals, B, C, beta=beta, transA=transA)
+
+    spmm(A_rowptrs, A_columns, A_vals, B, C)
+
+    print('\nCalculated: \n', C)
+    print('Expected: \n', expected_C)
+    assert np.allclose(C, expected_C)
+
 def test_many_stream_spmm():
     N = 4
     M = 2

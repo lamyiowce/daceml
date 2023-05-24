@@ -25,68 +25,57 @@ def set_implementation(dace_module, implementation):
 
 @pytest.mark.parametrize("bias", [False, True], ids=['', 'bias'])
 @pytest.mark.parametrize("implementation", ['csr', 'semester_thesis'])
-def test_gcn(bias, implementation):
+def test_gat(bias, implementation):
     self_loops = False
     normalize = False
 
-    weights_values = torch.Tensor([[1, 1], [0, 0], [1, 0]])
-    bias_values = torch.Tensor([0.21, 0.37, 0])
+    N = 3
+    F_in = 2
+    F_out = 3
+    heads = 2
+    torch.random.manual_seed(42)
+    # weights_values = torch.rand((F_out, F_in))
+    # bias_values = torch.rand((F_out,))
 
-    register_replacement_overrides(implementation_name=implementation, layer_name='gcn')
+    register_replacement_overrides(implementation_name=implementation,
+                                   layer_name='gat', idx_dtype=torch.int64,
+                                   val_dtype=torch.float32)
 
-    sdfg_name = f'GAT_{implementation}_{self_loops}_{normalize}_{bias}'
+    sdfg_name = f'GAT_{implementation}_{bias}'
 
     class GAT(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.conv1 = GATConv(2,
-                                 3,
+            self.conv1 = GATConv(F_in,
+                                 F_out,
                                  bias=bias,
-                                 normalize=normalize,
+                                 heads=heads,
                                  add_self_loops=self_loops)
-            self.conv1.lin.weight = nn.Parameter(weights_values)
-            if bias:
-                self.conv1.bias = nn.Parameter(bias_values)
+            # self.conv1.lin.weight = nn.Parameter(weights_values)
+            # if bias:
+            #     self.conv1.bias = nn.Parameter(bias_values)
 
         def forward(self, x, *edge_info):
             x = self.conv1(x, *edge_info)
             return x
 
+    reference_model = GAT()
     model = DaceModule(GAT(), sdfg_name=sdfg_name)
     set_implementation(model, implementation)
 
+    ##
     edges = torch.tensor([[0, 0, 0, 2, 2], [0, 1, 2, 0, 2]])
     edge_values = torch.tensor([1., 2., 3., 4., 5.])
     adj_matrix = SparseTensor.from_edge_index(edges, edge_attr=edge_values)
     rowptr, col, edge_vals = adj_matrix.csr()
-    x = torch.tensor([[0., 1], [1, 1], [-1, 0]])
+    x = torch.rand((N, F_in))
+
+    # PyG requires that the adj matrix is transposed when using SparseTensor.
+    expected_pred = reference_model(x, adj_matrix.t()).detach().numpy()
 
     pred = model(x, rowptr, col, edge_vals)
 
-    original_gcnconv = GAT()
-    # PyG requires that the adj matrix is transposed when using SparseTensor.
-    expected_pred = original_gcnconv(x, adj_matrix.t()).detach().numpy()
-
     print('\nCalculated: \n', pred)
     print('Expected: \n', expected_pred)
     assert np.allclose(pred, expected_pred)
 
-
-def test_simple():
-    weights_values = torch.Tensor([[1, 1], [0, 0], [1, 0]])
-
-    edges = torch.tensor([[0, 0, 0, 2, 2], [0, 1, 2, 0, 2]])
-    edge_values = torch.tensor([1., 2., 3., 4., 5.])
-    adj_matrix = SparseTensor.from_edge_index(edges, edge_attr=edge_values)
-    dense = adj_matrix.to_dense()
-    x = torch.tensor([[0., 1], [1, 1], [-1, 0]])
-    original_gcnconv = GATConv(3, 2, normalize=False, add_self_loops=False, bias=False)
-    original_gcnconv.lin.weight = nn.Parameter(weights_values)
-    # PyG requires that the adj matrix is transposed when using SparseTensor.
-    expected_pred = original_gcnconv(x, adj_matrix.t()).detach().numpy()
-
-    pred = dense.T @ (x @ weights_values.T)
-
-    print('\nCalculated: \n', pred)
-    print('Expected: \n', expected_pred)
-    assert np.allclose(pred, expected_pred)
