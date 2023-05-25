@@ -8,6 +8,7 @@ from torch_geometric.nn import GATConv
 from torch_sparse import SparseTensor
 
 from daceml.torch.module import DaceModule
+from examples.gnn_benchmark.csrmm_libnode import csrmm
 from examples.gnn_benchmark.util import register_replacement_overrides
 
 torch.backends.cuda.matmul.allow_tf32 = False
@@ -26,19 +27,19 @@ def set_implementation(dace_module, implementation):
 
 @pytest.mark.parametrize("bias", [True], ids=['bias'])
 @pytest.mark.parametrize("implementation", ['csr'])
-@pytest.mark.parametrize("N,F,heads", [(2, 3, 2), (2, 3, 1), (120, 20, 8)])
-def test_gat(bias, implementation, N, F, heads):
+@pytest.mark.parametrize("N,F,heads", [(2, 3, 1), (2, 3, 2), (120, 20, 8)])
+@pytest.mark.parametrize("seed", [40, 42])
+def test_gat(bias, implementation, N, F, heads, seed):
     F_in = F
     F_out = F + 3
     torch.random.manual_seed(42)
-    # weights_values = torch.rand((F_out, F_in))
-    # bias_values = torch.rand((F_out,))
+    np.random.seed(seed)
 
     register_replacement_overrides(implementation_name=implementation,
                                    layer_name='gat', idx_dtype=torch.int64,
                                    val_dtype=torch.float32)
 
-    sdfg_name = f'GAT_{implementation}_{bias}'
+    sdfg_name = f'GAT_{implementation}_{bias}_{heads}_{seed}'
 
     class GAT(torch.nn.Module):
         def __init__(self):
@@ -58,10 +59,9 @@ def test_gat(bias, implementation, N, F, heads):
     set_implementation(model, implementation)
 
     # Create input.
-    edges = torch.tensor([[0, 0, 0, 2, 2], [0, 1, 2, 0, 2]])
-    edge_values = torch.tensor([1., 2., 3., 4., 5.])
-    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
+    graph = scipy.sparse.random(N, N, density=0.5, format='csr') + scipy.sparse.eye(N, format='csr')
     adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A))
+    print(adj_matrix)
     rowptr, col, _ = adj_matrix.csr()
     x = torch.rand((N, F_in))
 
@@ -70,7 +70,126 @@ def test_gat(bias, implementation, N, F, heads):
 
     pred = model(x, rowptr, col)
 
+    check_equal(expected_pred, pred)
+
+
+def check_equal(expected_pred, pred):
     print('\nCalculated: \n', pred)
     print('Expected: \n', expected_pred)
-    assert np.allclose(pred, expected_pred)
+    if not np.allclose(pred, expected_pred):
+        print("Abs error: ", np.abs(pred - expected_pred).max())
+        print("Rel error: ", np.abs(pred - expected_pred).max() / np.abs(expected_pred).max())
+        assert False
 
+
+# @pytest.mark.parametrize("N", [3, 7])
+# @pytest.mark.parametrize("F", [4, 9])
+# @pytest.mark.parametrize("heads", [1])
+# @pytest.mark.parametrize("seed", [2137, 402])
+@pytest.mark.parametrize("N", [3])
+@pytest.mark.parametrize("F", [4])
+@pytest.mark.parametrize("heads", [1])
+@pytest.mark.parametrize("seed", [2137])
+def test_spmm_single_head(N, F, heads, seed):
+    if torch.cuda.is_available():
+        import cupy as np
+    else:
+        import numpy as np
+    torch.random.manual_seed(42)
+    np.random.seed(seed)
+
+    def ref(rowptrs, columns, features, e, output):
+        output[:] = 0
+        for l in range(N):
+            for v in range(rowptrs[l], rowptrs[l + 1]):
+                colv = columns[v]
+                if heads == 1:
+                    for k in dace.map[0:F]:
+                        output[colv, k] += e[v, 0] * features[l, 0, k]
+
+    @dace.program
+    def csrmm_prog(rowptrs, columns, features, e, output):
+        csrmm(rowptrs, columns, e, features, output,
+              transA=True, beta=0.0)
+
+    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
+    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A))
+    print(adj_matrix)
+    rowptr, col, _ = adj_matrix.csr()
+    if torch.cuda.is_available():
+        rowptr = np.array(rowptr.numpy(), copy=True)
+        col = np.array(col.numpy(), copy=True)
+    else:
+        rowptr = np.copy(rowptr.numpy())
+        col = np.copy(col.numpy())
+    x = np.random.rand(N, heads, F)
+    vals = np.random.rand(col.shape[0], heads)
+
+    print(f"rowptr {rowptr.shape} {rowptr.dtype}: ", rowptr)
+    print(f"col {col.shape}: ", col)
+    print(f"x {x.shape}: ", x)
+    print(f"vals {vals.shape}: ", vals)
+
+    expected = np.zeros((N, heads * F))
+    ref(rowptr, col, x, vals, expected)
+
+    result = np.zeros((N, heads * F))
+    csrmm_prog(rowptr, col, x, vals, result)
+
+    check_equal(expected, result)
+
+
+@pytest.mark.parametrize("N,F", [(3, 4), (7, 9)])
+@pytest.mark.parametrize("heads", [2, 3])
+@pytest.mark.parametrize("seed", [2137, 402])
+# @pytest.mark.parametrize("N,F", [(3, 4)])
+# @pytest.mark.parametrize("heads", [2])
+# @pytest.mark.parametrize("seed", [2137])
+def test_spmm_many_heads(N, F, heads, seed):
+    if torch.cuda.is_available():
+        import cupy as np
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    print(device)
+    torch.random.manual_seed(42)
+    np.random.seed(seed)
+    dtype = np.float32
+
+    def ref(rowptrs, columns, features, e, output):
+        output[:] = 0
+        for l in dace.map[0:N]:
+            for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+                colv = columns[v]
+                output[colv] += np.reshape(
+                    np.reshape(e[v], (heads, 1)) * features[l],
+                    (heads * F,))
+
+    @dace.program
+    def csrmm_prog(rowptrs, columns, features, e, output):
+        output_perm = np.zeros((heads, N, F), dtype=dace.float32)  # H x N x F'
+        features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
+        e_perm = np.transpose(e, (1, 0))  # H x num_entries
+        # for h in dace.map[0:heads]:
+        for h in range(heads):
+            output[h] = h
+            # csrmm(rowptrs, columns, e_perm[h], features_perm[h], output_perm[h], transA=True,
+            #       beta=1.0)
+
+        output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)), (N, heads * F))
+
+    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
+    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(device))
+    print(adj_matrix)
+    rowptr, col, _ = adj_matrix.csr()
+    x = np.random.rand(N, heads, F).astype(dtype)
+    vals = np.random.rand(col.shape[0], heads)
+
+    expected = np.zeros((N, heads * F), dtype=dtype)
+    ref(rowptr, col, x, vals, expected)
+
+    # fn_result = torch.zeros((N, heads * F))
+    # csrmm_prog.f(rowptr, col, x, vals, fn_result)
+    # check_equal(expected, fn_result)
+
+    result = np.zeros((N, heads * F), dtype=dtype)
+    csrmm_prog(rowptr, col, x, vals, result)
+    check_equal(expected, result)
