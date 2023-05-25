@@ -1,4 +1,4 @@
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Dict
 
 import numpy as np
 import torch
@@ -11,7 +11,7 @@ class GraphMatrix:
         raise NotImplementedError
 
     @staticmethod
-    def parse_args(args_list):
+    def parse_args(args_list) -> Dict[str, Union[str, int, float]]:
         raise NotImplementedError
 
 
@@ -20,6 +20,7 @@ class SparseGraph(GraphMatrix):
     def parse_args(args_list):
         if len(args_list) > 0:
             raise ValueError(f'Unexpected arguments: {args_list}')
+        return {}
 
     def __init__(self,
                  node_features: torch.Tensor,
@@ -68,7 +69,13 @@ class CsrGraph(SparseGraph):
         return data_list + (self.edge_vals,) if self.edge_vals is not None else data_list
 
     def __repr__(self):
-        return f'CsrGraph(node_features={self.node_features.shape}, edge_vals={self.edge_vals.shape}, rows={self.rowptrs.shape}, cols={self.columns.shape})'
+        repr_str = f'{self.__class__.__name__}('
+        if self.node_features is not None:
+            repr_str += f'node_features={self.node_features.shape},'
+        if self.edge_vals is not None:
+            repr_str += f' edge_vals={self.edge_vals.shape},'
+        repr_str += f' rows={self.rowptrs.shape}, cols={self.columns.shape})'
+        return repr_str
 
 
 class CooGraph(SparseGraph):
@@ -94,7 +101,13 @@ class CooGraph(SparseGraph):
         return data_list + (self.edge_vals,) if self.edge_vals is not None else data_list
 
     def __repr__(self):
-        return f'CooGraph(node_features={self.node_features.shape}, edge_vals={self.edge_vals.shape}, rows={self.rows.shape}, cols={self.cols.shape})'
+        repr_str = f'CooGraph('
+        if self.node_features is not None:
+            repr_str += f'node_features={self.node_features.shape},'
+        if self.edge_vals is not None:
+            repr_str += f' edge_vals={self.edge_vals.shape},'
+        repr_str += f' rows={self.rows.shape}, cols={self.cols.shape})'
+        return repr_str
 
 
 class CscGraph(SparseGraph):
@@ -148,7 +161,8 @@ class HybridCsrCooGraph(SparseGraph):
         # `coo_row_idx` has -1 if the entry goes to csr, otherwise it has the row index
         # of the coo entry.
         coo_row_idx = -1 * torch.ones_like(columns)
-        for row_idx, (row_start, csr_row_len, row_end) in enumerate(zip(rowptrs[:-1], csr_row_lens, rowptrs[1:])):
+        for row_idx, (row_start, csr_row_len, row_end) in enumerate(
+                zip(rowptrs[:-1], csr_row_lens, rowptrs[1:])):
             coo_row_idx[row_start + csr_row_len:row_end] = row_idx
         csr_rowptrs = torch.zeros_like(rowptrs, dtype=idx_dtype)
         csr_rowptrs[1:] = torch.cumsum(csr_row_lens, dim=0)
@@ -166,7 +180,8 @@ class HybridCsrCooGraph(SparseGraph):
             self.coo_edge_vals = None
 
         assert (self.csr_cols.shape[0] + self.coo_cols.shape[0] ==
-                columns.shape[0]), 'CSR and COO columns do not add up to the total number of columns.'
+                columns.shape[
+                    0]), 'CSR and COO columns do not add up to the total number of columns.'
 
         super().__init__(node_features)
 
@@ -211,14 +226,17 @@ class EllpackGraph(GraphMatrix):
         rowptrs, columns, edge_vals = sparse.csr()
         num_nodes = rowptrs.shape[0] - 1
         if num_nodes % block_size != 0:
-            raise ValueError(f"Ellpack block size ({block_size} should divide the number of nodes ({num_nodes}).")
+            raise ValueError(
+                f"Ellpack block size ({block_size} should divide the number of nodes ({num_nodes}).")
 
         num_blocked_rows = num_nodes // block_size
         col_block_idxs = columns // block_size
 
-        ell_columns = -torch.ones((num_blocked_rows, num_blocked_rows), dtype=columns.dtype, device=device)
+        ell_columns = -torch.ones((num_blocked_rows, num_blocked_rows), dtype=columns.dtype,
+                                  device=device)
         max_num_blocks_in_row = 0
-        for i, (a, b) in enumerate(zip(rowptrs[:-block_size:block_size], rowptrs[block_size::block_size])):
+        for i, (a, b) in enumerate(
+                zip(rowptrs[:-block_size:block_size], rowptrs[block_size::block_size])):
             unique_idxs = col_block_idxs[a:b].unique()
             unique_idxs.sort()
             ell_columns[i, :unique_idxs.shape[0]] = unique_idxs
@@ -227,7 +245,8 @@ class EllpackGraph(GraphMatrix):
 
         self.columns = ell_columns[:, :max_num_blocks_in_row].to(idx_dtype).contiguous()
 
-        self.values = torch.zeros((num_nodes, max_num_blocks_in_row * block_size), dtype=edge_vals.dtype, device=device)
+        self.values = torch.zeros((num_nodes, max_num_blocks_in_row * block_size),
+                                  dtype=edge_vals.dtype, device=device)
         for i, (a, b) in enumerate(zip(rowptrs[:-1], rowptrs[1:])):
             row_cols = columns[a:b]
             row_col_block_idxs = col_block_idxs[a:b]
@@ -262,15 +281,18 @@ class EllpackGraph(GraphMatrix):
     @classmethod
     def from_pyg_data(cls, data: torch_geometric.data.Data, block_size: int,
                       idx_dtype: Union[str, torch.dtype] = 'keep'):
-        return cls(data.x, edge_vals=data.edge_weight, rows=data.edge_index[0], cols=data.edge_index[1],
+        return cls(data.x, edge_vals=data.edge_weight, rows=data.edge_index[0],
+                   cols=data.edge_index[1],
                    idx_dtype=idx_dtype, block_size=block_size)
 
     @classmethod
-    def from_dense(cls, adjacency_matrix: torch.Tensor, node_features: Optional[torch.Tensor], block_size: int,
+    def from_dense(cls, adjacency_matrix: torch.Tensor, node_features: Optional[torch.Tensor],
+                   block_size: int,
                    idx_dtype: Union[str, torch.dtype] = 'keep'):
         csr_matrix = torch_sparse.SparseTensor.from_dense(adjacency_matrix)
         rows, col, val = csr_matrix.coo()
-        return EllpackGraph(node_features, rows=rows, cols=col, edge_vals=val, block_size=block_size,
+        return EllpackGraph(node_features, rows=rows, cols=col, edge_vals=val,
+                            block_size=block_size,
                             idx_dtype=idx_dtype)
 
 
@@ -286,5 +308,6 @@ class EllpackTransposedGraph(EllpackGraph):
     def from_pyg_data(cls, data: torch_geometric.data.Data, block_size: int,
                       idx_dtype: Union[str, torch.dtype] = 'keep'):
         # Same as for EllpackGraph, but the rows and cols are switched.
-        return cls(data.x, edge_vals=data.edge_weight, rows=data.edge_index[1], cols=data.edge_index[0],
+        return cls(data.x, edge_vals=data.edge_weight, rows=data.edge_index[1],
+                   cols=data.edge_index[0],
                    idx_dtype=idx_dtype, block_size=block_size)
