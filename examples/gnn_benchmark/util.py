@@ -156,6 +156,18 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
     dace_model.append_post_autodiff_hook("simplify",
                                          sdfg_util.apply_to_both(simplify))
 
+    def make_outer_map_seq(sdfg: dace.SDFG):
+        for node in sdfg.all_nodes_recursive():
+            if isinstance(node[0], dace.sdfg.nodes.MapEntry) \
+                    and node[0].schedule == dace.dtypes.ScheduleType.GPU_Device \
+                    and len(node[0].map.params):
+                if node[0].label == 'call_214_map':
+                    print("Changing schedule to Unrolled ", node[0].map)
+                    node[0].schedule = dace.dtypes.ScheduleType.Unrolled
+                else:
+                    print("Keeping schedule ", node[0].map, node[0].label)
+
+    dace_model.append_post_onnx_hook("make_outer_map_seq", lambda model: make_outer_map_seq(model.sdfg))
 
 def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
                                    val_dtype):
