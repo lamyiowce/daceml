@@ -194,7 +194,8 @@ class ExpandCSRMMPure(ExpandTransformation):
             init_state.add_mapped_tasklet(
                 'csrmm_init', {'_o%d' % i: '0:%s' % symstr(d)
                                for i, d in enumerate(shape_c)}, {},
-                'out = 0', {'out': dace.Memlet.simple('_c', ','.join(['_o%d' % i for i in range(len(shape_c))]))},
+                'out = 0', {'out': dace.Memlet.simple('_c', ','.join(
+                    ['_o%d' % i for i in range(len(shape_c))]))},
                 external_edges=True)
         elif node.beta == 1.0:
             # Simplify computation
@@ -216,22 +217,28 @@ class ExpandCSRMMPure(ExpandTransformation):
             init_state.add_mapped_tasklet(
                 'csrmm_init', {'_o%d' % i: '0:%s' % symstr(d)
                                for i, d in enumerate(cdesc.shape)},
-                {'_in': dace.Memlet.simple('_cin', ','.join(['_o%d' % i for i in range(len(cdesc.shape))]))},
+                {'_in': dace.Memlet.simple('_cin', ','.join(
+                    ['_o%d' % i for i in range(len(cdesc.shape))]))},
                 f'_out = {node.beta} * _in',
-                {'_out': dace.Memlet.simple('_c', ','.join(['_o%d' % i for i in range(len(cdesc.shape))]))},
+                {'_out': dace.Memlet.simple('_c', ','.join(
+                    ['_o%d' % i for i in range(len(cdesc.shape))]))},
                 external_edges=True)
 
         # Multiplication map
-        outer_map_entry, outer_map_exit = nstate.add_map("spmm_1", dict(i='0:' + str(array_a_rows.shape[0] - 1)))
+        outer_map_entry, outer_map_exit = nstate.add_map("spmm_1", dict(
+            i='0:' + str(array_a_rows.shape[0] - 1)))
         outer_map_entry.add_in_connector("IN__a_vals")
         outer_map_entry.add_in_connector("IN__a_cols")
         outer_map_entry.add_in_connector("IN__a_rows")
         outer_map_entry.add_in_connector("IN__b")
         outer_map_exit.add_out_connector("OUT__c")
 
-        nstate.add_edge(a_val_node, None, outer_map_entry, "IN__a_vals", mm.Memlet.from_array("_a_vals", array_a_vals))
-        nstate.add_edge(a_col_node, None, outer_map_entry, "IN__a_cols", mm.Memlet.from_array("_a_cols", array_a_cols))
-        nstate.add_edge(a_row_node, None, outer_map_entry, "IN__a_rows", mm.Memlet.from_array("_a_rows", array_a_rows))
+        nstate.add_edge(a_val_node, None, outer_map_entry, "IN__a_vals",
+                        mm.Memlet.from_array("_a_vals", array_a_vals))
+        nstate.add_edge(a_col_node, None, outer_map_entry, "IN__a_cols",
+                        mm.Memlet.from_array("_a_cols", array_a_cols))
+        nstate.add_edge(a_row_node, None, outer_map_entry, "IN__a_rows",
+                        mm.Memlet.from_array("_a_rows", array_a_rows))
         nstate.add_edge(b_node, None, outer_map_entry, "IN__b", mm.Memlet.from_array("_b", array_b))
         nstate.add_edge(outer_map_exit, "OUT__c", c_node, None, mm.Memlet.from_array("_c", array_c))
 
@@ -240,7 +247,8 @@ class ExpandCSRMMPure(ExpandTransformation):
         outer_map_entry.add_out_connector("OUT__a_rows")
         outer_map_entry.add_out_connector("OUT__b")
 
-        inner_map_entry, inner_map_exit = nstate.add_map("spmm_2", dict(j="__map_19_b0:__map_19_e1"))
+        inner_map_entry, inner_map_exit = nstate.add_map("spmm_2",
+                                                         dict(j="__map_19_b0:__map_19_e1"))
         inner_map_entry.add_in_connector("__map_19_b0")
         inner_map_entry.add_in_connector("__map_19_e1")
         nstate.add_edge(outer_map_entry, "OUT__a_rows", inner_map_entry, "__map_19_b0",
@@ -257,7 +265,8 @@ class ExpandCSRMMPure(ExpandTransformation):
                         mm.Memlet.from_array("_a_cols", array_a_cols))
 
         inner_map_entry.add_in_connector("IN_tmp_b")
-        nstate.add_edge(outer_map_entry, "OUT__b", inner_map_entry, "IN_tmp_b", mm.Memlet.from_array("_b", array_b))
+        nstate.add_edge(outer_map_entry, "OUT__b", inner_map_entry, "IN_tmp_b",
+                        mm.Memlet.from_array("_b", array_b))
 
         inner_map_exit.add_out_connector("OUT__c_1")
         outer_map_exit.add_in_connector("IN__c")
@@ -285,7 +294,8 @@ class ExpandCSRMMPure(ExpandTransformation):
                         mm.Memlet.simple("_a_cols", "j"))
 
         k_map_entry.add_in_connector("IN_tmp_b_1")
-        nstate.add_edge(inner_map_entry, "OUT_tmp_b", k_map_entry, "IN_tmp_b_1", mm.Memlet.from_array("_b", array_b))
+        nstate.add_edge(inner_map_entry, "OUT_tmp_b", k_map_entry, "IN_tmp_b_1",
+                        mm.Memlet.from_array("_b", array_b))
 
         k_map_exit.add_out_connector("OUT__c_1")
         inner_map_exit.add_in_connector("IN__c_1")
@@ -307,15 +317,18 @@ class ExpandCSRMMPure(ExpandTransformation):
         nstate.add_edge(k_map_entry, "OUT_tmp_a_cols_1", tasklet_ind, "index_a_cols_0",
                         mm.Memlet.simple("_a_cols", "j"))
         nstate.add_edge(k_map_entry, "OUT_tmp_b_1", tasklet_ind, "__ind_b",
-                        mm.Memlet.simple("_b", f"k, 0:{B_rows}" if node.transB else f"0:{B_rows}, k"))
+                        mm.Memlet.simple("_b",
+                                         f"k, 0:{B_rows}" if node.transB else f"0:{B_rows}, k"))
 
         tasklet_mult = nstate.add_tasklet("spmm", {
             "__a": None,
             "__b": None
         }, {"__o": None},
                                           code=f"__o = {node.alpha} * (__a * __b)")
-        nstate.add_edge(k_map_entry, "OUT_tmp_a_vals_1", tasklet_mult, "__a", mm.Memlet.simple("_a_vals", "j"))
-        nstate.add_edge(tasklet_ind, "lookup", tasklet_mult, "__b", mm.Memlet.simple("_b_value", "0"))
+        nstate.add_edge(k_map_entry, "OUT_tmp_a_vals_1", tasklet_mult, "__a",
+                        mm.Memlet.simple("_a_vals", "j"))
+        nstate.add_edge(tasklet_ind, "lookup", tasklet_mult, "__b",
+                        mm.Memlet.simple("_b_value", "0"))
 
         k_map_exit.add_in_connector("IN__c_1")
         nstate.add_edge(tasklet_mult, "__o", k_map_exit, "IN__c_1",
@@ -341,10 +354,23 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         avals = operands['_a_vals'][1]
         bdesc = operands['_b'][1]
         cdesc = sdfg.arrays[state.out_edges(node)[0].data.data]
+        # We need to use the shapes computed by _get_csrmm_operands, because it holds the
+        # squeezed shapes. Otherwise, we would get the wrong shapes in case the input has
+        # shape 2, 1, 4, for example.
+        avals_shape = operands['_a_vals'][2]
+        b_shape = operands['_b'][2]
+        c_shape = operands['_c'][2]
 
-        # If buffers are not on the GPU, copy them
-        needs_copy = any(desc.storage not in (dace.StorageType.GPU_Global, dace.StorageType.CPU_Pinned)
-                         for desc in (arows, acols, avals, bdesc, cdesc))
+        # If buffers are not on the GPU, copy them.
+        needs_copy = any(
+            desc.storage not in (dace.StorageType.GPU_Global, dace.StorageType.CPU_Pinned)
+            for desc in (arows, acols, avals, bdesc, cdesc))
+        if needs_copy:
+            print("!!!!!! Matrices not on GPU !!!!!!!")
+            cpu_matrices = [desc for desc in (arows, acols, avals, bdesc, cdesc) if desc.storage not in (
+            dace.StorageType.GPU_Global, dace.StorageType.CPU_Pinned)]
+            print(cpu_matrices)
+            raise ValueError("matrices not on GPU: " + str(cpu_matrices))
 
         dtype = avals.dtype.base_type
         func = "cusparseSpMM"
@@ -394,7 +420,8 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         # Get indices data type.
         idx_dtype = arows.dtype.base_type
         if idx_dtype not in [dace.int32, dace.int64]:
-            raise ValueError(f"Unsupported index type: {idx_dtype} (only int32 and int64 supported).")
+            raise ValueError(
+                f"Unsupported index type: {idx_dtype} (only int32 and int64 supported).")
 
         opt = {}
 
@@ -427,21 +454,21 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         opt['alpha'] = alpha
         opt['beta'] = beta
 
-        opt['nrows'] = cdesc.shape[0]
-        opt['ncols'] = cdesc.shape[1]
+        opt['nrows'] = c_shape[0]
+        opt['ncols'] = c_shape[1]
         opt['ldc'] = opt['ncols']
 
-        opt['brows'] = bdesc.shape[0]
-        opt['bcols'] = bdesc.shape[1]
+        opt['brows'] = b_shape[0]
+        opt['bcols'] = b_shape[1]
         opt['ldb'] = opt['bcols']
 
-        opt['arows'] = cdesc.shape[0]
+        opt['arows'] = c_shape[0]
         if node.transB:
-            opt['acols'] = bdesc.shape[1]
+            opt['acols'] = b_shape[1]
         else:
-            opt['acols'] = bdesc.shape[0]
+            opt['acols'] = b_shape[0]
 
-        opt['annz'] = avals.shape[0]
+        opt['annz'] = avals_shape[0]
 
         opt['algo'] = 'CUSPARSE_SPMM_CSR_ALG2'
 
@@ -501,7 +528,8 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
                 return nsdfg
 
             nsdfg = dace.SDFG('nested_gemm')
-            copies = [('_a_rows', arows), ('_a_cols', acols), ('_a_vals', avals), ('_b', bdesc), ('_c', cdesc)]
+            copies = [('_a_rows', arows), ('_a_cols', acols), ('_a_vals', avals), ('_b', bdesc),
+                      ('_c', cdesc)]
             for name, desc in copies:
                 if isinstance(desc, dt.View):
                     dcopy = desc.as_array()
@@ -536,9 +564,12 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
             nstate.add_nedge(av, gav, dace.Memlet.from_array('_a_vals', avals))
             nstate.add_nedge(b, gb, dace.Memlet.from_array('_b', bdesc))
 
-            nstate.add_edge(gar, None, tasklet, '_conn_a_rows', dace.Memlet.from_array('_a_rows_gpu', arows))
-            nstate.add_edge(gac, None, tasklet, '_conn_a_cols', dace.Memlet.from_array('_a_cols_gpu', arows))
-            nstate.add_edge(gav, None, tasklet, '_conn_a_vals', dace.Memlet.from_array('_a_vals_gpu', arows))
+            nstate.add_edge(gar, None, tasklet, '_conn_a_rows',
+                            dace.Memlet.from_array('_a_rows_gpu', arows))
+            nstate.add_edge(gac, None, tasklet, '_conn_a_cols',
+                            dace.Memlet.from_array('_a_cols_gpu', arows))
+            nstate.add_edge(gav, None, tasklet, '_conn_a_vals',
+                            dace.Memlet.from_array('_a_vals_gpu', arows))
             nstate.add_edge(gb, None, tasklet, '_conn_b', dace.Memlet.from_array('_b_gpu', bdesc))
             nstate.add_edge(tasklet, '_conn_c', gc, None, dace.Memlet.from_array('_c_gpu', cdesc))
             nstate.add_nedge(gc, c, dace.Memlet.from_array('_c', cdesc))
@@ -558,11 +589,11 @@ class ExpandCSRMMCpp(ExpandTransformation):
         node.validate(sdfg, state)
 
         operands = _get_csrmm_operands(node, state, sdfg)
-        arows = operands['_a_rows'][1]
-        acols = operands['_a_cols'][1]
+        # For getting the shape, we need to use the shape returned from _get_csrmm_operands
+        # because then it is squeezed.
         avals = operands['_a_vals'][1]
-        bdesc = operands['_b'][1]
-        cdesc = sdfg.arrays[state.out_edges(node)[0].data.data]
+        b_shape = operands['_b'][2]
+        c_shape = operands['_c'][2]
 
         dtype = avals.dtype.base_type
         func = "cusparseSpMM"
@@ -606,18 +637,18 @@ class ExpandCSRMMCpp(ExpandTransformation):
         opt['alpha'] = alpha
         opt['beta'] = beta
 
-        opt['nrows'] = cdesc.shape[0]
-        opt['ncols'] = cdesc.shape[1]
+        opt['nrows'] = c_shape[0]
+        opt['ncols'] = c_shape[1]
         opt['ldc'] = opt['ncols']
 
-        opt['brows'] = bdesc.shape[0]
-        opt['bcols'] = bdesc.shape[1]
+        opt['brows'] = b_shape[0]
+        opt['bcols'] = b_shape[1]
 
-        opt['arows'] = cdesc.shape[0]
+        opt['arows'] = c_shape[0]
         if node.transB:
-            opt['acols'] = bdesc.shape[1]
+            opt['acols'] = b_shape[1]
         else:
-            opt['acols'] = bdesc.shape[0]
+            opt['acols'] = b_shape[0]
 
         if node.transA:
             code = """
@@ -673,7 +704,9 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
     """
 
     # Global properties
-    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE} if os.environ.get('CUDA_VISIBLE_DEVICES', '') != '' else {
+    implementations = {"cuSPARSE": ExpandCSRMMCuSPARSE,
+                       "pure": ExpandCSRMMCuSPARSE} if os.environ.get('CUDA_VISIBLE_DEVICES',
+                                                                      '') != '' else {
         "pure": ExpandCSRMMCpp}
     default_implementation = None
 
@@ -691,7 +724,8 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
         super().__init__(name,
                          location=location,
                          inputs=({"_a_rows", "_a_cols", "_a_vals", "_b", "_cin"}
-                                 if beta != 0 and beta != 1.0 else {"_a_rows", "_a_cols", "_a_vals", "_b"}),
+                                 if beta != 0 and beta != 1.0 else {"_a_rows", "_a_cols", "_a_vals",
+                                                                    "_b"}),
                          outputs={"_c"})
         self.transA = transA
         self.transB = transB
