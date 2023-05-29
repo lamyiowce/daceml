@@ -23,8 +23,8 @@ do_test=
 
 export DACE_compiler_cuda_max_concurrent_streams=-1
 model=gcn
-formats="csr coo csc"
-
+formats="csr_adapt"
+backward=--backward
 datasets="cora ogbn-arxiv"
 
 #hidden_sizes="8 32 512 1024"
@@ -36,9 +36,10 @@ for dataset in $datasets; do
   for hidden in $hidden_sizes; do
     echo "Hidden " $hidden
     rm -rf .dacecache
-#    $do_test python main.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none --backward
+#    $do_test python main.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none $backward --torch csr
+#    $do_test python main.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none $backward --torch edge_list
     for format in $formats; do
-      $do_test python main.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl $format --torch none --backward
+      $do_test python main.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl $format --torch none $backward
     done
   done
 done
