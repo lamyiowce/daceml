@@ -158,43 +158,6 @@ def make_performance_plot(full_df, name, labels=None, title=None):
     plt.show()
 
 
-def get_flops_df(full_df, name):
-    df = full_df.pivot(index='Size', columns='Name', values='Mean')
-    if name == 'gcn-single-ogbn-arxiv':
-        num_nodes = 169343
-        num_edges = 1166243
-        num_features = 128
-    elif name == 'gcn-single-cora':
-        num_nodes = 2708
-        num_edges = 10556
-        num_features = 1433
-    else:
-        raise ValueError(f'Unknown name: {name}')
-    # This just need to be multiplied by hidden_size:
-    # flop = 2 * num_nodes * num_features * hidden_size + 2 * num_edges * hidden_size + num_nodes * hidden_size
-    flop_base = 2 * num_nodes * num_features + 2 * num_edges + num_nodes
-    print(df)
-    flop = df.index * flop_base / (1000 * 1000 * 1000 * 1000)  # tflops
-    print(df)
-    df_flops = pd.DataFrame()
-    print(df_flops)
-    for col in df.columns:
-        df_flops[col] = flop / (df[col] / 1000)
-    print(df_flops)
-
-    mem = 4 * (
-            4 * num_nodes * df.index + num_nodes * num_nodes + 4 * df.index * num_edges + df.index) / 1000 / 1000 / 1000
-    op_int = np.zeros((len(df.index), len(df.columns)))
-    for i, col in enumerate(df_flops.columns):
-        op_int[:, i] = df_flops[col] * 1000 / mem  # FLOPS / B
-
-    df_op_int = pd.DataFrame(op_int, index=df.index, columns=df.columns)
-    print(op_int)
-    print("FLOPS", df_flops)
-    print("Op INT", df_op_int)
-    return df, df_flops, df_op_int
-
-
 def read_many_dfs(filenames, name_to_replace=None, backward: bool = True,
                   names=None, name_fns=None):
     dfs = []
@@ -230,8 +193,10 @@ def plot_compare_csr_coo_cutoffs():
                    '16.05.13.59-gcn-csr_adapt-ogbn-arxiv-196780.csv',
                    '23.05.13.27-gcn-ogbn-arxiv-202455.csv']
     )
-    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv', plot_title="OGB Arxiv, cutoff comparison",
+    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
+                  plot_title="OGB Arxiv, cutoff comparison",
                   drop_names=['torch_edge_list', 'torch_csr'], sizes=[16, 256], legend_outside=True)
+
 
 def main():
     # tag = "11-04-gcn-csr-cora"
@@ -252,7 +217,8 @@ def main():
                    '16.05.13.59-gcn-csr_adapt-ogbn-arxiv-196780.csv',
                    '23.05.14.02-gcn-ogbn-arxiv-202457.csv']
     )
-    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv', plot_title="OGB Arxiv", drop_names=['dace_csc', 'dace_coo', 'dace_csr'])
+    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv', plot_title="OGB Arxiv",
+                  drop_names=['dace_csc', 'dace_coo', 'dace_csr'])
 
     cora_df, cora_bwd_df = read_many_dfs(
         filenames=['10.05.09.03-fix-contiguous-gcn-cora-191411.csv',
@@ -262,7 +228,8 @@ def main():
                    '16.05.13.45-gcn-csr_adapt-cora-196780.csv',
                    '23.05.12.56-gcn-cora-202421.csv']
     )
-    plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-ogbn-cora', plot_title="Cora", drop_names=['dace_csc', 'dace_coo', 'dace_csr'])
+    plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-ogbn-cora', plot_title="Cora",
+                  drop_names=['dace_csc', 'dace_coo', 'dace_csr'])
 
     #
     # gat_arxiv_df, gat_arxiv_bwd_df = read_many_dfs(['18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv'], backward=True)
