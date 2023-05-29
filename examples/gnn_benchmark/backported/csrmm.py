@@ -367,8 +367,9 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
             for desc in (arows, acols, avals, bdesc, cdesc))
         if needs_copy:
             print("!!!!!! Matrices not on GPU !!!!!!!")
-            cpu_matrices = [desc for desc in (arows, acols, avals, bdesc, cdesc) if desc.storage not in (
-            dace.StorageType.GPU_Global, dace.StorageType.CPU_Pinned)]
+            cpu_matrices = [(name, desc) for name, (_, desc, _, _) in operands.items() if
+                            desc.storage not in (
+                                dace.StorageType.GPU_Global, dace.StorageType.CPU_Pinned)]
             print(cpu_matrices)
             raise ValueError("matrices not on GPU: " + str(cpu_matrices))
 
@@ -603,11 +604,6 @@ class ExpandCSRMMCpp(ExpandTransformation):
             cdtype = 'double'
         else:
             raise ValueError("Unsupported type: " + str(dtype))
-
-        # ptr_dtype = acols.dtype.base_type
-        # if ptr_dtype not in [dace.int32, dace.int64]:
-        #     raise ValueError("Unsupported type: " + str(ptr_dtype))
-        # c_ptr_dtype = 'int' if acols.dtype.base_type == dace.int32 else 'long long'
 
         # Deal with complex input constants
         if isinstance(node.alpha, complex):
