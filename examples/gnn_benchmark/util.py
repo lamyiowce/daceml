@@ -187,9 +187,11 @@ def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
                              outputs={'output': val_dtype},
                              shape_infer=replacement_entries.shape_infer_GCNConv,
                              shape_fn_from_module=replacement_entries.make_GCNConv_shape_fn)
-    elif layer_name == 'gat':
+    elif 'gat' in layer_name:
         register_replacement('torch_geometric.nn.conv.gat_conv.GATConv',
                              inputs=input_spec,
                              outputs={'output': val_dtype},
                              shape_infer=replacement_entries.shape_infer_GATConv,
                              shape_fn_from_module=replacement_entries.make_GATConv_shape_fn)
+    else:
+        raise ValueError("Unknown layer name, no replacement registered.")
