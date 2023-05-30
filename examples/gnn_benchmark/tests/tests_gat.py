@@ -60,7 +60,9 @@ def test_gat(bias, implementation, N, F, heads, seed):
     set_implementation(model, implementation)
 
     # Create input.
-    graph = scipy.sparse.random(N, N, density=0.5, format='csr') + scipy.sparse.eye(N, format='csr')
+    graph = scipy.sparse.random(N, N, density=0.5,
+                                format='csr') + scipy.sparse.eye(N,
+                                                                 format='csr')
     adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A))
     adj_matrix.set_value(None)
     print(adj_matrix)
@@ -82,7 +84,8 @@ def check_equal(expected_pred, pred):
     print('Expected: \n', expected_pred)
     if not np.allclose(pred, expected_pred):
         print("Abs error: ", np.abs(pred - expected_pred).max())
-        print("Rel error: ", np.abs(pred - expected_pred).max() / np.abs(expected_pred).max())
+        print("Rel error: ",
+              np.abs(pred - expected_pred).max() / np.abs(expected_pred).max())
         assert False
 
 
@@ -100,7 +103,8 @@ def test_spmm_single_head(N, F, heads, seed):
         def ref(rowptrs, columns, features, e, output):
             output[:] = 0
             for l in range(N):
-                for v in range(np.asnumpy(rowptrs[l]), np.asnumpy(rowptrs[l + 1])):
+                for v in range(np.asnumpy(rowptrs[l]),
+                               np.asnumpy(rowptrs[l + 1])):
                     colv = columns[v]
                     if heads == 1:
                         for k in dace.map[0:F]:
@@ -166,7 +170,8 @@ def test_spmm_many_heads_cpu(N, F, heads, seed):
                     np.reshape(e[v], (heads, 1)) * features[l],
                     (heads * F,))
 
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device = torch.device(
+        'cuda') if torch.cuda.is_available() else torch.device('cpu')
     print(device)
     torch.random.manual_seed(42)
     np.random.seed(seed)
@@ -179,10 +184,12 @@ def test_spmm_many_heads_cpu(N, F, heads, seed):
         e_perm = np.transpose(e, (1, 0))  # H x num_entries
         # for h in dace.map[0:heads]:
         for h in range(heads):
-            csrmm(rowptrs, columns, e_perm[h], features_perm[h], output_perm[h], transA=True,
+            csrmm(rowptrs, columns, e_perm[h], features_perm[h], output_perm[h],
+                  transA=True,
                   beta=1.0)
 
-        output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)), (N, heads * F))
+        output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)),
+                               (N, heads * F))
 
     graph = scipy.sparse.random(N, N, density=0.5, format='csr')
     adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A))
@@ -247,7 +254,8 @@ def test_spmm_many_heads_gpu(N, F, heads, seed):
             # features_tmp = np.zeros_like(features_perm[h])
             # features_tmp[:] = features_perm[h]
             # output_tmp = np.zeros_like(output_perm[h])
-            csrmm(rowptrs, columns, e_perm[h], features_perm[h], output_perm[h], transA=True,
+            csrmm(rowptrs, columns, e_perm[h], features_perm[h], output_perm[h],
+                  transA=True,
                   beta=0.0)
             # output_perm[h, :, :] = np.copy(output_tmp)
 
@@ -260,7 +268,8 @@ def test_spmm_many_heads_gpu(N, F, heads, seed):
             #       beta=0.0)
             # output_perm[h, :, :] = np.copy(output_tmp)
 
-        output[:] = np.copy(np.reshape(np.transpose(output_perm, (1, 0, 2)), (N, heads * F)))
+        output[:] = np.copy(
+            np.reshape(np.transpose(output_perm, (1, 0, 2)), (N, heads * F)))
 
     graph = scipy.sparse.random(N, N, density=0.5, format='csr')
     adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A))
@@ -280,6 +289,63 @@ def test_spmm_many_heads_gpu(N, F, heads, seed):
     sdfg(rowptr, col, x, vals, result)
     check_equal(expected, result)
 
+
+def test_bwd_weight_compute():
+    N = 2
+    F_in = 3
+    F_out = 4
+    # heads = 2
+    dtype = torch.float32
+
+    torch.random.manual_seed(42)
+    np.random.seed(42)
+
+    def compute_grads(x, adj_matrix, weight,
+                      att_src, att_dst,
+                      bias,
+                      att_weights,
+                      out_grad):
+        grads = {'x': None, 'lin_src.weight': None, 'bias': None, 'att_src': None,
+                 'att_dst': None}
+        print(out_grad)
+        grads['lin_src.weight'] = (x.t() @ att_weights[:, :, 0].t() @ out_grad).t()
+
+        H_prime = x @ weight.t()
+
+
+        grads['x'] = None
+        grads['bias'] = torch.sum(out_grad, dim=0)
+        return grads
+
+    layer = GATConv(F_in, F_out, heads=1, add_self_loops=False)
+
+    x = torch.randn(N, F_in, requires_grad=True)
+    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
+    graph.data = np.ones_like(graph.data)
+    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(dtype))
+    print("ADJ matrix", adj_matrix)
+    rowptr, col, _ = adj_matrix.csr()
+    adj_matrix_dense = adj_matrix.to_dense()
+
+    # PyG requires that the adj matrix is transposed when using SparseTensor.
+    pred, att_weights = layer(x, adj_matrix.t(), return_attention_weights=True)
+    print("pred", pred)
+    loss = torch.sum(pred)
+    pred.retain_grad()
+    loss.backward()
+
+    result = compute_grads(x, adj_matrix_dense, layer.lin_src.weight,
+                           layer.att_src, layer.att_dst,
+                           layer.bias, att_weights.to_dense(), pred.grad)
+
+    params = dict(layer.named_parameters())
+    params['x'] = x
+
+    for name, param in params.items():
+        print(name, param.grad)
+        if result[name] is not None:
+            check_equal(param.grad, result[name].detach().numpy())
+    print("x", x.grad)
 
 
 if __name__ == '__main__':
