@@ -191,6 +191,46 @@ class GCNConvCSRAdapt(GCNConvBase):
     }
 
     @staticmethod
+    def get_stats(N: int, F_in: int, F_out: int, num_entries: int,
+                  val_dtype: dace.dtypes.typeclass, idx_dtype: dace.dtypes.typeclass,
+                  do_bias: bool):
+        ## Flops.
+        # X @ W or (A.t @ X) @ W
+        matmul_flops = 2 * N * F_out * F_in
+
+        if F_in > F_out:
+            # A.t @ (X @ W)
+            spmm_flops = 2 * num_entries * F_out
+            # Bias is omitted because it's just copied into the output matrix.
+            bias_flops = 0
+        else:
+            # A.t @ X
+            spmm_flops = 2 * num_entries * F_in
+            bias_flops = N * F_out if do_bias else 0
+        flops = matmul_flops + spmm_flops + bias_flops
+
+        ## Memory movement in bytes.
+        # X @ W or (A.t @ X) @ W
+        matmul_mem = (N * F_out + F_in * F_out + N * F_in) * val_dtype.bytes
+
+        if F_in > F_out:
+            # A.t @ (X @ W)
+            # Load all entry values, input matrix and output matrix.
+            spmm_val_mem = (num_entries + N * F_out + N * F_out) * val_dtype.bytes
+        else:
+            # A.t @ X
+            # Load all entry values, input matrix and output matrix.
+            spmm_val_mem = (num_entries + N * F_in + N * F_in) * val_dtype.bytes
+        # Load all column indices and rowptrs.
+        spmm_idx_mem = (num_entries + N) * idx_dtype.bytes
+
+        # Load the whole of output matrix and whole bias.
+        bias_mem = (N * F_out + F_out) * val_dtype.bytes
+        mem = matmul_mem + spmm_val_mem + spmm_idx_mem + bias_mem
+
+        return flops, mem
+
+    @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):
@@ -388,7 +428,7 @@ class GCNConvCOOAdapt(GCNConvBase):
                     coomm(rows, columns, edge_vals, node_features, temp, beta=0.0,
                           transA=True)
                     output[:] = np.einsum('nm,fm->nf', temp,
-                                            linDOTweight)
+                                          linDOTweight)
                     for i, j in dace.map[0:N, 0:num_out_features]:
                         output[i, j] += bias[j]
         else:
@@ -413,7 +453,7 @@ class GCNConvCOOAdapt(GCNConvBase):
                     coomm(rows, columns, edge_vals, node_features, temp, beta=0.0,
                           transA=True)
                     output[:] = np.einsum('ij,kj->ik', temp,
-                                            linDOTweight)
+                                          linDOTweight)
         return gcn_op
 
 
@@ -636,8 +676,6 @@ class GCNConvCSRCOO(GCNConvBase):
         return gcn_op
 
 
-
-
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csr_coo_adapt")
 class GCNConvCSRCOOAdapt(GCNConvBase):
     graph_format = sparse.HybridCsrCooGraph
@@ -685,7 +723,7 @@ class GCNConvCSRCOOAdapt(GCNConvBase):
                     csrmm_libnode.csrmm(csr_rowptrs, csr_columns, csr_edge_vals, node_features,
                                         temp, beta=1.0, transA=True)
                     output[:] = np.einsum('nm,fm->nf', temp,
-                                            linDOTweight)
+                                          linDOTweight)
                     for i, j in dace.map[0:N, 0:num_out_features]:
                         output[i, j] += bias[j]
 
@@ -719,5 +757,5 @@ class GCNConvCSRCOOAdapt(GCNConvBase):
                     csrmm_libnode.csrmm(csr_rowptrs, csr_columns, csr_edge_vals, node_features,
                                         temp, beta=1.0, transA=True)
                     output[:] = np.einsum('nm,fm->nf', temp,
-                                            linDOTweight)
+                                          linDOTweight)
         return gcn_op
