@@ -34,6 +34,7 @@ def test_gat(bias, implementation, N, F, heads, seed):
     F_out = F + 3
     torch.random.manual_seed(42)
     np.random.seed(seed)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     register_replacement_overrides(implementation_name=implementation,
                                    layer_name='gat', idx_dtype=torch.int64,
@@ -64,7 +65,9 @@ def test_gat(bias, implementation, N, F, heads, seed):
     adj_matrix.set_value(None)
     print(adj_matrix)
     rowptr, col, _ = adj_matrix.csr()
-    x = torch.rand((N, F_in))
+    rowptr = rowptr.to(device)
+    col = col.to(device)
+    x = torch.rand((N, F_in)).to(device)
 
     # PyG requires that the adj matrix is transposed when using SparseTensor.
     expected_pred = reference_model(x, adj_matrix.t()).detach().numpy()
