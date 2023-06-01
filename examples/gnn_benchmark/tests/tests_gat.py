@@ -115,7 +115,6 @@ def test_gat_compare_gpu():
     heads = 3
     F_out = 5
     dtype = np.float32
-    negative_slope = 0.2
 
     torch.random.manual_seed(42)
     np.random.seed(42)
