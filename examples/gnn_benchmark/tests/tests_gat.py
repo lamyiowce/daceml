@@ -291,12 +291,12 @@ def test_spmm_many_heads_gpu(N, F, heads, seed):
 
 
 def test_bwd_weight_compute():
-    N = 2
-    F_in = 3
+    N = 3
+    F_in = 2
     F_out = 4
     # heads = 2
     dtype = torch.float32
-
+    negative_slope = 0.2
     torch.random.manual_seed(42)
     np.random.seed(42)
 
@@ -304,20 +304,57 @@ def test_bwd_weight_compute():
                       att_src, att_dst,
                       bias,
                       att_weights,
+                      output,
                       out_grad):
-        grads = {'x': None, 'lin_src.weight': None, 'bias': None, 'att_src': None,
+        # x: N x F_in
+        # adj_matrix: N x N
+        # weight: F_out x F_in
+        # att_src: 1 x H x F_out
+        # att_dst: 1 x H x F_out
+        # bias: F_out
+        # output: N x F_out
+        # out_grad: N x F_out
+
+        grads = {'x': None, 'lin_src.weight': None, 'bias': None,
+                 'att_src': None,
                  'att_dst': None}
         print(out_grad)
-        grads['lin_src.weight'] = (x.t() @ att_weights[:, :, 0].t() @ out_grad).t()
+        grads['lin_src.weight'] = (
+                x.t() @ att_weights[:, :, 0].t() @ out_grad).t()
 
-        H_prime = x @ weight.t()
+        H_prime = x @ weight.t()  # N x F_out
+        # H_prime @ att_src =
+        alpha_src = torch.sum(H_prime * att_src[0], dim=-1)  # N x H
+        alpha_dst = torch.sum(H_prime * att_dst[0], dim=-1)  # N x H
+        C = alpha_src[None, :] + alpha_dst[:, None]  # N x N x H
+        Tau = adj_matrix.t() * torch.exp(torch.maximum(negative_slope * C, C))
+        Tau_sum = torch.sum(Tau, dim=1)[:, None]  # N x 1 x H
+        Phi = Tau / Tau_sum  # N x N x H
+        assert torch.allclose(Phi[:, :, None], att_weights)
 
+        def d_leaky_relu(x):
+            return torch.where(x > 0, torch.ones_like(x),
+                               torch.ones_like(x) * negative_slope)
 
-        grads['x'] = None
+        F_first_denominator = Tau_sum * (out_grad @ H_prime.t())
+        # TODO: maybe we need to do [:, None] here.
+        F_second_denominator = Tau_sum ** 2 * torch.sum((Tau @ H_prime) * out_grad, dim=1)
+        # F: N x N
+        F = (d_leaky_relu(C) / F_first_denominator +
+             d_leaky_relu(C) / F_second_denominator)
+
+        # Gamma: N x F_in
+        Gamma = x * (torch.sum(F, dim=1) * alpha_src +
+                     torch.sum(F, dim=0) * alpha_dst)[:, None]
+
+        # x_grad: N x F_in
+        grads['x'] = x * Gamma
+
         grads['bias'] = torch.sum(out_grad, dim=0)
         return grads
 
-    layer = GATConv(F_in, F_out, heads=1, add_self_loops=False)
+    layer = GATConv(F_in, F_out, heads=1, add_self_loops=False,
+                    negative_slope=negative_slope)
 
     x = torch.randn(N, F_in, requires_grad=True)
     graph = scipy.sparse.random(N, N, density=0.5, format='csr')
@@ -334,9 +371,10 @@ def test_bwd_weight_compute():
     pred.retain_grad()
     loss.backward()
 
-    result = compute_grads(x, adj_matrix_dense, layer.lin_src.weight,
-                           layer.att_src, layer.att_dst,
-                           layer.bias, att_weights.to_dense(), pred.grad)
+    with torch.no_grad():
+        result = compute_grads(x, adj_matrix_dense, layer.lin_src.weight,
+                               layer.att_src, layer.att_dst,
+                               layer.bias, att_weights.to_dense(), pred, pred.grad)
 
     params = dict(layer.named_parameters())
     params['x'] = x
