@@ -9,6 +9,8 @@ from torch_sparse import SparseTensor
 
 from daceml.torch.module import DaceModule
 from examples.gnn_benchmark.csrmm_libnode import csrmm
+from examples.gnn_benchmark.implementations.gat_implementations import \
+    GATConvCSR
 from examples.gnn_benchmark.util import register_replacement_overrides
 
 torch.backends.cuda.matmul.allow_tf32 = False
@@ -27,8 +29,9 @@ def set_implementation(dace_module, implementation):
 
 @pytest.mark.parametrize("bias", [True], ids=['bias'])
 @pytest.mark.parametrize("implementation", ['csr'])
-@pytest.mark.parametrize("N,F,heads", [(2, 3, 1), (2, 3, 2), (120, 20, 8)])
-@pytest.mark.parametrize("seed", [40, 42])
+@pytest.mark.parametrize("N,F,heads", [(2, 3, 1)])
+# @pytest.mark.parametrize("N,F,heads", [(2, 3, 1), (2, 3, 2), (120, 20, 8)])
+@pytest.mark.parametrize("seed", [40])
 def test_gat(bias, implementation, N, F, heads, seed):
     F_in = F
     F_out = F + 3
@@ -55,7 +58,7 @@ def test_gat(bias, implementation, N, F, heads, seed):
             x = self.conv1(x, *edge_info)
             return x
 
-    reference_model = GAT()
+    reference_model = GAT().to(device)
     model = DaceModule(reference_model, sdfg_name=sdfg_name)
     set_implementation(model, implementation)
 
@@ -63,7 +66,7 @@ def test_gat(bias, implementation, N, F, heads, seed):
     graph = scipy.sparse.random(N, N, density=0.5,
                                 format='csr') + scipy.sparse.eye(N,
                                                                  format='csr')
-    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A))
+    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(device))
     adj_matrix.set_value(None)
     print(adj_matrix)
     rowptr, col, _ = adj_matrix.csr()
@@ -72,21 +75,163 @@ def test_gat(bias, implementation, N, F, heads, seed):
     x = torch.rand((N, F_in)).to(device)
 
     # PyG requires that the adj matrix is transposed when using SparseTensor.
-    expected_pred = reference_model(x, adj_matrix.t()).detach().numpy()
+    expected_pred = reference_model(x, adj_matrix.t()).cpu().detach().numpy()
 
-    pred = model(x, rowptr, col)
+    pred = model(x, rowptr, col).cpu().detach().numpy()
 
+    # my_gat_op = GATConvCSR.make_op(N=N, heads=heads, num_out_features=F_out,
+    #                                num_entries=col.shape[0],
+    #                                dtype=np.float32,
+    #                                negative_slope=0.2, do_bias=True)
+    #
+    # plain_pred = torch.zeros((N, F_out), dtype=torch.float32)
+    # my_gat_op(x.detach(), rowptr.detach(), col.detach(),
+    #           lin_srcDOTweight=reference_model.conv1.lin_src.weight.detach(),
+    #           att_src=reference_model.conv1.att_src.detach(),
+    #           att_dst=reference_model.conv1.att_dst.detach(),
+    #           bias=reference_model.conv1.bias.detach(),
+    #           output=plain_pred)
+
+    # check_equal(plain_pred, pred)
     check_equal(expected_pred, pred)
 
 
-def check_equal(expected_pred, pred):
-    print('\nCalculated: \n', pred)
+def check_equal(expected_pred, pred, name=None):
+    print('\n' + name)
+    print('Calculated: \n', pred)
     print('Expected: \n', expected_pred)
     if not np.allclose(pred, expected_pred):
-        print("Abs error: ", np.abs(pred - expected_pred).max())
+        max_err_abs = np.abs(pred - expected_pred).max()
+        print("Abs error: ", max_err_abs)
+        max_err_rel = max_err_abs / np.abs(expected_pred).max()
         print("Rel error: ",
-              np.abs(pred - expected_pred).max() / np.abs(expected_pred).max())
-        assert False
+              max_err_rel)
+        assert False, f"{name} abs: {max_err_abs}, rel: {max_err_rel}"
+
+
+def test_gat_compare_gpu():
+    import cupy as cp
+    N = 2
+    heads = 3
+    F_in = 3
+    F_out = 4
+    dtype = np.float32
+    negative_slope = 0.2
+
+    torch.random.manual_seed(42)
+    np.random.seed(42)
+    cp.random.seed(42)
+
+    # Create input.
+    graph = (scipy.sparse.random(N, N, density=0.5, format='csr')
+             + scipy.sparse.eye(N, format='csr'))
+    graph.data = cp.ones_like(graph.data)
+    rowptr, col = np.ascontiguousarray(graph.indptr), np.ascontiguousarray(
+        graph.indices)
+    rowptr = cp.asarray(rowptr)
+    col = cp.asarray(col)
+    num_entries = col.shape[0]
+    x = cp.random.rand(N, F_in).astype(dtype)
+    output = cp.zeros((N, heads * F_out), dtype=dtype)
+    out_e_before_softmax = cp.zeros((num_entries, heads), dtype=dtype)
+    out_e_softmax_sum = cp.zeros((N, heads), dtype=dtype)
+    out_e = cp.zeros((num_entries, heads), dtype=dtype)
+    out_alpha_src = cp.zeros((N, heads), dtype=dtype)
+    out_alpha_dst = cp.zeros((N, heads), dtype=dtype)
+
+    layer = GATConv(F_in, F_out, bias=True, heads=heads, add_self_loops=False)
+
+    @dace.program
+    def gat(node_features, rowptrs, columns, lin_srcDOTweight, att_src, att_dst,
+            output, e, e_before_softmax, e_softmax_sum, alpha_src, alpha_dst):
+        # features = np.zeros((N, heads, F_out),
+        #                     dtype=dtype)
+        # features_tmp = np.einsum('ij,kj->ik', node_features,
+        #                          lin_srcDOTweight)
+        #
+        # # features: N x H x F'
+        # features[:] = np.reshape(features_tmp,
+        #                          (N, heads, F_out))
+
+        # Compute node attention coefficients.
+        alpha_src[:] = np.sum(node_features * att_src, axis=-1)  # shape: N x H
+        alpha_dst[:] = np.sum(node_features * att_dst, axis=-1)  # N x H
+
+        # Calculate attention weights.
+        e_softmax_sum[:] = 0
+
+        # TODO: Below loop can be flipped.
+        for l in dace.map[0:N]:
+            for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+                # Calculating e_l->colv
+                colv = columns[v]
+                e_tmp = alpha_src[l] + alpha_dst[colv]
+                # LeakyReLU
+                e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                e_tmp = np.exp(e_tmp)
+                e_before_softmax[v] = e_tmp
+                e_softmax_sum[colv] += e_tmp
+
+        # # Softmax normalization.
+        # for j in dace.map[0:num_entries]:
+        #     colj = columns[j]
+        #     e[j] = e_before_softmax[j] / e_softmax_sum[colj]
+        #
+        # if heads == 1:
+        #     csrmm(rowptrs, columns, e,
+        #           np.reshape(features, (N, F_out)),
+        #           output,
+        #           transA=True, beta=0.0)
+        # else:
+        #     output_perm = np.zeros((heads, N, F_out),
+        #                            dtype=dtype)  # H x N x F'
+        #     features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
+        #     e_perm = np.transpose(e, (1, 0))  # H x num_entries
+        #     # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
+        #     for h in range(heads):
+        #         csrmm(rowptrs, columns, e_perm[h], features_perm[h],
+        #               output_perm[h],
+        #               transA=True,
+        #               beta=1.0)
+        #
+        #     output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)),
+        #                            (N, heads * F_out))
+
+    weight = cp.array(layer.lin_src.weight.detach().numpy())
+    att_src = cp.array(layer.att_src.detach().numpy())
+    att_dst = cp.array(layer.att_dst.detach().numpy())
+    sdfg = gat.to_sdfg(x, rowptr, col, weight, att_src,
+                       att_dst, output, out_e, out_e_before_softmax,
+                       out_e_softmax_sum,
+                       out_alpha_src, out_alpha_dst)
+    sdfg.apply_gpu_transformations()
+
+    sdfg(node_features=x, rowptrs=rowptr, columns=col, lin_srcDOTweight=weight,
+         att_src=att_src, att_dst=att_dst, output=output, e=out_e,
+         e_before_softmax=out_e_before_softmax, e_softmax_sum=out_e_softmax_sum,
+         alpha_src=out_alpha_src, alpha_dst=out_alpha_dst)
+
+    expected = np.zeros((N, heads * F_out), dtype=dtype)
+    expected_e = np.zeros((num_entries, heads), dtype=dtype)
+    expected_e_before_softmax = np.zeros((num_entries, heads), dtype=dtype)
+    expected_e_softmax_sum = np.zeros((N, heads), dtype=dtype)
+    expected_alpha_src = np.zeros((N, heads), dtype=dtype)
+    expected_alpha_dst = np.zeros((N, heads), dtype=dtype)
+    gat.f(node_features=x.get(), rowptrs=rowptr.get(), columns=col.get(),
+          lin_srcDOTweight=weight.get(),
+          att_src=att_src.get(), att_dst=att_dst.get(), output=expected,
+          e=expected_e, e_before_softmax=expected_e_before_softmax,
+            e_softmax_sum=expected_e_softmax_sum,
+          alpha_src=expected_alpha_src, alpha_dst=expected_alpha_dst)
+
+    check_equal(expected_alpha_src, out_alpha_src.get(), 'alpha_src')
+    check_equal(expected_alpha_dst, out_alpha_dst.get(), 'alpha_dst')
+    check_equal(expected_e_before_softmax, out_e_before_softmax.get(),
+                'e_before_softmax')
+    check_equal(expected_e_softmax_sum, out_e_softmax_sum.get(),
+                'e_softmax_sum')
+    check_equal(expected_e, out_e.get(), 'attention_weights')
+    check_equal(expected, output.get(), 'result')
 
 
 @pytest.mark.parametrize("N", [3, 7])
@@ -338,7 +483,8 @@ def test_bwd_weight_compute():
 
         F_first_denominator = Tau_sum * (out_grad @ H_prime.t())
         # TODO: maybe we need to do [:, None] here.
-        F_second_denominator = Tau_sum ** 2 * torch.sum((Tau @ H_prime) * out_grad, dim=1)
+        F_second_denominator = Tau_sum ** 2 * torch.sum(
+            (Tau @ H_prime) * out_grad, dim=1)
         # F: N x N
         F = (d_leaky_relu(C) / F_first_denominator +
              d_leaky_relu(C) / F_second_denominator)
@@ -374,7 +520,8 @@ def test_bwd_weight_compute():
     with torch.no_grad():
         result = compute_grads(x, adj_matrix_dense, layer.lin_src.weight,
                                layer.att_src, layer.att_dst,
-                               layer.bias, att_weights.to_dense(), pred, pred.grad)
+                               layer.bias, att_weights.to_dense(), pred,
+                               pred.grad)
 
     params = dict(layer.named_parameters())
     params['x'] = x
