@@ -144,7 +144,6 @@ class GATConvCSR(GATConvBase):
     def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
                 dtype: dace.dtypes.Typeclasses, negative_slope: float,
                 do_bias: bool):
-        @dace.program
         def gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
                    att_src, att_dst, output):
             """
