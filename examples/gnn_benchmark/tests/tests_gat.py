@@ -111,10 +111,9 @@ def check_equal(expected_pred, pred, name=None):
 
 def test_gat_compare_gpu():
     import cupy as cp
-    N = 2
+    N = 3
     heads = 3
-    F_in = 3
-    F_out = 4
+    F_out = 5
     dtype = np.float32
     negative_slope = 0.2
 
@@ -131,107 +130,63 @@ def test_gat_compare_gpu():
     rowptr = cp.asarray(rowptr)
     col = cp.asarray(col)
     num_entries = col.shape[0]
-    x = cp.random.rand(N, F_in).astype(dtype)
-    output = cp.zeros((N, heads * F_out), dtype=dtype)
+    x = cp.random.rand(N, heads, F_out).astype(dtype)
+    att_src = cp.random.rand(1, heads, F_out).astype(dtype)
+
     out_e_before_softmax = cp.zeros((num_entries, heads), dtype=dtype)
     out_e_softmax_sum = cp.zeros((N, heads), dtype=dtype)
     out_e = cp.zeros((num_entries, heads), dtype=dtype)
     out_alpha_src = cp.zeros((N, heads), dtype=dtype)
-    out_alpha_dst = cp.zeros((N, heads), dtype=dtype)
-
-    layer = GATConv(F_in, F_out, bias=True, heads=heads, add_self_loops=False)
 
     @dace.program
-    def gat(node_features, rowptrs, columns, lin_srcDOTweight, att_src, att_dst,
-            output, e, e_before_softmax, e_softmax_sum, alpha_src, alpha_dst):
-        # features = np.zeros((N, heads, F_out),
-        #                     dtype=dtype)
-        # features_tmp = np.einsum('ij,kj->ik', node_features,
-        #                          lin_srcDOTweight)
-        #
-        # # features: N x H x F'
-        # features[:] = np.reshape(features_tmp,
-        #                          (N, heads, F_out))
-
+    def gat(node_features, rowptrs, columns, att_src,
+            e, e_before_softmax, e_softmax_sum, alpha_src):
         # Compute node attention coefficients.
         alpha_src[:] = np.sum(node_features * att_src, axis=-1)  # shape: N x H
-        alpha_dst[:] = np.sum(node_features * att_dst, axis=-1)  # N x H
 
         # Calculate attention weights.
         e_softmax_sum[:] = 0
 
-        # TODO: Below loop can be flipped.
         for l in dace.map[0:N]:
             for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
                 # Calculating e_l->colv
                 colv = columns[v]
-                e_tmp = alpha_src[l] + alpha_dst[colv]
-                # LeakyReLU
-                e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
-                e_tmp = np.exp(e_tmp)
+                e_tmp = alpha_src[l]
                 e_before_softmax[v] = e_tmp
-                e_softmax_sum[colv] += e_tmp
+                e_softmax_sum[colv] += e_before_softmax[v]
 
-        # # Softmax normalization.
-        # for j in dace.map[0:num_entries]:
-        #     colj = columns[j]
-        #     e[j] = e_before_softmax[j] / e_softmax_sum[colj]
-        #
-        # if heads == 1:
-        #     csrmm(rowptrs, columns, e,
-        #           np.reshape(features, (N, F_out)),
-        #           output,
-        #           transA=True, beta=0.0)
-        # else:
-        #     output_perm = np.zeros((heads, N, F_out),
-        #                            dtype=dtype)  # H x N x F'
-        #     features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
-        #     e_perm = np.transpose(e, (1, 0))  # H x num_entries
-        #     # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
-        #     for h in range(heads):
-        #         csrmm(rowptrs, columns, e_perm[h], features_perm[h],
-        #               output_perm[h],
-        #               transA=True,
-        #               beta=1.0)
-        #
-        #     output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)),
-        #                            (N, heads * F_out))
+        # Softmax normalization.
+        for j in dace.map[0:num_entries]:
+            colj = columns[j]
+            e[j] = e_before_softmax[j] / e_softmax_sum[colj]
 
-    weight = cp.array(layer.lin_src.weight.detach().numpy())
-    att_src = cp.array(layer.att_src.detach().numpy())
-    att_dst = cp.array(layer.att_dst.detach().numpy())
-    sdfg = gat.to_sdfg(x, rowptr, col, weight, att_src,
-                       att_dst, output, out_e, out_e_before_softmax,
+    sdfg = gat.to_sdfg(x, rowptr, col, att_src,
+                       out_e, out_e_before_softmax,
                        out_e_softmax_sum,
-                       out_alpha_src, out_alpha_dst)
+                       out_alpha_src)
     sdfg.apply_gpu_transformations()
 
-    sdfg(node_features=x, rowptrs=rowptr, columns=col, lin_srcDOTweight=weight,
-         att_src=att_src, att_dst=att_dst, output=output, e=out_e,
+    sdfg(node_features=x, rowptrs=rowptr, columns=col,
+         att_src=att_src, e=out_e,
          e_before_softmax=out_e_before_softmax, e_softmax_sum=out_e_softmax_sum,
-         alpha_src=out_alpha_src, alpha_dst=out_alpha_dst)
+         alpha_src=out_alpha_src)
 
-    expected = np.zeros((N, heads * F_out), dtype=dtype)
     expected_e = np.zeros((num_entries, heads), dtype=dtype)
     expected_e_before_softmax = np.zeros((num_entries, heads), dtype=dtype)
     expected_e_softmax_sum = np.zeros((N, heads), dtype=dtype)
     expected_alpha_src = np.zeros((N, heads), dtype=dtype)
-    expected_alpha_dst = np.zeros((N, heads), dtype=dtype)
     gat.f(node_features=x.get(), rowptrs=rowptr.get(), columns=col.get(),
-          lin_srcDOTweight=weight.get(),
-          att_src=att_src.get(), att_dst=att_dst.get(), output=expected,
+          att_src=att_src.get(),
           e=expected_e, e_before_softmax=expected_e_before_softmax,
-            e_softmax_sum=expected_e_softmax_sum,
-          alpha_src=expected_alpha_src, alpha_dst=expected_alpha_dst)
+          e_softmax_sum=expected_e_softmax_sum,
+          alpha_src=expected_alpha_src)
 
     check_equal(expected_alpha_src, out_alpha_src.get(), 'alpha_src')
-    check_equal(expected_alpha_dst, out_alpha_dst.get(), 'alpha_dst')
     check_equal(expected_e_before_softmax, out_e_before_softmax.get(),
                 'e_before_softmax')
     check_equal(expected_e_softmax_sum, out_e_softmax_sum.get(),
                 'e_softmax_sum')
     check_equal(expected_e, out_e.get(), 'attention_weights')
-    check_equal(expected, output.get(), 'result')
 
 
 @pytest.mark.parametrize("N", [3, 7])
