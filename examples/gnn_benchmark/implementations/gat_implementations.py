@@ -183,7 +183,6 @@ class GATConvCSR(GATConvBase):
             e = np.zeros((num_entries, heads), dtype=dtype)
             softmax_sum = np.zeros((N, heads), dtype=dtype)
 
-            # TODO: Below loop can be flipped.
             for l in dace.map[0:N]:
                 for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
                     # Calculating e_l->colv
@@ -219,13 +218,8 @@ class GATConvCSR(GATConvBase):
         if do_bias:
             def bias_prog(node_features, rowptrs, columns, lin_srcDOTweight,
                           att_src, att_dst, bias, output):
-                if heads == 1:
-                    gat_op(node_features, rowptrs, columns,
-                           lin_srcDOTweight, att_src, att_dst,
-                           output)
-                else:
-                    gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
-                           att_src, att_dst, output)
+                gat_op(node_features, rowptrs, columns, lin_srcDOTweight, att_src, att_dst,
+                       output)
                 for i, j in dace.map[0:N, 0:num_out_features * heads]:
                     output[i, j] += bias[j]
 
