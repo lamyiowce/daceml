@@ -3,14 +3,12 @@ import numpy as np
 import pytest
 import scipy
 import torch
-from torch import nn
 from torch_geometric.nn import GATConv
+from torch_geometric.utils import softmax
 from torch_sparse import SparseTensor
 
 from daceml.torch.module import DaceModule
 from examples.gnn_benchmark.csrmm_libnode import csrmm
-from examples.gnn_benchmark.implementations.gat_implementations import \
-    GATConvCSR
 from examples.gnn_benchmark.util import register_replacement_overrides
 
 torch.backends.cuda.matmul.allow_tf32 = False
@@ -29,8 +27,8 @@ def set_implementation(dace_module, implementation):
 
 @pytest.mark.parametrize("bias", [True], ids=['bias'])
 @pytest.mark.parametrize("implementation", ['csr'])
-@pytest.mark.parametrize("N,F,heads", [(2, 3, 1)])
-# @pytest.mark.parametrize("N,F,heads", [(2, 3, 1), (2, 3, 2), (120, 20, 8)])
+# @pytest.mark.parametrize("N,F,heads", [(2, 3, 1)])
+@pytest.mark.parametrize("N,F,heads", [(2, 3, 1), (2, 3, 2), (120, 20, 8)])
 @pytest.mark.parametrize("seed", [40])
 def test_gat(bias, implementation, N, F, heads, seed):
     F_in = F
@@ -346,26 +344,10 @@ def test_spmm_many_heads_gpu(N, F, heads, seed):
         # output_perm = np.reshape(np.zeros_like(output), (heads, N, F))  # H x N x F'
         features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
         e_perm = np.transpose(e, (1, 0))  # H x num_entries
-        # for h in dace.map[0:heads]:
         for h in range(heads):
-            # e_tmp = np.zeros_like(e_perm[h])
-            # e_tmp[:] = e_perm[h]
-            # features_tmp = np.zeros_like(features_perm[h])
-            # features_tmp[:] = features_perm[h]
-            # output_tmp = np.zeros_like(output_perm[h])
             csrmm(rowptrs, columns, e_perm[h], features_perm[h], output_perm[h],
                   transA=True,
                   beta=0.0)
-            # output_perm[h, :, :] = np.copy(output_tmp)
-
-            # e_tmp = np.zeros_like(e_perm[h])
-            # e_tmp[:] = e_perm[h]
-            # features_tmp = np.zeros_like(features_perm[h])
-            # features_tmp[:] = features_perm[h]
-            # output_tmp = np.zeros_like(output_perm[h])
-            # csrmm(rowptrs, columns, e_tmp, features_tmp, output_tmp, transA=True,
-            #       beta=0.0)
-            # output_perm[h, :, :] = np.copy(output_tmp)
 
         output[:] = np.copy(
             np.reshape(np.transpose(output_perm, (1, 0, 2)), (N, heads * F)))
@@ -485,6 +467,92 @@ def test_bwd_weight_compute():
         if result[name] is not None:
             check_equal(param.grad, result[name].detach().numpy())
     print("x", x.grad)
+
+
+def test_stable_softmax():
+    if torch.cuda.is_available():
+        import cupy as xp
+    else:
+        import numpy as xp
+    N = 3
+    heads = 1
+    dtype = np.float32
+
+    torch.random.manual_seed(42)
+    np.random.seed(42)
+    xp.random.seed(42)
+
+    # Create input.
+    graph = (scipy.sparse.random(N, N, density=0.5, format='csr')
+             + scipy.sparse.eye(N, format='csr'))
+    graph.data = xp.ones_like(graph.data)
+    rowptr, col = np.ascontiguousarray(graph.indptr), np.ascontiguousarray(
+        graph.indices)
+    rowptr = xp.asarray(rowptr)
+    col = xp.asarray(col)
+    num_entries = col.shape[0]
+    edge_vals = xp.random.rand(num_entries, heads).astype(dtype)
+
+    out_e_before_softmax = xp.zeros((num_entries, heads), dtype=dtype)
+    out_e_softmax_sum = xp.zeros((N, heads), dtype=dtype)
+    out_e = xp.zeros((num_entries, heads), dtype=dtype)
+
+    def att_weights_expected(rowptrs, columns,
+                             e, e_before_softmax, e_softmax_sum, edge_vals):
+        # Calculate attention weights.
+        e_softmax_sum[:] = 0
+
+        for l in dace.map[0:N]:
+            for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+                # Calculating e_l->colv
+                colv = columns[v]
+                # LeakyReLU
+                e_before_softmax[v] = np.exp(edge_vals[v])
+                e_softmax_sum[colv] += e_before_softmax[v]
+
+        # Softmax normalization.
+        for j in dace.map[0:num_entries]:
+            colj = columns[j]
+            e[j] = e_before_softmax[j] / e_softmax_sum[colj]
+
+    def att_weights_stable(rowptrs, columns,
+                           e, e_before_softmax, e_softmax_sum, e_softmax_max, edge_vals):
+
+        for l in dace.map[0:N]:
+            for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+                # Calculating e_l->colv
+                colv = columns[v]
+                e_softmax_max[colv] = np.maximum(e_softmax_max[colv], edge_vals[v])
+
+        for j in dace.map[0:num_entries]:
+            colj = columns[j]
+            e_before_softmax[j] = np.exp(edge_vals[j] - e_softmax_max[colj])
+            e_softmax_sum[colj] += e_before_softmax[j]
+
+        # Softmax normalization.
+        for j in dace.map[0:num_entries]:
+            colj = columns[j]
+            e[j] = e_before_softmax[j] / e_softmax_sum[colj]
+
+    expected_e = np.zeros((num_entries, heads), dtype=dtype)
+    expected_e_before_softmax = np.zeros((num_entries, heads), dtype=dtype)
+    expected_e_softmax_sum = np.zeros((N, heads), dtype=dtype)
+    att_weights_expected(rowptr, col,
+                         expected_e, expected_e_before_softmax,
+                         expected_e_softmax_sum,
+                         edge_vals)
+
+    out_e_softmax_max = xp.ones((N, heads), dtype=dtype) * -np.inf
+    att_weights_stable(rowptr, col,
+                       out_e, out_e_before_softmax,
+                       out_e_softmax_sum,
+                       out_e_softmax_max,
+                       edge_vals)
+
+    torch_result = softmax(torch.tensor(edge_vals), torch.tensor(col, dtype=torch.int64))
+
+    check_equal(torch_result, out_e, 'attention_weights torch')
+    check_equal(expected_e, out_e, 'attention_weights')
 
 
 if __name__ == '__main__':

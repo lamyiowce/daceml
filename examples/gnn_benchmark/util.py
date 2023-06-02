@@ -34,6 +34,7 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
         "semester_thesis": gat_implementations.GATConvSemesterThesis,
         "csr": gat_implementations.GATConvCSR,
         "coo": gat_implementations.GATConvCOO,
+        "csr_stable": gat_implementations.GATConvCSRStable,
     }
 }
 name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
