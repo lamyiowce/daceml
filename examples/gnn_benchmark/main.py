@@ -71,6 +71,7 @@ def main():
     parser.add_argument('--val-dtype', type=str, default='float32')
     parser.add_argument('--no-gen-code', action='store_true')
     parser.add_argument('--torch', choices=['both', 'csr', 'edge_list', 'none'], default='both')
+    parser.add_argument('--tag', type=str, default=None)
     args = parser.parse_args()
 
     dtype_str_to_torch_type = {
@@ -155,6 +156,8 @@ def main():
             dace_tag += "_no_autoopt"
         if args.no_persistent_mem:
             dace_tag += "_no_persistent_mem"
+        if args.tag is not None:
+            dace_tag += f"_{args.tag}"
 
         do_benchmark(dace_models,
                      backward=args.backward,
