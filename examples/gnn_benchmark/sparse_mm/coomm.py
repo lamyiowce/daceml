@@ -66,11 +66,11 @@ class ExpandCOOMMCuSPARSE(ExpandTransformation):
         node.validate(sdfg, state)
 
         operands = _get_operands(node, state, sdfg)
-        avalues = operands['_a_vals'][1]
-        acols = operands['_a_cols'][1]
-        arows = operands['_a_rows'][1]
-        bdesc = operands['_b'][1]
-        cdesc = sdfg.arrays[state.out_edges(node)[0].data.data]
+        _, avalues, avalues_shape, _ = operands['_a_vals']
+        _, acols, acols_shape, _ = operands['_a_cols']
+        _, bdesc, b_shape, _ = operands['_b']
+        _, cdesc, c_shape, _ = operands['_c']
+        # cdesc = sdfg.arrays[state.out_edges(node)[0].data.data]
 
         # Get values data type.
         dtype = avalues.dtype.base_type
@@ -108,20 +108,20 @@ class ExpandCOOMMCuSPARSE(ExpandTransformation):
         opt['opB'] = 'CUSPARSE_OPERATION_NON_TRANSPOSE'
 
         # Get sizes.
-        opt['nnz'] = avalues.shape[0]
-        opt['nrows'] = cdesc.shape[0]
-        opt['ncols'] = cdesc.shape[1]
+        opt['nnz'] = avalues_shape[0]
+        opt['nrows'] = c_shape[0]
+        opt['ncols'] = c_shape[1]
         opt['ldc'] = opt['ncols']
 
         if not node.transA:
-            opt['arows'] = cdesc.shape[0]
-            opt['acols'] = bdesc.shape[0]
+            opt['arows'] = c_shape[0]
+            opt['acols'] = b_shape[0]
         else:
-            opt['arows'] = bdesc.shape[0]
-            opt['acols'] = cdesc.shape[0]
+            opt['arows'] = b_shape[0]
+            opt['acols'] = c_shape[0]
 
-        opt['brows'] = bdesc.shape[0]
-        opt['bcols'] = bdesc.shape[1]
+        opt['brows'] = b_shape[0]
+        opt['bcols'] = b_shape[1]
         opt['ldb'] = opt['bcols']
 
         opt['compute'] = f'CUDA_R_{to_cublas_computetype(dtype)}'
@@ -209,9 +209,10 @@ class ExpandCOOMMCpp(ExpandTransformation):
         node.validate(sdfg, state)
 
         operands = _get_operands(node, state, sdfg)
-        avalues = operands['_a_vals'][1]
-        bdesc = operands['_b'][1]
-        cdesc = sdfg.arrays[state.out_edges(node)[0].data.data]
+        _, avalues, avalues_shape, _ = operands['_a_vals']
+        _, bdesc, b_shape, _ = operands['_b']
+        _, cdesc, c_shape, _ = operands['_c']
+        # cdesc = sdfg.arrays[state.out_edges(node)[0].data.data]
 
         dtype = avalues.dtype.base_type
         if dtype == dace.float32:
@@ -232,11 +233,11 @@ class ExpandCOOMMCpp(ExpandTransformation):
         opt['alpha'] = alpha
         opt['beta'] = beta
 
-        opt['num_entries'] = avalues.shape[0]
-        opt['nrows'] = cdesc.shape[0]
-        opt['ncols'] = cdesc.shape[1]
+        opt['num_entries'] = avalues_shape[0]
+        opt['nrows'] = c_shape[0]
+        opt['ncols'] = c_shape[1]
 
-        opt['bcols'] = bdesc.shape[1]
+        opt['bcols'] = b_shape[1]
 
         if node.transA:
             code = """
