@@ -97,7 +97,7 @@ def test_gat(bias, implementation, N, F, heads, seed):
 
 
 def check_equal(expected_pred, pred, name=None):
-    print('\n' + name)
+    print('\n' + name if name else '')
     print('Calculated: \n', pred)
     print('Expected: \n', expected_pred)
     if not np.allclose(pred, expected_pred):
