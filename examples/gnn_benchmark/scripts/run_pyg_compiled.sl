@@ -21,11 +21,11 @@ rm -rf ./.dacecache
 
 do_test=
 
-model=gcn
+model=gat
 
-datasets="ogbn-arxiv cora"
+datasets="cora ogbn-arxiv "
 
-hidden_sizes="8 16 32 64 128 256 512 1024"
+hidden_sizes="8 16 32 64 128 256"
 
 echo "Running model " $model
 for dataset in $datasets; do
@@ -34,8 +34,9 @@ for dataset in $datasets; do
   for hidden in $hidden_sizes; do
     echo "Hidden " $hidden
     rm -rf .dacecache
-    $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --backward --torch csr
-    $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --backward --torch edge_list
+#    $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model fused_gat --backward --torch csc_csr
+#    $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --backward --torch csr
+    $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --backward --torch compiled_edge_list
   done
 done
 

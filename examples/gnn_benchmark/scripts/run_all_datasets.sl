@@ -21,6 +21,7 @@ rm -rf ./.dacecache
 
 do_test=
 
+export DACE_default_build_folder=./.dacecache-$SLURM_JOB_ID
 export DACE_compiler_cuda_max_concurrent_streams=-1
 model=gcn
 formats="csr_adapt"
