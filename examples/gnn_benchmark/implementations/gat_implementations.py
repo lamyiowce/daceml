@@ -13,6 +13,7 @@ from examples.gnn_benchmark import sparse
 from examples.gnn_benchmark.csrmm_libnode import csrmm
 from examples.gnn_benchmark.implementations import common
 from examples.gnn_benchmark.implementations.common import SparseLayerBase, SpecialInputType
+from examples.gnn_benchmark.sparse_mm.coomm import coomm
 
 
 class GATConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
@@ -283,18 +284,8 @@ class GATConvCSRStable(GATConvBase):
                     e[v] = e_tmp
                     softmax_max[colv] = np.maximum(softmax_max[colv], e[v])
 
-            for j in dace.map[0:num_entries]:
-                colj = columns[j]
-                e[j] = np.exp(e[j] - softmax_max[colj])
-                softmax_sum[colj] += e[j]
-
-            for l in dace.map[0:N]:
-                for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
-                    # Calculating e_l->colv
-                    colv = columns[v]
-                    softmax_max[colv] = np.maximum(softmax_max[colv], e[v])
-
-            for j in dace.map[0:num_entries]:
+            # TODO: sequential map, otherwise incorrect with autoopt.
+            for j in dace.map[0:num_entries]@dace.dtypes.ScheduleType.Sequential:
                 colj = columns[j]
                 e[j] = np.exp(e[j] - softmax_max[colj])
                 softmax_sum[colj] += e[j]
@@ -345,6 +336,7 @@ class GATConvCOO(GATConvBase):
     def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
                 dtype: dace.dtypes.Typeclasses, negative_slope: float,
                 do_bias: bool):
+        @dace.program
         def gat_op(node_features, rows, columns, lin_srcDOTweight,
                    att_src, att_dst, output):
             """
@@ -378,37 +370,41 @@ class GATConvCOO(GATConvBase):
             e[:] = 0
             softmax_sum[:] = 0
 
-            # def leaky_relu(x):
-            #     return np.maximum(negative_slope * x, x)
-            #
-            # e[:] = np.exp(leaky_relu(alpha_src[rows] + alpha_dst[columns]))
-
-            # TODO: Below loop can be flipped.
             for i in dace.map[0:num_entries]:
                 row = rows[i]
                 col = columns[i]
                 e_tmp = alpha_src[row] + alpha_dst[col]
-                # LeakyReLU
+                # # LeakyReLU
                 e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
                 e_tmp = np.exp(e_tmp)
                 e[i] = e_tmp
-                softmax_sum[col] += e_tmp
+
+            # # TODO: This is a workaround. With no schedule type, the results are incorrect with autoopt
+            # for i in dace.map[0:num_entries]@dace.dtypes.ScheduleType.Sequential:
+                col = columns[i]
+                softmax_sum[col] += e[i]
 
             # Softmax normalization.
             for j in dace.map[0:num_entries]:
                 colj = columns[j]
                 e[j] = e[j] / softmax_sum[colj]
 
-            output[:] = 0
-            for i in dace.map[0:num_entries]:
-                col = columns[i]
-                row = rows[i]
-                if heads == 1:
-                    output[col] += e[i] * features[row]
-                else:
-                    output[col] += np.reshape(
-                        np.reshape(e[i], (heads, 1)) * features[row],
-                        (heads * num_out_features,))
+            if heads == 1:
+                coomm(rows, columns, e, np.reshape(features, (N, num_out_features)), output,
+                      transA=True, beta=0.0)
+            else:
+                output_perm = np.zeros((heads, N, num_out_features), dtype=dtype)  # H x N x F'
+                features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
+                e_perm = np.transpose(e, (1, 0))  # H x num_entries
+                # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
+                for h in range(heads):
+                    coomm(rows, columns, e_perm[h], features_perm[h], output_perm[h],
+                          transA=True,
+                          beta=1.0)
+
+                output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)),
+                                       (N, heads * num_out_features))
+
 
         if do_bias:
             def bias_prog(node_features, rows, columns, lin_srcDOTweight,
