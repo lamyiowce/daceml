@@ -199,37 +199,45 @@ def plot_compare_csr_coo_cutoffs():
 
 
 def main():
-    # tag = "11-04-gcn-csr-cora"
+    cora_df, cora_bwd_df = read_many_dfs(
+        filenames=['02.06.09.52-block-sizes-gcn-cora-202957.csv']
+    )
+    plot_block_sizes(cora_df, cora_bwd_df, name='Cora')
+    arxiv_df, arxiv_bwd_df = read_many_dfs(
+        filenames=['02.06.10.44-block-sizes-gcn-ogbn-arxiv-202957.csv']
+    )
+    plot_block_sizes(arxiv_df, arxiv_bwd_df, name='Arxiv')
+
     # plot_block_sizes(tag)
     # plot_adapt_matmul_order()
 
     # plot_backward("data/24-04-gcn-reduce-gpuauto-simplify", model='GCN')
     # plot_backward("data/24-04-gcn-single-reduce-gpuauto-simplify", model='GCN Single layer')
 
-    plot_compare_csr_coo_cutoffs()
+    # plot_compare_csr_coo_cutoffs()
 
-    arxiv_df, arxiv_bwd_df = read_many_dfs(
-        filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
-                   '10.05.08.35-fix-contiguous-gcn-ogbn-arxiv-191411.csv',
-                   '10.05.16.28-gcn-ogbn-arxiv-191708.csv',
-                   '11.05-pyg-arxiv-1024.csv',
-                   '16.05.12.53-gcn-ogbn-arxiv-196721.csv',
-                   '16.05.13.59-gcn-csr_adapt-ogbn-arxiv-196780.csv',
-                   '23.05.14.02-gcn-ogbn-arxiv-202457.csv']
-    )
-    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv', plot_title="OGB Arxiv",
-                  drop_names=['dace_csc', 'dace_coo', 'dace_csr'])
+    # arxiv_df, arxiv_bwd_df = read_many_dfs(
+    #     filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
+    #                '10.05.08.35-fix-contiguous-gcn-ogbn-arxiv-191411.csv',
+    #                '10.05.16.28-gcn-ogbn-arxiv-191708.csv',
+    #                '11.05-pyg-arxiv-1024.csv',
+    #                '16.05.12.53-gcn-ogbn-arxiv-196721.csv',
+    #                '16.05.13.59-gcn-csr_adapt-ogbn-arxiv-196780.csv',
+    #                '23.05.14.02-gcn-ogbn-arxiv-202457.csv']
+    # )
+    # plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv', plot_title="OGB Arxiv",
+    #               drop_names=['dace_csc', 'dace_coo', 'dace_csr'])
 
-    cora_df, cora_bwd_df = read_many_dfs(
-        filenames=['10.05.09.03-fix-contiguous-gcn-cora-191411.csv',
-                   '10.05.15.40-pyg-gcn-cora-191680.csv',
-                   '10.05.16.08-gcn-cora-191708.csv',
-                   '16.05.12.40-gcn-cora-196721.csv',
-                   '16.05.13.45-gcn-csr_adapt-cora-196780.csv',
-                   '23.05.12.56-gcn-cora-202421.csv']
-    )
-    plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-ogbn-cora', plot_title="Cora",
-                  drop_names=['dace_csc', 'dace_coo', 'dace_csr'])
+    # cora_df, cora_bwd_df = read_many_dfs(
+    #     filenames=['10.05.09.03-fix-contiguous-gcn-cora-191411.csv',
+    #                '10.05.15.40-pyg-gcn-cora-191680.csv',
+    #                '10.05.16.08-gcn-cora-191708.csv',
+    #                '16.05.12.40-gcn-cora-196721.csv',
+    #                '16.05.13.45-gcn-csr_adapt-cora-196780.csv',
+    #                '23.05.12.56-gcn-cora-202421.csv']
+    # )
+    # plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-ogbn-cora', plot_title="Cora",
+    #               drop_names=['dace_csc', 'dace_coo', 'dace_csr'])
 
     #
     # gat_arxiv_df, gat_arxiv_bwd_df = read_many_dfs(['18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv'], backward=True)
@@ -353,31 +361,38 @@ def plot_adapt_matmul_order():
     return adapt_labels
 
 
-def plot_block_sizes(tag):
-    dfs = []
-    for sz in ['', '-64-8-1', '-512-1-1', '-128-8-1']:
-        df_temp = pd.read_csv(tag + sz + '.csv')
-        dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_csr'
-        df_temp['Name'][dace_rows] = df_temp['Name'][dace_rows] + sz
-        dfs.append(df_temp)
-    df = pd.concat(dfs)
+def plot_block_sizes(df=None, bwd_df=None, tag=None, name=None):
+    if df is None:
+        dfs = []
+        for sz in ['', '-64-8-1', '-512-1-1', '-128-8-1']:
+            df_temp = pd.read_csv(tag + sz + '.csv')
+            dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_csr'
+            df_temp['Name'][dace_rows] = df_temp['Name'][dace_rows] + sz
+            dfs.append(df_temp)
+        df = pd.concat(dfs)
+
     block_size_labels = {
         'dace_autoopt_persistent_mem_csr': 'Block size 32,1,1',
         'dace_autoopt_persistent_mem_csr-64-8-1': 'Block size 64,8,1',
         'dace_autoopt_persistent_mem_csr-512-1-1': 'Block size 512,1,1',
         'dace_autoopt_persistent_mem_csr-128-8-1': 'Block size 128,8,1',
     }
-    make_plot(df, "Block size comparison (forward)",
-              label_map=block_size_labels)
-    dfs = []
-    for sz in ['', '-64-8-1', '-512-1-1', '-128-8-1']:
-        df_temp = pd.read_csv(tag + sz + '-bwd.csv')
-        dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_csr'
-        df_temp['Name'][dace_rows] = df_temp['Name'][dace_rows] + sz
-        dfs.append(df_temp)
-    df = pd.concat(dfs)
-    make_plot(df, "Block size comparison (fwd + bwd)",
-              label_map=block_size_labels)
+
+    if bwd_df is None:
+        dfs = []
+        for sz in ['', '-64-8-1', '-512-1-1', '-128-8-1']:
+            df_temp = pd.read_csv(tag + sz + '-bwd.csv')
+            dace_rows = df_temp['Name'] == 'dace_autoopt_persistent_mem_csr'
+            df_temp['Name'][dace_rows] = df_temp['Name'][dace_rows] + sz
+            dfs.append(df_temp)
+        bwd_df = pd.concat(dfs)
+
+    block_sizes = ['1024_1_1', '32_1_1', '64_8_1', '512_1_1']
+    formats = ['csr', 'coo']
+    labels = {f'dace_{sz}_{fmt}_adapt': f'DaCe {sz.replace("_", ",")} {fmt} adapt' for sz in block_sizes for fmt in formats}
+    labels.update(block_size_labels)
+    make_plot(df, f"{name}: Block sizes (fwd + bwd)",
+              label_map=labels, bwd_df=bwd_df)
 
 
 if __name__ == '__main__':
