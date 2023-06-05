@@ -116,8 +116,8 @@ class GCNConvSemesterThesis(GCNConvBase):
                           linDOTweight, bias, output):
                 gcn_op(node_features, rowptrs, columns, edge_vals,
                        linDOTweight, output)
-                for i in dace.map[0:N]:
-                    output[i] += bias
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] += bias[j]
 
             return bias_prog
         return gcn_op
@@ -150,8 +150,9 @@ class GCNConvCSR(GCNConvBase):
 
                 Compute X' = A.t @ X @ W.t + b
                 """
-                for i in dace.map[0:N]:
-                    output[i] = bias
+
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] = bias[j]
                 features = dace.define_local((N, num_out_features), dtype=dtype)
                 features[:] = np.einsum('ij,kj->ik', node_features,
                                         linDOTweight)
@@ -247,8 +248,8 @@ class GCNConvCSRAdapt(GCNConvBase):
                 Compute X' = A.t @ X @ W.t + b
                 """
                 if num_in_features > num_out_features:
-                    for i in dace.map[0:N]:
-                        output[i] = bias
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] = bias[j]
                     features = dace.define_local((N, num_out_features), dtype=dtype)
                     features[:] = np.einsum('ij,kj->ik', node_features,
                                             linDOTweight)
@@ -261,8 +262,8 @@ class GCNConvCSRAdapt(GCNConvBase):
                                         aggregated_features, beta=0.0, transA=True)
                     output[:] = np.einsum('ij,kj->ik', aggregated_features,
                                           linDOTweight)
-                    for i in dace.map[0:N]:
-                        output[i] += bias
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] += bias[j]
 
 
         else:
@@ -329,8 +330,8 @@ class GCNConvCSC(GCNConvBase):
                           linDOTweight, bias, output):
                 gcn_op(node_features, colptrs, rows, edge_vals,
                        linDOTweight, output)
-                for i in dace.map[0:N]:
-                    output[i] += bias
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] += bias[j]
 
             return bias_prog
         return gcn_op
@@ -365,8 +366,8 @@ class GCNConvCSCAdapt(GCNConvBase):
                 Compute X' = A.t @ X @ W.t + b
                 """
                 if num_in_features > num_out_features:
-                    for i in dace.map[0:N]:
-                        output[i] = bias
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] = bias[j]
                     features = dace.define_local((N, num_out_features), dtype=dtype)
                     features[:] = np.einsum('ij,kj->ik', node_features,
                                             linDOTweight)
@@ -379,8 +380,8 @@ class GCNConvCSCAdapt(GCNConvBase):
                                         aggregated_features, beta=0.0, transA=False)
                     output[:] = np.einsum('ij,kj->ik', aggregated_features,
                                           linDOTweight)
-                    for i in dace.map[0:N]:
-                        output[i] += bias
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] += bias[j]
 
 
         else:
@@ -439,8 +440,8 @@ class GCNConvCOO(GCNConvBase):
                 features = dace.define_local((N, num_out_features), dtype=dtype)
                 features[:] = np.einsum('ij,kj->ik', node_features,
                                         linDOTweight)
-                for i in dace.map[0:N]:
-                    output[i] = bias
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] = bias[j]
                 coomm(rows, columns, edge_vals, features, output, beta=1.0,
                       transA=True)
         else:
@@ -492,8 +493,8 @@ class GCNConvCOOAdapt(GCNConvBase):
                     features = dace.define_local((N, num_out_features), dtype=dtype)
                     features[:] = np.einsum('ij,kj->ik', node_features,
                                             linDOTweight)
-                    for i in dace.map[0:N]:
-                        output[i] = bias
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] = bias[j]
                     coomm(rows, columns, edge_vals, features, output, beta=1.0,
                           transA=True)
                 else:
@@ -503,8 +504,8 @@ class GCNConvCOOAdapt(GCNConvBase):
                           transA=True)
                     output[:] = np.einsum('nm,fm->nf', temp,
                                           linDOTweight)
-                    for i in dace.map[0:N]:
-                        output[i] += bias
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] += bias[j]
         else:
             def gcn_op(node_features, rows, columns, edge_vals,
                        linDOTweight, output):
@@ -569,8 +570,8 @@ class GCNConvEllpackTransposed(GCNConvBase):
                           linDOTweight, bias, output):
                 gcn_op(node_features, rows, edge_vals,
                        linDOTweight, output)
-                for i in dace.map[0:N]:
-                    output[i] += bias
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] += bias[j]
 
             return bias_prog
         return gcn_op
@@ -617,8 +618,8 @@ class GCNConvEllpack(GCNConvBase):
                           linDOTweight, bias, output):
                 gcn_op(node_features, columns, edge_vals,
                        linDOTweight, output)
-                for i in dace.map[0:N]:
-                    output[i] += bias
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] += bias[j]
 
             return bias_prog
         return gcn_op
@@ -678,8 +679,8 @@ class GCNConvEllpack(GCNConvBase):
                           linDOTweight, bias, output):
                 gcn_op(node_features, columns, edge_vals,
                        linDOTweight, output)
-                for i in dace.map[0:N]:
-                    output[i] += bias
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] += bias[j]
 
             return bias_prog
         return gcn_op
@@ -719,8 +720,8 @@ class GCNConvCSRCOO(GCNConvBase):
                 features = dace.define_local((N, num_out_features), dtype=dtype)
                 features[:] = np.einsum('ij,kj->ik', node_features,
                                         linDOTweight)
-                for i in dace.map[0:N]:
-                    output[i] = bias
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] = bias[j]
                 coomm(coo_rows, coo_columns, coo_edge_vals, features, output, beta=1.0,
                       transA=True)
                 csrmm_libnode.csrmm(csr_rowptrs, csr_columns, csr_edge_vals, features,
@@ -783,8 +784,8 @@ class GCNConvCSRCOOAdapt(GCNConvBase):
                     features = dace.define_local((N, num_out_features), dtype=dtype)
                     features[:] = np.einsum('ij,kj->ik', node_features,
                                             linDOTweight)
-                    for i in dace.map[0:N]:
-                        output[i] = bias
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] = bias[j]
                     coomm(coo_rows, coo_columns, coo_edge_vals, features, output, beta=1.0,
                           transA=True)
                     csrmm_libnode.csrmm(csr_rowptrs, csr_columns, csr_edge_vals, features,
@@ -798,8 +799,8 @@ class GCNConvCSRCOOAdapt(GCNConvBase):
                                         temp, beta=1.0, transA=True)
                     output[:] = np.einsum('nm,fm->nf', temp,
                                           linDOTweight)
-                    for i in dace.map[0:N]:
-                        output[i] += bias
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] += bias[j]
 
         else:
             def gcn_op(node_features,
