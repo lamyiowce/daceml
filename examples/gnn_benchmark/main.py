@@ -60,6 +60,8 @@ def main():
     parser.add_argument('--normalize', action='store_true')
     parser.add_argument('--no-persistent-mem', action='store_true')
     parser.add_argument('--no-opt', action='store_true')
+    parser.add_argument('--zero-bias', action='store_true')
+    parser.add_argument('--no-bias', action='store_true')
     parser.add_argument('--threadblock-dynamic', action='store_true')
     parser.add_argument('--backward', action='store_true')
     parser.add_argument('--model', choices=model_dict.keys(), required=True)
@@ -87,6 +89,7 @@ def main():
     model_class = model_dict[args.model]
     num_hidden_features = args.hidden
     args.outfile = Path(args.outfile) if args.outfile is not None else None
+    bias_init_fn = torch.nn.init.uniform_ if not args.zero_bias else torch.nn.init.zeros_
 
     log = logging.getLogger(__name__)
     log.setLevel(logging.INFO)
@@ -101,6 +104,8 @@ def main():
     print("Num non zero:", data.num_edges)
     normalize = args.normalize
     print("Normalize: ", normalize)
+    print("Bias: ", not args.no_bias)
+    print("Bias init fn: ", bias_init_fn)
     print("Implementation: ", args.impl)
     print("DaCe indices dtype: ", args.idx_dtype)
     print("DaCe values dtype: ", args.val_dtype)
@@ -108,7 +113,7 @@ def main():
     # Define models.
     additional_kwargs = {} if 'gcn' in args.model else {'num_heads': args.heads}
     torch_model = model_class(data.num_node_features, num_hidden_features, num_classes,
-                              bias_init=torch.nn.init.uniform_, **additional_kwargs)
+                              bias_init=bias_init_fn, bias=not args.no_bias, **additional_kwargs)
     torch_model = torch_model.to(
         args.val_dtype).to(device)
     torch_model.eval()

@@ -15,14 +15,16 @@ except ImportError:
 
 class GCNSingleLayer(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes,
-                 bias_init=torch.nn.init.zeros_):
+                 bias=True, bias_init=torch.nn.init.zeros_):
         del num_classes
         super().__init__()
         self.conv = GCNConv(num_node_features,
                             num_hidden_features,
                             normalize=False,
-                            add_self_loops=False)
-        bias_init(self.conv.bias)
+                            add_self_loops=False,
+                            bias=bias)
+        if bias:
+            bias_init(self.conv.bias)
 
     def forward(self, x, *edge_info):
         x = self.conv(x, *edge_info)
@@ -32,18 +34,21 @@ class GCNSingleLayer(torch.nn.Module):
 
 class GCN(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes,
-                 bias_init=torch.nn.init.zeros_):
+                 bias=True, bias_init=torch.nn.init.zeros_):
         super().__init__()
         self.conv1 = GCNConv(num_node_features,
                              num_hidden_features,
                              normalize=False,
-                             add_self_loops=False)
+                             add_self_loops=False,
+                             bias=bias)
         self.conv2 = GCNConv(num_hidden_features,
                              num_classes,
                              normalize=False,
-                             add_self_loops=False)
-        bias_init(self.conv1.bias)
-        bias_init(self.conv2.bias)
+                             add_self_loops=False,
+                             bias=bias)
+        if bias:
+            bias_init(self.conv1.bias)
+            bias_init(self.conv2.bias)
 
         self.act = nn.ReLU()
         self.log_softmax = nn.LogSoftmax(dim=1)
@@ -75,20 +80,22 @@ class GATBase(torch.nn.Module):
                  features_per_head,
                  num_classes,
                  num_heads=8,
+                 bias=True,
                  bias_init=torch.nn.init.zeros_):
         super().__init__()
         self.conv1 = self.gat_layer(num_node_features,
-                               features_per_head,
-                               heads=num_heads,
-                               bias=True,
-                               **self.additional_kwargs)
+                                    features_per_head,
+                                    heads=num_heads,
+                                    bias=bias,
+                                    **self.additional_kwargs)
         self.conv2 = self.gat_layer(features_per_head * num_heads,
-                               num_classes,
-                               heads=1,
-                               bias=True,
-                               **self.additional_kwargs)
-        bias_init(self.conv1.bias)
-        bias_init(self.conv2.bias)
+                                    num_classes,
+                                    heads=1,
+                                    bias=bias,
+                                    **self.additional_kwargs)
+        if bias:
+            bias_init(self.conv1.bias)
+            bias_init(self.conv2.bias)
         self.act = nn.ELU()
         self.log_softmax = nn.LogSoftmax(dim=1)
 
@@ -116,15 +123,16 @@ class FusedGAT(GATBase):
 
 class GATSingleLayer(torch.nn.Module):
     def __init__(self, num_node_features, features_per_head, num_classes,
-                 num_heads=8, bias_init=torch.nn.init.zeros_):
+                 num_heads=8, bias=True, bias_init=torch.nn.init.zeros_):
         del num_classes
         super().__init__()
         self.conv = GATConv(num_node_features,
                             features_per_head,
                             heads=num_heads,
                             add_self_loops=False,
-                            bias=True)
-        bias_init(self.conv.bias)
+                            bias=bias)
+        if bias:
+            bias_init(self.conv.bias)
 
     def forward(self, x, *edge_info):
         x = self.conv(x, *edge_info)
