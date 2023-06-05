@@ -10,7 +10,7 @@ from typing import List, Tuple, Callable, Optional, Dict, Union
 import dace.library
 import numpy as np
 import torch
-from dace import dtypes as dt, data
+from dace import dtypes as dt, data, Config
 from dace.codegen import targets, compiler
 from dace.codegen.codeobject import CodeObject
 from dace.codegen.compiled_sdfg import CompiledSDFG
@@ -509,7 +509,8 @@ def register_and_compile_torch_extension(module: 'daceml.torch.DaceModule',
                          targets.cpu.CPUCodeGen,
                          f"Torch{module.sdfg_name}",
                          environments=environments)
-    torch_module_build_path = os.path.join('.dacecache',
+    cache_folder_path = Config.get("default_build_folder")
+    torch_module_build_path = os.path.join(cache_folder_path,
                                            f"torch_{compiled.sdfg.name}")
 
     compiler.generate_program_folder(None, [program], torch_module_build_path)
