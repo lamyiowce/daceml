@@ -173,6 +173,11 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
     dace_model.append_post_onnx_hook("make_outer_map_seq",
                                      lambda model: make_outer_map_seq(model.sdfg))
 
+    dace_model.append_post_onnx_hook("flatten_blocks_for_1d_maps",
+                                     lambda model: sdfg_util.flatten_blocks_for_1d_maps(model.sdfg))
+    dace_model.append_post_autodiff_hook("flatten_blocks_for_1d_maps_post_autodiff",
+                                         sdfg_util.apply_to_both(sdfg_util.flatten_blocks_for_1d_maps))
+
 
 def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
                                    val_dtype):

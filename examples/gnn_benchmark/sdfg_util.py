@@ -1,9 +1,12 @@
+import functools
 import logging
 from typing import Callable, Optional, Tuple
 
 import dace
 import torch
+from dace import Config
 from dace.dtypes import ScheduleType
+from dace.sdfg import nodes as nd
 from dace.transformation.auto.auto_optimize import \
     auto_optimize as dace_auto_optimize
 
@@ -99,7 +102,8 @@ def set_implementation(module: daceml.torch.module.DaceModule,
             node.implementation = implementation_name
 
 
-def set_memory_to_register(sdfg: dace.SDFG, array_name: str, expected_shape: Tuple[int, ...] = None):
+def set_memory_to_register(sdfg: dace.SDFG, array_name: str,
+                           expected_shape: Tuple[int, ...] = None):
     for node, _ in sdfg.all_nodes_recursive():
         if isinstance(node, dace.nodes.AccessNode) and node.data == array_name:
             arr = sdfg.arrays[node.data]
@@ -114,12 +118,59 @@ def apply_to_both(fn: Callable[[dace.SDFG], None]):
         fn(backward_sdfg)
     return wrapper
 
+
 def set_reduce_implementation(sdfg: dace.SDFG, implementation_name: str = 'GPUAuto'):
     counter = 0
     for node, _ in sdfg.all_nodes_recursive():
-        if isinstance(node, dace.nodes.LibraryNode) and isinstance(node, dace.libraries.standard.nodes.Reduce):
+        if isinstance(node, dace.nodes.LibraryNode) and isinstance(node,
+                                                                   dace.libraries.standard.nodes.Reduce):
             print(f"Setting impl {node} from {node.implementation} to {implementation_name}.")
             node.implementation = implementation_name
             counter += 1
     print(f"Set {counter} reduce nodes to {implementation_name}")
 
+
+def get_tb_maps_recursive(subgraph):
+    res = []
+    for node in subgraph.nodes():
+        if isinstance(node, nd.NestedSDFG):
+            for state in node.sdfg.states():
+                tbmaps = get_tb_maps_recursive(state)
+                for map, sym_map in tbmaps:
+                    for k in sym_map.values():
+                        for kk, vv in node.symbol_mapping.items():
+                            sym_map[k] = sym_map[k].subs(dace.symbol(kk), vv)
+                    res.append((map, sym_map))
+        elif isinstance(node, nd.MapEntry) and node.schedule in (
+                dace.dtypes.ScheduleType.GPU_Device,
+                dace.dtypes.ScheduleType.GPU_ThreadBlock,
+                dace.dtypes.ScheduleType.GPU_ThreadBlock_Dynamic,
+        ):
+            res.append(
+                (node.map, {dace.symbol(k): dace.symbol(k) for k in node.map.range.free_symbols}))
+    return res
+
+
+def flatten_blocks_for_1d_maps(sdfg: dace.SDFG):
+    default_block_size = [int(b) for b in
+                          Config.get('compiler', 'cuda', 'default_block_size').split(',')]
+    total_size = functools.reduce(lambda a, b: a * b, default_block_size)
+
+    for node, dfg_scope in sdfg.all_nodes_recursive():
+        if isinstance(node, nd.MapEntry) \
+                and node.schedule == dace.dtypes.ScheduleType.GPU_Device \
+                and len(node.map.params):
+            if len(node.map.params) == 1 and node.map.gpu_block_size is None:
+                subgraph = dfg_scope.scope_subgraph(node)
+                sub_maps = get_tb_maps_recursive(subgraph)
+                if len(sub_maps) > 1:
+                    # Don't set the block size if there are submaps. (sub_maps contains also the current map)
+                    print("Keeping block size, map has submaps: ", node.map,
+                          node.map.gpu_block_size, node.map.params, sub_maps)
+                else:
+                    print(
+                        f"Changing block size for {node.map} from {node.map.gpu_block_size} to {[total_size, 1, 1]}")
+                    node.map.gpu_block_size = [total_size, 1, 1]
+            else:
+                print("Keeping block size: ", node.map, node.map.gpu_block_size, node.map.params,
+                      len(node.map.params), len(node.map.params) == 1)
