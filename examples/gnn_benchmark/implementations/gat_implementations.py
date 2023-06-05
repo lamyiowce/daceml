@@ -124,8 +124,8 @@ class GATConvSemesterThesis(GATConvBase):
                           att_src, att_dst, bias, output):
                 gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
                        att_src, att_dst, output)
-                for i in dace.map[0:N]:
-                        output[i] += bias
+                for i, j in dace.map[0:N, 0:heads * num_out_features]:
+                    output[i, j] += bias[j]
 
             return bias_prog
         return gat_op
@@ -145,6 +145,7 @@ class GATConvCSR(GATConvBase):
     def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
                 dtype: dace.dtypes.Typeclasses, negative_slope: float,
                 do_bias: bool):
+        @dace.program
         def gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
                    att_src, att_dst, output):
             """
@@ -177,11 +178,24 @@ class GATConvCSR(GATConvBase):
             # else:
             #     alpha_src = np.einsum('nhf,hf->nh', features, att_src[0])
             #     alpha_dst = np.einsum('nhf,hf->nh', features, att_dst[0])
-            alpha_src = np.sum(features * att_src, axis=-1)  # shape: N x H
-            alpha_dst = np.sum(features * att_dst, axis=-1)  # N x H
+
+            # This results in incorrect code (exceeding the max grid size).
+            # alpha_src = np.sum(features * att_src, axis=-1)  # shape: N x H
+            # alpha_dst = np.sum(features * att_dst, axis=-1)  # N x H
+
+            alpha_src_tmp = dace.define_local((N, heads, num_out_features), dtype=dtype)
+            alpha_dst_tmp = dace.define_local((N, heads, num_out_features), dtype=dtype)
+            # Compute node attention coefficients.
+            # features * att_src: N x H x F
+            for j, k, i in dace.map[0:heads, 0:num_out_features, 0:N]:
+                alpha_src_tmp[i, j, k] = features[i, j, k] * att_src[0, j, k]
+                alpha_dst_tmp[i, j, k] = features[i, j, k] * att_dst[0, j, k]
+
+            alpha_src = np.sum(alpha_src_tmp, axis=-1)  # shape: N x H
+            alpha_dst = np.sum(alpha_dst_tmp, axis=-1)  # N x H
 
             # Calculate attention weights.
-            e = np.zeros((num_entries, heads), dtype=dtype)
+            e = np.empty((num_entries, heads), dtype=dtype)
             softmax_sum = np.zeros((N, heads), dtype=dtype)
 
             for l in dace.map[0:N]:
@@ -205,8 +219,14 @@ class GATConvCSR(GATConvBase):
                       transA=True, beta=0.0)
             else:
                 output_perm = np.zeros((heads, N, num_out_features), dtype=dtype)  # H x N x F'
-                features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
+
+                # This results in incorrect code (exceeding the max grid size).
+                # features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
+                features_perm = dace.define_local((heads, N, num_out_features), dtype=dtype)
+                for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
+                    features_perm[j, i, k] = features[i, j, k]
                 e_perm = np.transpose(e, (1, 0))  # H x num_entries
+
                 # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
                 for h in range(heads):
                     csrmm(rowptrs, columns, e_perm[h], features_perm[h], output_perm[h],
@@ -221,8 +241,8 @@ class GATConvCSR(GATConvBase):
                           att_src, att_dst, bias, output):
                 gat_op(node_features, rowptrs, columns, lin_srcDOTweight, att_src, att_dst,
                        output)
-                for i in dace.map[0:N]:
-                        output[i] += bias
+                for i, j in dace.map[0:N, 0:heads * num_out_features]:
+                    output[i, j] += bias[j]
 
             return bias_prog
         return gat_op
@@ -314,8 +334,8 @@ class GATConvCSRStable(GATConvBase):
                           att_src, att_dst, bias, output):
                 gat_op(node_features, rowptrs, columns, lin_srcDOTweight, att_src, att_dst,
                        output)
-                for i in dace.map[0:N]:
-                        output[i] += bias
+                for i, j in dace.map[0:N, 0:heads * num_out_features]:
+                    output[i, j] += bias[j]
 
             return bias_prog
         return gat_op
@@ -356,10 +376,17 @@ class GATConvCOO(GATConvBase):
             # features: N x H x F'
             features[:] = np.reshape(features_tmp,
                                      (N, heads, num_out_features))
+
+            alpha_src_tmp = dace.define_local((N, num_entries, heads), dtype=dtype)
+            alpha_dst_tmp = dace.define_local((N, num_entries, heads), dtype=dtype)
             # Compute node attention coefficients.
             # features * att_src: N x H x F
-            alpha_src = np.sum(features * att_src, axis=-1)  # shape: N x H
-            alpha_dst = np.sum(features * att_dst, axis=-1)  # N x H
+            for i, j, k in dace.map[0:N, 0:heads, 0:num_out_features]:
+                alpha_src_tmp[i, j, k] = features[i, j, k] * att_src[j, k]
+                alpha_dst_tmp[i, j, k] = features[i, j, k] * att_dst[j, k]
+
+            alpha_src = np.sum(alpha_src_tmp, axis=-1)  # shape: N x H
+            alpha_dst = np.sum(alpha_dst_tmp, axis=-1)  # N x H
 
             # Calculate attention weights.
             e = np.zeros((num_entries, heads), dtype=dtype)
@@ -392,7 +419,11 @@ class GATConvCOO(GATConvBase):
                       transA=True, beta=0.0)
             else:
                 output_perm = np.zeros((heads, N, num_out_features), dtype=dtype)  # H x N x F'
-                features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
+                # features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
+                features_perm = dace.define_local((heads, N, num_out_features), dtype=dtype)
+                for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
+                    features_perm[j, i, k] = features[i, j, k]
+
                 e_perm = np.transpose(e, (1, 0))  # H x num_entries
                 # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
                 for h in range(heads):
@@ -409,8 +440,8 @@ class GATConvCOO(GATConvBase):
                           att_src, att_dst, bias, output):
                 gat_op(node_features, rows, columns, lin_srcDOTweight,
                        att_src, att_dst, output)
-                for i in dace.map[0:N]:
-                        output[i] += bias
+                for i, j in dace.map[0:N, 0:heads * num_out_features]:
+                    output[i, j] += bias[j]
 
             return bias_prog
         return gat_op
