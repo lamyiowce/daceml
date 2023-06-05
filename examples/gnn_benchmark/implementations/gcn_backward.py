@@ -246,6 +246,96 @@ class GCNConvBackwardCSC(BackwardImplementation):
 
 
 @autoregister_params(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
+                     name="csc_adapt")
+class GCNConvBackwardCSCAdapt(BackwardImplementation):
+    @staticmethod
+    def backward(
+            forward_node: nd.Node, context: BackwardContext,
+            given_gradients: List[Optional[str]],
+            required_gradients: List[Optional[str]]
+    ) -> Tuple[Union[nd.Node, dace.SDFG], BackwardResult]:
+        output_shape = autodiff_utils.forward_out_desc_with_name(
+            forward_node, context, "output").shape
+
+        N, F_out = output_shape
+        node_features_desc = autodiff_utils.forward_in_desc_with_name(
+            forward_node, context, "node_features")
+        F_in = node_features_desc.shape[1]
+        val_dtype = node_features_desc.dtype
+
+        compute_grad_for_node_features = 'node_features' in required_gradients
+
+        def gcn_backward(node_features, colptrs, rows, edge_vals,
+                         linDOTweight,
+                         linDOTweight_grad, bias_grad,
+                         output_grad):
+            """
+            node_features: input features, N x M
+            rowptrs: row pointers (CSR format), N+1
+            columns: col, num_entries
+            edge_vals: values, num_entries
+            linDOTweight: F x M
+            bias: F
+            output: N x F
+
+            node_features_grad: N x F_in
+            linDOTweight_grad: F_out x F_in
+            output_grad: N x F_out
+            """
+
+            # Compute the values of the gradient of weights and node_features.
+            # The gradient of the bias is just the sum of the output gradient.
+            # The gradient of the adjacency matrix is not computed.
+
+            # Compute the gradient of the GCN layer.
+            if F_out > F_in:
+                # Grad W = Grad Y.t @ (A.t @ X)
+                temp = dace.define_local((N, F_in), dtype=val_dtype)
+                csrmm(colptrs, rows, edge_vals, node_features,
+                      temp, transA=False)
+                bias_grad[:] = np.sum(output_grad, axis=0)
+                linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp)
+            else:
+                # Grad W = (A @ Grad Y).t @ X
+                temp = dace.define_local((N, F_out), dtype=val_dtype)
+                csrmm(colptrs, rows, edge_vals, output_grad,
+                      temp, transA=True)
+                bias_grad[:] = np.sum(output_grad, axis=0)
+                linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
+
+        def gcn_backward_with_node_features(node_features, colptrs, rows,
+                                            edge_vals,
+                                            linDOTweight, node_features_grad,
+                                            linDOTweight_grad, bias_grad,
+                                            output_grad):
+            if F_out > F_in:
+                # Grad X = A @ (Grad Y @ W)
+                temp = dace.define_local((N, F_in), dtype=val_dtype)
+                temp[:] = output_grad @ linDOTweight
+
+                # `columns` and `rows` are switched because transA=False doesn't work here
+                # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
+                csrmm(colptrs, rows, edge_vals, temp,
+                      node_features_grad, transA=True)
+            else:
+                # Grad X = (A @ Grad Y) @ W
+                temp = dace.define_local((N, F_out), dtype=val_dtype)
+                csrmm(colptrs, rows, edge_vals, output_grad,
+                      temp, transA=True)
+                node_features_grad[:] = temp @ linDOTweight
+
+            gcn_backward(node_features, colptrs, rows, edge_vals,
+                         linDOTweight,
+                         linDOTweight_grad, bias_grad, output_grad)
+
+        result_node, result = autodiff_utils.backward_program_for_node(
+            gcn_backward_with_node_features if compute_grad_for_node_features else gcn_backward,
+            context, forward_node)
+
+        return result_node, result
+
+
+@autoregister_params(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                      name="coo")
 class GCNConvBackwardCOO(BackwardImplementation):
     @staticmethod

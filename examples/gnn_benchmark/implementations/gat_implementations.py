@@ -124,8 +124,8 @@ class GATConvSemesterThesis(GATConvBase):
                           att_src, att_dst, bias, output):
                 gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
                        att_src, att_dst, output)
-                for i, j in dace.map[0:N, 0:num_out_features * heads]:
-                    output[i, j] += bias[j]
+                for i in dace.map[0:N]:
+                        output[i] += bias
 
             return bias_prog
         return gat_op
@@ -221,8 +221,8 @@ class GATConvCSR(GATConvBase):
                           att_src, att_dst, bias, output):
                 gat_op(node_features, rowptrs, columns, lin_srcDOTweight, att_src, att_dst,
                        output)
-                for i, j in dace.map[0:N, 0:num_out_features * heads]:
-                    output[i, j] += bias[j]
+                for i in dace.map[0:N]:
+                        output[i] += bias
 
             return bias_prog
         return gat_op
@@ -231,8 +231,6 @@ class GATConvCSR(GATConvBase):
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
                    name="csr_stable")
 class GATConvCSRStable(GATConvBase):
-    ### BROKEN: doesn't work with opt.
-
     graph_format = sparse.CsrGraph
     input_spec = {
         "node_features": SpecialInputType.VAL_DTYPE,
@@ -316,8 +314,8 @@ class GATConvCSRStable(GATConvBase):
                           att_src, att_dst, bias, output):
                 gat_op(node_features, rowptrs, columns, lin_srcDOTweight, att_src, att_dst,
                        output)
-                for i, j in dace.map[0:N, 0:num_out_features * heads]:
-                    output[i, j] += bias[j]
+                for i in dace.map[0:N]:
+                        output[i] += bias
 
             return bias_prog
         return gat_op
@@ -411,8 +409,8 @@ class GATConvCOO(GATConvBase):
                           att_src, att_dst, bias, output):
                 gat_op(node_features, rows, columns, lin_srcDOTweight,
                        att_src, att_dst, output)
-                for i, j in dace.map[0:N, 0:num_out_features * heads]:
-                    output[i, j] += bias[j]
+                for i in dace.map[0:N]:
+                        output[i] += bias
 
             return bias_prog
         return gat_op
