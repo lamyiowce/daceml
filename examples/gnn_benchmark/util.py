@@ -1,5 +1,6 @@
 import copy
 import functools
+import re
 from typing import Dict, Tuple, Optional
 
 import dace
@@ -24,6 +25,7 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
         "coo": gcn_implementations.GCNConvCOO,
         "coo_adapt": gcn_implementations.GCNConvCOOAdapt,
         "csc": gcn_implementations.GCNConvCSC,
+        "csc_adapt": gcn_implementations.GCNConvCSCAdapt,
         "ellpack_t": gcn_implementations.GCNConvEllpackTransposed,
         "ellpack": gcn_implementations.GCNConvEllpack,
         "semester_thesis": gcn_implementations.GCNConvSemesterThesis,
@@ -158,15 +160,15 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
                                          sdfg_util.apply_to_both(simplify))
 
     def make_outer_map_seq(sdfg: dace.SDFG):
-        for node in sdfg.all_nodes_recursive():
-            if isinstance(node[0], dace.sdfg.nodes.MapEntry) \
-                    and node[0].schedule == dace.dtypes.ScheduleType.GPU_Device \
-                    and len(node[0].map.params):
-                if node[0].label in ['call_214_map', 'call_212_map', 'call_211_map']:
-                    print("Changing schedule to Unrolled ", node[0].map)
-                    node[0].schedule = dace.dtypes.ScheduleType.Unrolled
+        for node, _ in sdfg.all_nodes_recursive():
+            if isinstance(node, dace.sdfg.nodes.MapEntry) \
+                    and node.schedule == dace.dtypes.ScheduleType.GPU_Device \
+                    and len(node.map.params):
+                if re.fullmatch(r'call_\d+_map', node.label) and node.map.params[0] == 'h':
+                    print("Changing schedule to Unrolled ", node.map)
+                    node.schedule = dace.dtypes.ScheduleType.Unrolled
                 else:
-                    print("Keeping schedule ", node[0].map, node[0].schedule)
+                    print("Keeping schedule ", node.map, node.schedule)
 
     dace_model.append_post_onnx_hook("make_outer_map_seq",
                                      lambda model: make_outer_map_seq(model.sdfg))
