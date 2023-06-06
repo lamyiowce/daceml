@@ -72,27 +72,30 @@ class LinearModel(torch.nn.Module):
         return x
 
 
-class GATBase(torch.nn.Module):
-    additional_kwargs = {}
-
+class GAT(torch.nn.Module):
     def __init__(self,
                  num_node_features,
                  features_per_head,
                  num_classes,
+                 gat_layer=GATConv,
                  num_heads=8,
                  bias=True,
                  bias_init=torch.nn.init.zeros_):
         super().__init__()
-        self.conv1 = self.gat_layer(num_node_features,
-                                    features_per_head,
-                                    heads=num_heads,
-                                    bias=bias,
-                                    **self.additional_kwargs)
-        self.conv2 = self.gat_layer(features_per_head * num_heads,
-                                    num_classes,
-                                    heads=1,
-                                    bias=bias,
-                                    **self.additional_kwargs)
+        if gat_layer == CuGraphGATConv:
+            additional_kwargs = {}
+        else:
+            additional_kwargs = {"add_self_loops": False}
+        self.conv1 = gat_layer(num_node_features,
+                               features_per_head,
+                               heads=num_heads,
+                               bias=bias,
+                               **additional_kwargs)
+        self.conv2 = gat_layer(features_per_head * num_heads,
+                               num_classes,
+                               heads=1,
+                               bias=bias,
+                               **additional_kwargs)
         if bias:
             bias_init(self.conv1.bias)
             bias_init(self.conv2.bias)
@@ -107,30 +110,21 @@ class GATBase(torch.nn.Module):
         return self.log_softmax(x)
 
 
-class GAT(GATBase):
-    gat_layer = GATConv
-    additional_kwargs = {"add_self_loops": False}
-
-
-class CuGraphGAT(GATBase):
-    gat_layer = CuGraphGATConv
-
-
-class FusedGAT(GATBase):
-    gat_layer = FusedGATConv
-    additional_kwargs = {"add_self_loops": False}
-
-
 class GATSingleLayer(torch.nn.Module):
     def __init__(self, num_node_features, features_per_head, num_classes,
+                 gat_layer=GATConv,
                  num_heads=8, bias=True, bias_init=torch.nn.init.zeros_):
         del num_classes
         super().__init__()
-        self.conv = GATConv(num_node_features,
-                            features_per_head,
-                            heads=num_heads,
-                            add_self_loops=False,
-                            bias=bias)
+        if gat_layer == CuGraphGATConv:
+            additional_kwargs = {}
+        else:
+            additional_kwargs = {"add_self_loops": False}
+        self.conv = gat_layer(num_node_features,
+                              features_per_head,
+                              heads=num_heads,
+                              bias=bias,
+                              **additional_kwargs)
         if bias:
             bias_init(self.conv.bias)
 

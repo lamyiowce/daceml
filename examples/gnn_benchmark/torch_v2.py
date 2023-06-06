@@ -44,9 +44,11 @@ def parse_impl_spec(impl_spec: str):
 
 
 def main():
-    model_dict = {'gcn': models.GCN, 'linear': models.LinearModel,
-                  'gat': models.GAT, 'gcn_single_layer': models.GCNSingleLayer, 'cugraph_gat': models.CuGraphGAT,
-                  'fused_gat': models.FusedGAT, 'gat_single_layer': models.GATSingleLayer}
+    model_dict = {'gcn': models.GCN,
+                  'linear': models.LinearModel,
+                  'gat': models.GAT,
+                  'gcn_single_layer': models.GCNSingleLayer,
+                  'gat_single_layer': models.GATSingleLayer}
 
     parser = argparse.ArgumentParser(description='benchmark')
     parser.add_argument('--data', required=True)
@@ -59,7 +61,7 @@ def main():
     parser.add_argument('--outfile', type=str, default=None)
     parser.add_argument('--idx-dtype', type=str, default='int32')
     parser.add_argument('--val-dtype', type=str, default='float32')
-    parser.add_argument('--torch', choices=['all', 'csr', 'edge_list', 'none', 'compiled_edge_list', 'csc', 'csc_csr'], default='all')
+    parser.add_argument('--torch', type=str, required=True)
     args = parser.parse_args()
 
     dtype_str_to_torch_type = {
@@ -90,47 +92,51 @@ def main():
     print("DaCe indices dtype: ", args.idx_dtype)
     print("DaCe values dtype: ", args.val_dtype)
 
-    # Define models.
-    torch_model = model_class(data.num_node_features, num_hidden_features, num_classes,
-                              bias_init=torch.nn.init.uniform_).to(
-        args.val_dtype).to(device)
-    torch_model.eval()
-    print(torch_model)
-
     # Normalize data for GCN.
     if 'gcn' in args.model:
         gcn_norm = GCNNorm(add_self_loops=True)
         data = gcn_norm(data)
 
-    torch_experiments = []
-    if args.torch == 'csc':
-        assert args.model == 'cugraph_gat'
-        torch_csc_args = CuGraphModule.to_csc(data.edge_index)
-        torch_experiments += [('torch_csc', torch_model, (data.x, torch_csc_args))]
-    if args.torch == 'csc_csr':
-        assert args.model == 'fused_gat'
-        torch_args = FusedGATConv.to_graph_format(data.edge_index)
-        torch_experiments += [('torch_dgnn', torch_model, (data.x, *torch_args))]
-    if args.torch == 'edge_list' or args.torch == 'all':
+    model_kwargs = {}
+
+    if 'cugraph' in args.torch:
+        from torch_geometric.nn import CuGraphGATConv
+        assert 'gat' in args.model
+        graph_inputs = CuGraphModule.to_csc(data.edge_index)
+        inputs = (data.x, *graph_inputs)
+        model_kwargs = {'gat_layer': CuGraphGATConv}
+    elif 'dgnn' in args.torch:
+        assert 'gat' in args.model
+        from torch_geometric.nn import FusedGATConv
+        graph_inputs = FusedGATConv.to_graph_format(data.edge_index)
+        inputs = (data.x, *graph_inputs)
+        model_kwargs = {'gat_layer': FusedGATConv}
+    elif 'edge_list' in args.torch:
         add_edge_weight = hasattr(data, 'edge_weight') and 'gcn' in args.model
-        torch_edge_list_args = examples.gnn_benchmark.torch_util.make_torch_edge_list_args(
+        inputs = examples.gnn_benchmark.torch_util.make_torch_edge_list_args(
             data, add_edge_weight)
-        torch_experiments += [
-            ('torch_edge_list', torch_model, torch_edge_list_args)]
-    if args.torch in ['compiled_edge_list', 'all']:
-        compiled_torch_model = torch_geometric.compile(copy.deepcopy(torch_model))
-        compiled_torch_model.eval()
-        if args.torch == 'compiled_edge_list':
-            del torch_model
-        add_edge_weight = hasattr(data, 'edge_weight') and 'gcn' in args.model
-        torch_edge_list_args = examples.gnn_benchmark.torch_util.make_torch_edge_list_args(
-            data, add_edge_weight)
-        torch_experiments += [
-            ('compiled_torch_edge_list', compiled_torch_model, torch_edge_list_args)]
-    if args.torch == 'csr' or args.torch == 'all':
-        torch_csr_args = examples.gnn_benchmark.torch_util.make_torch_csr_args(
+    elif 'csr' in args.torch:
+        inputs = examples.gnn_benchmark.torch_util.make_torch_csr_args(
             data)
-        torch_experiments += [('torch_csr', torch_model, torch_csr_args)]
+    else:
+        raise ValueError(f'Unknown torch impl {args.torch}.')
+
+    torch_model = model_class(data.num_node_features, num_hidden_features,
+                              num_classes,
+                              bias_init=torch.nn.init.uniform_,
+                              **model_kwargs)
+
+    torch_model = torch_model.to(args.val_dtype).to(device)
+    torch_model.eval()
+    print(torch_model)
+
+    if 'compiled' in args.torch:
+        torch_model = torch_geometric.compile(torch_model)
+        torch_model.eval()
+
+    experiment = [(f'torch_{args.torch}', torch_model, inputs)]
+
+    print("Running experiment: ", experiment)
 
     if 'single_layer' in args.model:
         loss_fn = lambda pred, targets: torch.sum(pred)
@@ -138,13 +144,13 @@ def main():
         loss_fn = torch.nn.NLLLoss()
 
     check_correctness(dace_models=dict(),
-                      torch_experiments=torch_experiments,
+                      torch_experiments=experiment,
                       loss_fn=loss_fn,
                       targets=data.y,
                       backward=args.backward)
     if args.mode == 'benchmark' or args.mode == 'benchmark_small':
         do_benchmark(dict(),
-                     torch_experiments=torch_experiments,
+                     torch_experiments=experiment,
                      backward=args.backward,
                      loss_fn=loss_fn,
                      targets=data.y,
@@ -154,16 +160,16 @@ def main():
                      use_gpu=use_gpu,
                      outfile=args.outfile,
                      small=args.mode == 'benchmark_small')
-    elif args.mode == 'torch_profile':
-        torch_profile(dict(),
-                      torch_model,
-                      torch_csr_args,
-                      torch_edge_list_args,
-                      args,
-                      backward=args.backward,
-                      targets=data.y,
-                      skip_torch_csr=args.torch != 'all' and args.torch != 'csr',
-                      skip_torch_edge_list=args.torch != 'all' and args.torch != 'edge_list')
+    # elif args.mode == 'torch_profile':
+    #     torch_profile(dict(),
+    #                   torch_model,
+    #                   torch_csr_args,
+    #                   torch_edge_list_args,
+    #                   args,
+    #                   backward=args.backward,
+    #                   targets=data.y,
+    #                   skip_torch_csr=args.torch != 'all' and args.torch != 'csr',
+    #                   skip_torch_edge_list=args.torch != 'all' and args.torch != 'edge_list')
     elif args.mode != 'dry':
         raise ValueError(f"Invalid mode {args.mode}.")
 
