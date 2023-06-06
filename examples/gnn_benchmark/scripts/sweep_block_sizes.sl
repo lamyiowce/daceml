@@ -17,8 +17,6 @@ conda activate env14
 module load cuda/11.4.0
 export LIBRARY_PATH=/users/jbazinsk/miniconda3/envs/env/lib/:$LIBRARY_PATH
 
-rm -rf ./.dacecache
-
 do_test=
 
 export DACE_default_build_folder=./.dacecache-$SLURM_JOB_ID
@@ -28,8 +26,8 @@ formats="csr_adapt coo_adapt"
 backward=--backward
 datasets="cora ogbn-arxiv"
 
-block_sizes="1024,1,1 512,1,1 32,1,1 64,8,1"
-hidden_sizes="8 32 128 512"
+block_sizes="512,1,1 32,1,1 64,8,1"
+hidden_sizes="32 128 512"
 echo "Running model " $model
 for dataset in $datasets; do
   echo "Running dataset " $dataset
@@ -39,9 +37,9 @@ for dataset in $datasets; do
     export DACE_compiler_cuda_default_block_size=$block
     for hidden in $hidden_sizes; do
       echo "Hidden " $hidden
-      rm -rf .dacecache
+      rm -rf $DACE_default_build_folder
       for format in $formats; do
-        $do_test python main.py --tag ${block//,/_} --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl $format --torch none $backward
+        $do_test python main.py --tag ${block//,/_} --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl $format --torch csr $backward
       done
     done
   done
