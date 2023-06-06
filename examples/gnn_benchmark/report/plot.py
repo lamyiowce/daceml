@@ -26,8 +26,10 @@ DEFAULT_LABEL_MAP.update(
 def get_colors(names: pd.Series):
     reds_intense = ['orangered']
     reds = ['indianred', 'lightcoral', 'lightsalmon', 'pink']
-    greens = ['olivedrab', 'yellowgreen', 'forestgreen', 'limegreen', 'seagreen', 'mediumseagreen',
-              'lightseagreen', 'mediumturquoise', 'paleturquoise', 'steelblue', 'lightskyblue']
+    greens = ['olivedrab', 'yellowgreen', 'forestgreen', 'limegreen',
+              'seagreen', 'mediumseagreen',
+              'lightseagreen', 'mediumturquoise', 'paleturquoise', 'steelblue',
+              'lightskyblue']
     # Get unique names. If 'torch' is in the name, use red, otherwise green.
     unique_names = names.unique()
     color_dict = {}
@@ -46,7 +48,8 @@ def prep_df(full_df):
     df = full_df.pivot(index='Size', columns='Name', values='Mean')
     std_df = full_df.pivot(index='Size', columns='Name', values='Stdev')
     print(df)
-    sorted_cols = sorted(df.columns, key=lambda x: ('torch' in x, 'edge_list' in x))
+    sorted_cols = sorted(df.columns,
+                         key=lambda x: ('torch' in x, 'edge_list' in x))
     df = df.reindex(sorted_cols, axis=1)
     std_df = std_df.reindex(sorted_cols, axis=1)
     print(df)
@@ -141,7 +144,8 @@ def make_performance_plot(full_df, name, labels=None, title=None):
     peak_v100 = 14  # https://images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf
     ax.plot([peak_v100, peak_v100], [-10, 10], color='black', linestyle='--',
             linewidth=1)
-    ax.text(peak_v100 * 0.95, 1, f'V100 peak: {peak_v100} TFLOP / s', rotation=90,
+    ax.text(peak_v100 * 0.95, 1, f'V100 peak: {peak_v100} TFLOP / s',
+            rotation=90,
             verticalalignment='center',
             horizontalalignment='left', fontsize=12)
     ax.set_xlim(xmax=peak_v100 * 1.1)
@@ -153,8 +157,9 @@ def make_performance_plot(full_df, name, labels=None, title=None):
             ax.bar_label(container, fmt="%.2f")
 
     plt.tight_layout()
-    plt.savefig(PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {name}-performance.pdf',
-                bbox_inches='tight')
+    plt.savefig(
+        PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {name}-performance.pdf',
+        bbox_inches='tight')
     plt.show()
 
 
@@ -170,7 +175,8 @@ def read_many_dfs(filenames, name_to_replace=None, backward: bool = True,
         df_temp = pd.read_csv(DATA_FOLDER / filename, comment='#')
         if name_to_replace:
             dace_rows = df_temp['Name'].str.contains(name_to_replace)
-            df_temp.loc[dace_rows, 'Name'] = df_temp.loc[dace_rows, 'Name'].apply(
+            df_temp.loc[dace_rows, 'Name'] = df_temp.loc[
+                dace_rows, 'Name'].apply(
                 name_fn) if name_fn else name
         dfs.append(df_temp)
         if backward:
@@ -178,7 +184,8 @@ def read_many_dfs(filenames, name_to_replace=None, backward: bool = True,
             df_temp = pd.read_csv(bwd_path, comment='#')
             if name_to_replace:
                 dace_rows = df_temp['Name'].str.contains(name_to_replace)
-                df_temp.loc[dace_rows, 'Name'] = df_temp.loc[dace_rows, 'Name'].apply(
+                df_temp.loc[dace_rows, 'Name'] = df_temp.loc[
+                    dace_rows, 'Name'].apply(
                     name_fn) if name_fn else name
             bwd_dfs.append(df_temp)
 
@@ -195,18 +202,56 @@ def plot_compare_csr_coo_cutoffs():
     )
     plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
                   plot_title="OGB Arxiv, cutoff comparison",
-                  drop_names=['torch_edge_list', 'torch_csr'], sizes=[16, 256], legend_outside=True)
+                  drop_names=['torch_edge_list', 'torch_csr'], sizes=[16, 256],
+                  legend_outside=True)
 
 
 def main():
-    cora_df, cora_bwd_df = read_many_dfs(
-        filenames=['02.06.09.52-block-sizes-gcn-cora-202957.csv']
-    )
-    plot_block_sizes(cora_df, cora_bwd_df, name='Cora')
+    # 06.06 Plot GAT fwd with multiple spmm kernels and permutations.
+
     arxiv_df, arxiv_bwd_df = read_many_dfs(
-        filenames=['02.06.10.44-block-sizes-gcn-ogbn-arxiv-202957.csv']
+        filenames=['05.06.15.33-gat-ogbn-arxiv-203058.csv',
+                   '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
+                   ],
+        backward=False
     )
-    plot_block_sizes(arxiv_df, arxiv_bwd_df, name='Arxiv')
+    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
+                  plot_title="GAT, OGB Arxiv")
+
+    cora_df, cora_bwd_df = read_many_dfs(
+        filenames=['18.05.14.43-pyg-gat-cora-198393.csv',
+                   '18.05.14.59-pyg-gat-cora-198400.csv',
+                   '05.06.15.28-gat-cora-203058.csv'],
+        backward=False
+    )
+    plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
+                  plot_title="GAT, Cora")
+
+    # # 06.06 Plot GCN after block size adaptation.
+    # This is actually incorrect! some kernels are not run!!!!
+    # arxiv_df, arxiv_bwd_df = read_many_dfs(
+    #     filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
+    #                '11.05-pyg-arxiv-1024.csv',
+    #                '05.06.15.02-gcn-ogbn-arxiv-203054.csv']
+    # )
+    # plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
+    #               plot_title="GCN, OGB Arxiv")
+    #
+    # cora_df, cora_bwd_df = read_many_dfs(
+    #     filenames=['05.06.14.22-gcn-cora-203054.csv',
+    #                '10.05.15.40-pyg-gcn-cora-191680.csv', ]
+    # )
+    # plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
+    #               plot_title="GCN, Cora")
+
+    # cora_df, cora_bwd_df = read_many_dfs(
+    #     filenames=['02.06.09.52-block-sizes-gcn-cora-202957.csv']
+    # )
+    # plot_block_sizes(cora_df, cora_bwd_df, name='Cora')
+    # arxiv_df, arxiv_bwd_df = read_many_dfs(
+    #     filenames=['02.06.10.44-block-sizes-gcn-ogbn-arxiv-202957.csv']
+    # )
+    # plot_block_sizes(arxiv_df, arxiv_bwd_df, name='Arxiv')
 
     # plot_block_sizes(tag)
     # plot_adapt_matmul_order()
@@ -277,16 +322,20 @@ def plot_midthesis_main_datasets():
                    '03.05.18.24-gcn-ogbn-arxiv-alt-sizes-185598.csv',
                    '03.05.19.41-gcn-ogbn-arxiv-alt-sizes-185634.csv']
     )
-    plot_backward(tag='arxiv', sizes=[16, 64, 256, 1024], plot_title='GCN, OGBN Arxiv', df=arxiv_df,
+    plot_backward(tag='arxiv', sizes=[16, 64, 256, 1024],
+                  plot_title='GCN, OGBN Arxiv', df=arxiv_df,
                   bwd_df=arxiv_bwd_df)
-    plot_backward(tag='arxiv', plot_title='GCN, OGBN Arxiv', df=arxiv_df, bwd_df=arxiv_bwd_df)
+    plot_backward(tag='arxiv', plot_title='GCN, OGBN Arxiv', df=arxiv_df,
+                  bwd_df=arxiv_bwd_df)
     cora_df, cora_bwd_df = read_many_dfs(
         filenames=['01.05.11.17-gcn-cora-183528.csv',
                    '03.05.17.14-gcn-cora-csc-185561.csv',
                    '03.05.18.04-gcn-cora-alt-sizes-185598.csv'])
-    plot_backward(tag="cora", sizes=[16, 64, 256, 1024], plot_title='GCN, Cora', df=cora_df,
+    plot_backward(tag="cora", sizes=[16, 64, 256, 1024], plot_title='GCN, Cora',
+                  df=cora_df,
                   bwd_df=cora_bwd_df)
-    plot_backward(tag="cora", plot_title='GCN, Cora', df=cora_df, bwd_df=cora_bwd_df)
+    plot_backward(tag="cora", plot_title='GCN, Cora', df=cora_df,
+                  bwd_df=cora_bwd_df)
 
 
 def plot_stream_comparison():
@@ -306,7 +355,8 @@ def plot_stream_comparison():
               label_map=labels)
 
 
-def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None, sizes=None, drop_names=None,
+def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None,
+                  sizes=None, drop_names=None,
                   legend_outside=False):
     if df is None:
         df = pd.read_csv(DATA_FOLDER / (tag + '.csv'), comment='#')
@@ -389,7 +439,9 @@ def plot_block_sizes(df=None, bwd_df=None, tag=None, name=None):
 
     block_sizes = ['1024_1_1', '32_1_1', '64_8_1', '512_1_1']
     formats = ['csr', 'coo']
-    labels = {f'dace_{sz}_{fmt}_adapt': f'DaCe {sz.replace("_", ",")} {fmt} adapt' for sz in block_sizes for fmt in formats}
+    labels = {
+        f'dace_{sz}_{fmt}_adapt': f'DaCe {sz.replace("_", ",")} {fmt} adapt' for
+        sz in block_sizes for fmt in formats}
     labels.update(block_size_labels)
     make_plot(df, f"{name}: Block sizes (fwd + bwd)",
               label_map=labels, bwd_df=bwd_df)
