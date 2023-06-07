@@ -1,6 +1,7 @@
 import functools
 import logging
-from typing import Callable, Optional, Tuple
+import re
+from typing import Callable, Optional, Tuple, List
 
 import dace
 import torch
@@ -116,18 +117,23 @@ def apply_to_both(fn: Callable[[dace.SDFG], None]):
     def wrapper(forward_sdfg, backward_sdfg):
         fn(forward_sdfg)
         fn(backward_sdfg)
+
     return wrapper
 
 
 def set_reduce_implementation(sdfg: dace.SDFG, implementation_name: str = 'GPUAuto'):
     counter = 0
+    counter_already = 0
     for node, _ in sdfg.all_nodes_recursive():
         if isinstance(node, dace.nodes.LibraryNode) and isinstance(node,
                                                                    dace.libraries.standard.nodes.Reduce):
-            print(f"Setting impl {node} from {node.implementation} to {implementation_name}.")
-            node.implementation = implementation_name
-            counter += 1
-    print(f"Set {counter} reduce nodes to {implementation_name}")
+            if node.implementation == implementation_name:
+                counter_already += 1
+            else:
+                print(f"⅀  Setting impl {node} from {node.implementation} to {implementation_name}.")
+                node.implementation = implementation_name
+                counter += 1
+    print(f"⅀ ⅀ ⅀  Set {counter} reduce nodes to {implementation_name}, {counter_already} were already set.")
 
 
 def get_tb_maps_recursive(subgraph):
@@ -165,12 +171,28 @@ def flatten_blocks_for_1d_maps(sdfg: dace.SDFG):
                 sub_maps = get_tb_maps_recursive(subgraph)
                 if len(sub_maps) > 1:
                     # Don't set the block size if there are submaps. (sub_maps contains also the current map)
-                    print("Keeping block size, map has submaps: ", node.map,
+                    print("🧱  Keeping block size, map has submaps: ", node.map,
                           node.map.gpu_block_size, node.map.params, sub_maps)
                 else:
                     print(
-                        f"Changing block size for {node.map} from {node.map.gpu_block_size} to {[total_size, 1, 1]}")
+                        f"🧱  Changing block size: {node.map}: {node.map.gpu_block_size} -> {[total_size, 1, 1]}")
                     node.map.gpu_block_size = [total_size, 1, 1]
             else:
-                print("Keeping block size: ", node.map, node.map.gpu_block_size, node.map.params,
-                      len(node.map.params), len(node.map.params) == 1)
+                print("🧱  Keeping block size: ", node.map, node.map.gpu_block_size)
+
+
+def change_map_schedule(sdfg: dace.SDFG,
+                        new_schedule: dace.dtypes.ScheduleType,
+                        label_regex: str,
+                        expected_params: List[str] = None):
+    for node, _ in sdfg.all_nodes_recursive():
+        if isinstance(node, dace.sdfg.nodes.MapEntry) \
+                and node.schedule == dace.dtypes.ScheduleType.GPU_Device \
+                and len(node.map.params):
+            if re.fullmatch(label_regex, node.label):
+                if expected_params is None or set(node.map.params) == set(expected_params):
+                    print(
+                        f"⏲  Changing schedule: {node.map}: {node.schedule} --> {new_schedule}")
+                    node.schedule = new_schedule
+            else:
+                print("⏲  Keeping schedule: ", node.map, node.schedule)

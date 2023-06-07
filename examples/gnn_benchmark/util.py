@@ -16,7 +16,7 @@ from examples.gnn_benchmark.implementations import gcn_implementations, \
 from examples.gnn_benchmark.implementations.common import SparseLayerBase, \
     SpecialInputType
 from examples.gnn_benchmark.sdfg_util import apply_dace_auto_optimize, \
-    specialize_mem_onnx, make_maps_dynamic, apply_dace_auto_opt_after_autodiff
+    specialize_mem_onnx, make_maps_dynamic, apply_dace_auto_opt_after_autodiff, change_map_schedule
 
 name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
     "gcn": {
@@ -159,19 +159,10 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
     dace_model.append_post_autodiff_hook("simplify",
                                          sdfg_util.apply_to_both(simplify))
 
-    def make_outer_map_seq(sdfg: dace.SDFG):
-        for node, _ in sdfg.all_nodes_recursive():
-            if isinstance(node, dace.sdfg.nodes.MapEntry) \
-                    and node.schedule == dace.dtypes.ScheduleType.GPU_Device \
-                    and len(node.map.params):
-                if re.fullmatch(r'call_\d+_map', node.label) and node.map.params[0] == 'h':
-                    print("Changing schedule to Unrolled ", node.map)
-                    node.schedule = dace.dtypes.ScheduleType.Unrolled
-                else:
-                    print("Keeping schedule ", node.map, node.schedule)
-
     dace_model.append_post_onnx_hook("make_outer_map_seq",
-                                     lambda model: make_outer_map_seq(model.sdfg))
+                                     lambda model: change_map_schedule(model.sdfg,
+                                                                       new_schedule=dace.dtypes.ScheduleType.Unrolled,
+                                                                       label_regex=r'call_\d+_map'))
 
     dace_model.append_post_onnx_hook("flatten_blocks_for_1d_maps",
                                      lambda model: sdfg_util.flatten_blocks_for_1d_maps(model.sdfg))
