@@ -8,14 +8,14 @@
 #include <stdexcept>  // std::runtime_error
 #include <string>     // std::to_string
 #include <unordered_map>
-
 namespace dace {
 
 namespace sparse {
 
 static void CheckCusparseError(cusparseStatus_t const& status) {
+  std::string error(cusparseGetErrorString(status));
   if (status != CUSPARSE_STATUS_SUCCESS) {
-    throw std::runtime_error("cuSPARSE failed with error code: " + std::to_string(status));
+    throw std::runtime_error("cuSPARSE failed with error code: " + error);
   }
 }
 
