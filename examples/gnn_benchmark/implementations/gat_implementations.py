@@ -181,27 +181,21 @@ class GATConvCSR(GATConvBase):
                 features = np.reshape(features_tmp,
                                       (N, heads, num_out_features))
 
-                # Below is very slow.
-                # alpha_src_tmp = dace.define_local((N, heads, num_out_features), dtype=dtype)
-                # alpha_dst_tmp = dace.define_local((N, heads, num_out_features), dtype=dtype)
-                # # Compute node attention coefficients.
-                # # features * att_src: N x H x F
-                # for j, k, i in dace.map[0:heads, 0:num_out_features, 0:N]:
-                #     alpha_src_tmp[i, j, k] = features[i, j, k] * att_src[0, j, k]
-                #     alpha_dst_tmp[i, j, k] = features[i, j, k] * att_dst[0, j, k]
-                #
-                # alpha_src = np.sum(alpha_src_tmp, axis=-1)  # shape: N x H
-                # alpha_dst = np.sum(alpha_dst_tmp, axis=-1)  # N x H
-
                 # This ends up ridiculously slow because the outer loop is
                 # executed on gpu and everything inside is executed
-                # sequentially. Otherwise, maybe it would be alright.
-                alpha_src = dace.define_local((N, heads), dtype=dtype)
-                alpha_dst = dace.define_local((N, heads), dtype=dtype)
-                for h in dace.map[
-                         0:heads] @ dace.dtypes.ScheduleType.Sequential:
-                    alpha_src[:, h] = features[:, h, :] @ att_src[0, h]
-                    alpha_dst[:, h] = features[:, h, :] @ att_dst[0, h]
+                # sequentially. The loop is moved to Sequential and the
+                # inside matmul to GPU in my_auto_optimize.py.
+
+                features_perm = np.empty((heads, N, num_out_features), dtype=dtype)
+                for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
+                    features_perm[j, i, k] = features[i, j, k]
+                alpha_src_tmp = dace.define_local((heads, N,), dtype=dtype)
+                alpha_dst_tmp = dace.define_local((heads, N,), dtype=dtype)
+                for h in dace.map[0:heads] @ dace.dtypes.ScheduleType.Sequential:
+                    alpha_src_tmp[h] = features_perm[h] @ att_src[0, h]
+                    alpha_dst_tmp[h] = features_perm[h] @ att_dst[0, h]
+                alpha_dst = np.transpose(alpha_dst_tmp)
+                alpha_src = np.transpose(alpha_src_tmp)
 
             # Calculate attention weights.
             e = np.empty((num_entries, heads), dtype=dtype)
@@ -233,10 +227,11 @@ class GATConvCSR(GATConvBase):
 
                 # This results in incorrect code (exceeding the max grid size).
                 # features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
-                features_perm = dace.define_local((heads, N, num_out_features),
-                                                  dtype=dtype)
-                for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
-                    features_perm[j, i, k] = features[i, j, k]
+                # features_perm = dace.define_local((heads, N, num_out_features),
+                #                                   dtype=dtype)
+                # for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
+                #     features_perm[j, i, k] = features[i, j, k]
+                # We already have features_perm from calculating alpha.
                 e_perm = np.transpose(e, (1, 0))  # H x num_entries
 
                 # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
@@ -381,8 +376,8 @@ class GATConvCOO(GATConvBase):
             rowptrs: rowptr, N+1
             columns: col, num_entries
             lin_srcDOTweight: H * F' x F
-            att_src: H x F
-            att_dst: H x F
+            att_src: H x F'
+            att_dst: H x F'
             output: N x H * F'
             """
 
@@ -396,25 +391,22 @@ class GATConvCOO(GATConvBase):
             features[:] = np.reshape(features_tmp,
                                      (N, heads, num_out_features))
 
-            alpha_src_tmp = dace.define_local((N, num_entries, heads),
+            alpha_src_tmp = dace.define_local((N, heads, num_out_features),
                                               dtype=dtype)
-            alpha_dst_tmp = dace.define_local((N, num_entries, heads),
+            alpha_dst_tmp = dace.define_local((N, heads, num_out_features),
                                               dtype=dtype)
             # Compute node attention coefficients.
             # features * att_src: N x H x F
-            for i, j, k in dace.map[0:N, 0:heads, 0:num_out_features]:
-                alpha_src_tmp[i, j, k] = features[i, j, k] * att_src[j, k]
-                alpha_dst_tmp[i, j, k] = features[i, j, k] * att_dst[j, k]
+            for k, j, i in dace.map[0:num_out_features, 0:heads, 0:N]:
+                alpha_src_tmp[i, j, k] = features[i, j, k] * att_src[0, j, k]
+                alpha_dst_tmp[i, j, k] = features[i, j, k] * att_dst[0, j, k]
 
             alpha_src = np.sum(alpha_src_tmp, axis=-1)  # shape: N x H
             alpha_dst = np.sum(alpha_dst_tmp, axis=-1)  # N x H
 
             # Calculate attention weights.
-            e = np.zeros((num_entries, heads), dtype=dtype)
+            e = np.empty((num_entries, heads), dtype=dtype)
             softmax_sum = np.zeros((N, heads), dtype=dtype)
-
-            e[:] = 0
-            softmax_sum[:] = 0
 
             for i in dace.map[0:num_entries]:
                 row = rows[i]
@@ -427,7 +419,7 @@ class GATConvCOO(GATConvBase):
 
                 # # TODO: This is a workaround. With no schedule type, the results are incorrect with autoopt
                 # for i in dace.map[0:num_entries]@dace.dtypes.ScheduleType.Sequential:
-                col = columns[i]
+                # col = columns[i]
                 softmax_sum[col] += e[i]
 
             # Softmax normalization.
@@ -437,7 +429,7 @@ class GATConvCOO(GATConvBase):
 
             if heads == 1:
                 coomm(rows, columns, e,
-                      np.reshape(features, (N, num_out_features)), output,
+                      features[:, 0, :], output,
                       transA=True, beta=0.0)
             else:
                 output_perm = np.zeros((heads, N, num_out_features),

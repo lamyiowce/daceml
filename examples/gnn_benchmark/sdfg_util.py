@@ -8,10 +8,9 @@ import torch
 from dace import Config
 from dace.dtypes import ScheduleType
 from dace.sdfg import nodes as nd
-from dace.transformation.auto.auto_optimize import \
-    auto_optimize as dace_auto_optimize
 
 import daceml
+from examples.gnn_benchmark.my_auto_optimize import my_auto_optimize
 
 
 def _specialize_memory(sdfg):
@@ -54,7 +53,7 @@ def simplify_hook(sdfg: dace.SDFG):
 
 
 def apply_dace_auto_optimize(sdfg):
-    dace_auto_optimize(
+    my_auto_optimize(
         sdfg,
         device=dace.dtypes.DeviceType.GPU
         if torch.cuda.is_available() else dace.dtypes.DeviceType.CPU)
@@ -116,21 +115,38 @@ def apply_to_both(fn: Callable[[dace.SDFG], None]):
     return wrapper
 
 
-def set_reduce_implementation(sdfg: dace.SDFG, implementation_name: str = 'GPUAuto'):
+def set_library_node_implementation(sdfg: dace.SDFG,
+                                   implementation_name: str,
+                                   node_name: str = None,
+                                   node_class: type = None,
+                                   schedule: dace.dtypes.ScheduleType = None):
+    def matches(node: nd.LibraryNode):
+        if node_name is not None and node.label != node_name:
+            return False
+        if node_class is not None and not isinstance(node, node_class):
+            return False
+        return True
+
     counter = 0
     counter_already = 0
+
     for node, _ in sdfg.all_nodes_recursive():
-        if isinstance(node, dace.nodes.LibraryNode) and isinstance(node,
-                                                                   dace.libraries.standard.nodes.Reduce):
+        if isinstance(node, nd.LibraryNode) and matches(node):
             if node.implementation == implementation_name:
                 counter_already += 1
             else:
                 print(
-                    f"⅀  Setting impl {node} from {node.implementation} to {implementation_name}.")
+                    f"📚  Setting impl {node} ({node.schedule}) from {node.implementation} to {implementation_name}.")
                 node.implementation = implementation_name
+                node.schedule = schedule or node.schedule
                 counter += 1
+
     print(
-        f"⅀ ⅀ ⅀  Set {counter} reduce nodes to {implementation_name}, {counter_already} were already set.")
+        f"📚 📚 📚  Set {counter} nodes of {node_name} / {node_class}  to {implementation_name}, {counter_already} were already set.")
+
+
+def set_reduce_implementation(sdfg: dace.SDFG, implementation_name: str = 'GPUAuto'):
+    set_library_node_implementation(sdfg, implementation_name, node_class=dace.libraries.standard.nodes.Reduce)
 
 
 def get_tb_maps_recursive(subgraph):

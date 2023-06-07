@@ -138,6 +138,12 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
         backward=backward)
     dace_model.prepend_post_onnx_hook("set_implementation",
                                       set_implementation)
+
+    dace_model.append_post_onnx_hook("make_outer_map_att",
+                                     lambda model: change_map_schedule(model.sdfg,
+                                                                       new_schedule=dace.dtypes.ScheduleType.Unrolled,
+                                                                       label_regex=r'examples_gnn_benchmark_implementations_gat_implementations_gat_op_\d+',
+                                                                       expected_params=['h']))
     if do_opt:
         print("---> Adding auto-opt hook.")
         if backward:
@@ -158,10 +164,21 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
 
     dace_model.append_post_onnx_hook("make_outer_map_seq",
                                      lambda model: change_map_schedule(model.sdfg,
-                                                                       new_schedule=dace.dtypes.ScheduleType.Unrolled,
-                                                                       label_regex=r'call_\d+_map'))
+                                                                       new_schedule=dace.dtypes.ScheduleType.Sequential,
+                                                                       label_regex=r'call_\d+_map',
+                                                                       expected_params=['h']))
 
     add_hook(dace_model, "flatten_blocks_for_1d_maps", sdfg_util.flatten_blocks_for_1d_maps, backward=backward)
+
+    print("/////////////////////")
+    print(">>> Model hooks:")
+    print("> Post onnx:")
+    for name in dace_model.post_onnx_hooks:
+        print(name)
+    print("> Post autodiff:")
+    for name in dace_model.post_autodiff_hooks:
+        print(name)
+    print("/////////////////////")
 
 
 def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
