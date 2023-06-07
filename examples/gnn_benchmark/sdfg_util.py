@@ -30,7 +30,7 @@ def _specialize_memory(sdfg):
             if (arr.transient and not isinstance(arr, dace.data.View)
                     and arr.storage != dace.StorageType.Register):
                 if arr.lifetime != dace.AllocationLifetime.Persistent:
-                    arrays.append(dnode.data)
+                    arrays.append((dnode.data, arr.lifetime))
                 arr.lifetime = dace.AllocationLifetime.Persistent
 
     # Disable OpenMP sections
@@ -44,25 +44,20 @@ def specialize_mem_onnx(mod):
         for sd in module.sdfg.all_sdfgs_recursive():
             arrays += _specialize_memory(sd)
         print(
-            f"Specialized {len(arrays)} arrays to persistent: {' '.join(arrays)}")
+            f"Specialized {len(arrays)} arrays to persistent: {' '.join([str(x) for x in arrays])}")
 
     mod.append_post_onnx_hook("specializemem", spec)
 
 
-def apply_dace_auto_optimize(module):
-    sdfg = module.sdfg
+def simplify_hook(sdfg: dace.SDFG):
+    sdfg.simplify(verbose=True)
+
+
+def apply_dace_auto_optimize(sdfg):
     dace_auto_optimize(
         sdfg,
         device=dace.dtypes.DeviceType.GPU
         if torch.cuda.is_available() else dace.dtypes.DeviceType.CPU)
-
-
-def apply_dace_auto_opt_after_autodiff(forward_sdfg, backward_sdfg):
-    dace_device = dace.dtypes.DeviceType.GPU if torch.cuda.is_available() else dace.dtypes.DeviceType.CPU
-    dace_auto_optimize(forward_sdfg,
-                       device=dace_device)
-    dace_auto_optimize(backward_sdfg,
-                       device=dace_device)
 
 
 def make_maps_dynamic(module, exclude_loops=None):
@@ -130,10 +125,12 @@ def set_reduce_implementation(sdfg: dace.SDFG, implementation_name: str = 'GPUAu
             if node.implementation == implementation_name:
                 counter_already += 1
             else:
-                print(f"⅀  Setting impl {node} from {node.implementation} to {implementation_name}.")
+                print(
+                    f"⅀  Setting impl {node} from {node.implementation} to {implementation_name}.")
                 node.implementation = implementation_name
                 counter += 1
-    print(f"⅀ ⅀ ⅀  Set {counter} reduce nodes to {implementation_name}, {counter_already} were already set.")
+    print(
+        f"⅀ ⅀ ⅀  Set {counter} reduce nodes to {implementation_name}, {counter_already} were already set.")
 
 
 def get_tb_maps_recursive(subgraph):

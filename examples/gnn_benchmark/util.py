@@ -1,14 +1,12 @@
 import copy
 import functools
-import re
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Callable
 
 import dace
 import torch
 
 from daceml.onnx import register_replacement, TORCH_DTYPE_TO_TYPECLASS
 from daceml.onnx.nodes import replacement_entries
-
 from daceml.torch import DaceModule
 from examples.gnn_benchmark import models, sdfg_util
 from examples.gnn_benchmark.implementations import gcn_implementations, \
@@ -16,7 +14,8 @@ from examples.gnn_benchmark.implementations import gcn_implementations, \
 from examples.gnn_benchmark.implementations.common import SparseLayerBase, \
     SpecialInputType
 from examples.gnn_benchmark.sdfg_util import apply_dace_auto_optimize, \
-    specialize_mem_onnx, make_maps_dynamic, apply_dace_auto_opt_after_autodiff, change_map_schedule
+    specialize_mem_onnx, make_maps_dynamic, change_map_schedule, \
+    simplify_hook
 
 name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
     "gcn": {
@@ -86,6 +85,13 @@ def create_dace_model(model: torch.nn.Module,
 
     return dace_model_eval, dace_model_train
 
+def add_hook(dace_model: DaceModule, name: str, fn: Callable, backward: bool):
+    if not backward:
+        dace_model.append_post_onnx_hook(name + "_post_onnx", lambda model: fn(model.sdfg))
+    else:
+        dace_model.append_post_autodiff_hook(name + "_post_autodiff",
+                                         sdfg_util.apply_to_both(fn))
+
 
 def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
               do_opt: bool, implementation_name: str,
@@ -94,14 +100,8 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
     if device.type == 'cuda':
         set_reduce_implementation = functools.partial(
             sdfg_util.set_reduce_implementation, implementation_name='GPUAuto')
-        dace_model.append_post_onnx_hook("set_reduce_implementation_post_onnx",
-                                         lambda
-                                             model: set_reduce_implementation(
-                                             model.sdfg))
+        add_hook(dace_model, "set_reeduce_implementation", set_reduce_implementation, backward)
 
-        dace_model.append_post_autodiff_hook(
-            "set_reduce_implementation_post_autodiff",
-            sdfg_util.apply_to_both(set_reduce_implementation))
     if persistent_mem:
         print("---> Adding persistent memory hook.")
         specialize_mem_onnx(dace_model)
@@ -130,6 +130,7 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
         dace_model.append_post_onnx_hook(
             "apply_threadblock_dynamic_maps",
             make_maps_dynamic_with_excluded_loops)
+
     set_implementation = functools.partial(
         sdfg_util.set_implementation,
         implementation_name=implementation_name,
@@ -141,10 +142,10 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
         print("---> Adding auto-opt hook.")
         if backward:
             dace_model.append_post_autodiff_hook("dace_auto_optimize",
-                                                 apply_dace_auto_opt_after_autodiff)
+                                                 sdfg_util.apply_to_both(apply_dace_auto_optimize))
         else:
             dace_model.append_post_onnx_hook("dace_auto_optimize",
-                                             apply_dace_auto_optimize)
+                                             lambda model: apply_dace_auto_optimize(model.sdfg))
     fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(
         backward_sdfg, '__tmp3')
     dace_model.append_post_autodiff_hook("Set __tmp3 to register", fn)
@@ -153,22 +154,14 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
         backward_sdfg, '__tmp1', expected_shape=(1, 1))
     dace_model.append_post_autodiff_hook("Set __tmp1 to register", fn)
 
-    def simplify(sdfg: dace.SDFG):
-        sdfg.simplify(verbose=True)
-
-    dace_model.append_post_autodiff_hook("simplify",
-                                         sdfg_util.apply_to_both(simplify))
+    add_hook(dace_model, "simplify", simplify_hook, backward=backward)
 
     dace_model.append_post_onnx_hook("make_outer_map_seq",
                                      lambda model: change_map_schedule(model.sdfg,
                                                                        new_schedule=dace.dtypes.ScheduleType.Unrolled,
                                                                        label_regex=r'call_\d+_map'))
 
-    dace_model.append_post_onnx_hook("flatten_blocks_for_1d_maps",
-                                     lambda model: sdfg_util.flatten_blocks_for_1d_maps(model.sdfg))
-    dace_model.append_post_autodiff_hook("flatten_blocks_for_1d_maps_post_autodiff",
-                                         sdfg_util.apply_to_both(
-                                             sdfg_util.flatten_blocks_for_1d_maps))
+    add_hook(dace_model, "flatten_blocks_for_1d_maps", sdfg_util.flatten_blocks_for_1d_maps, backward=backward)
 
 
 def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
