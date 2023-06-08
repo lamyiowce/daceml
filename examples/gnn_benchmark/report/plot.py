@@ -10,6 +10,7 @@ PLOT_FOLDER = Path(__file__).parent / 'plots'
 DEFAULT_LABEL_MAP = {
     'torch_csr': 'Torch CSR',
     'torch_edge_list': 'Torch Edge List',
+    'torch_dgnn': 'Torch DGNN-GAT',
     'dace_csr': 'Dace CSR',
     'dace_csr_adapt': 'Dace CSR (adapt MM order)',
     'dace_coo': 'Dace COO',
@@ -22,9 +23,13 @@ DEFAULT_LABEL_MAP.update(
     {f'dace_csr_coo_adapt-0.{i}': f'Dace CSR/COO adapt, CSR {i}0%' for i in
      range(3, 9)})
 
+DEFAULT_LABEL_MAP.update(
+    {f'{key}_compiled': f'{name} (compiled)' for key, name in DEFAULT_LABEL_MAP.items() if 'torch' in key})
+
+
 
 def get_colors(names: pd.Series):
-    reds_intense = ['orangered']
+    reds_intense = ['gold', 'orange', 'darkorange']
     reds = ['indianred', 'lightcoral', 'lightsalmon', 'pink']
     greens = ['olivedrab', 'yellowgreen', 'forestgreen', 'limegreen',
               'seagreen', 'mediumseagreen',
@@ -210,8 +215,10 @@ def main():
     # 06.06 Plot GAT fwd with multiple spmm kernels and permutations.
 
     arxiv_df, arxiv_bwd_df = read_many_dfs(
-        filenames=['05.06.15.33-gat-ogbn-arxiv-203058.csv',
+        filenames=[#'05.06.15.33-gat-ogbn-arxiv-203058.csv',
                    '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
+                   '06.06.16.48-pyg-gat-ogbn-arxiv-203173.csv',
+                   '07.06.17.32-gat-ogbn-arxiv-203297.csv',
                    ],
         backward=False
     )
@@ -221,7 +228,10 @@ def main():
     cora_df, cora_bwd_df = read_many_dfs(
         filenames=['18.05.14.43-pyg-gat-cora-198393.csv',
                    '18.05.14.59-pyg-gat-cora-198400.csv',
-                   '05.06.15.28-gat-cora-203058.csv'],
+                   #'05.06.15.28-gat-cora-203058.csv',
+                   '06.06.16.41-pyg-gat-cora-203173.csv',
+                   '07.06.17.27-gat-cora-203297.csv',
+                   ],
         backward=False
     )
     plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
