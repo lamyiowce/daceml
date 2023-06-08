@@ -76,7 +76,7 @@ def my_auto_optimize(sdfg: SDFG,
     if device == dtypes.DeviceType.GPU:
         change_map_schedule(sdfg,
                             new_schedule=dtypes.ScheduleType.Sequential,
-                            label_regex=r'examples_gnn_benchmark_implementations_gat_implementations_gat_op_\d+',
+                            label_regex=r'examples_gnn_benchmark_implementations_gat_implementations_torch_geometricDOTnnDOTconvDOTgat_convDOTGATConv_0_expansion_\d+',
                             expected_params=['h'])
 
     #### END EDIT
