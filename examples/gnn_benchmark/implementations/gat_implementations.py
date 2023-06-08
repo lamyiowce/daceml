@@ -169,9 +169,28 @@ class GATConvCSR(GATConvBase):
                 alpha_src = features @ att_src[0, 0]
                 alpha_dst = features @ att_dst[0, 0]
 
-            # This results in incorrect code (exceeding the max grid size).
-            # alpha_src = np.sum(features * att_src, axis=-1)  # shape: N x H
-            # alpha_dst = np.sum(features * att_dst, axis=-1)  # N x H
+                # Calculate attention weights.
+                e = np.empty((num_entries,), dtype=dtype)
+                softmax_sum = np.zeros((N,), dtype=dtype)
+
+                for l in dace.map[0:N]:
+                    for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+                        # Calculating e_l->colv
+                        colv = columns[v]
+                        e[v] = alpha_src[l] + alpha_dst[colv]
+
+                for j in dace.map[0:num_entries]:
+                        colj = columns[j]
+                        e[j] = np.exp(np.maximum(negative_slope * e[j], e[j]))
+                        softmax_sum[colj] += e[j]
+
+                # Softmax normalization.
+                for j in dace.map[0:num_entries]:
+                    colj = columns[j]
+                    e[j] = e[j] / softmax_sum[colj]
+
+                csrmm(rowptrs, columns, e, features, output,
+                      transA=True, beta=0.0)
 
             else:
                 # Transform input features.
@@ -189,60 +208,59 @@ class GATConvCSR(GATConvBase):
                 features_perm = np.empty((heads, N, num_out_features), dtype=dtype)
                 for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
                     features_perm[j, i, k] = features[i, j, k]
-                alpha_src_tmp = dace.define_local((heads, N,), dtype=dtype)
-                alpha_dst_tmp = dace.define_local((heads, N,), dtype=dtype)
+
+                alpha_src = dace.define_local((heads, N,), dtype=dtype)
+                alpha_dst = dace.define_local((heads, N,), dtype=dtype)
                 for h in dace.map[0:heads] @ dace.dtypes.ScheduleType.Sequential:
-                    alpha_src_tmp[h] = features_perm[h] @ att_src[0, h]
-                    alpha_dst_tmp[h] = features_perm[h] @ att_dst[0, h]
-                alpha_dst = np.transpose(alpha_dst_tmp)
-                alpha_src = np.transpose(alpha_src_tmp)
+                    alpha_src[h] = features_perm[h] @ att_src[0, h]
+                    alpha_dst[h] = features_perm[h] @ att_dst[0, h]
 
-            # Calculate attention weights.
-            e = np.empty((num_entries, heads), dtype=dtype)
-            softmax_sum = np.zeros((N, heads), dtype=dtype)
+                # Calculate attention weights.
+                e = np.empty((heads, num_entries), dtype=dtype)
+                softmax_sum = np.zeros((heads, N), dtype=dtype)
 
-            for l in dace.map[0:N]:
-                for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
-                    # Calculating e_l->colv
-                    colv = columns[v]
-                    e_tmp = alpha_src[l] + alpha_dst[colv]
-                    # LeakyReLU
-                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
-                    e_tmp = np.exp(e_tmp)
-                    e[v] = e_tmp
-                    softmax_sum[colv] += e_tmp
+                for h, l in dace.map[0:heads, 0:N]:
+                    for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+                        # Calculating e_l->colv
+                        colv = columns[v]
+                        e[h, v] = alpha_src[h, l] + alpha_dst[h, colv]
 
-            # Softmax normalization.
-            for j in dace.map[0:num_entries]:
-                colj = columns[j]
-                e[j] = e[j] / softmax_sum[colj]
+                for h, j in dace.map[0:heads, 0:num_entries]:
+                    colj = columns[j]
+                    e[h, j] = np.exp(np.maximum(negative_slope * e[h, j], e[h, j]))
+                    softmax_sum[h, colj] += e[h, j]
 
-            if heads == 1:
-                # Features: N x F'
-                csrmm(rowptrs, columns, e, features, output,
-                      transA=True, beta=0.0)
-            else:
+                # Softmax normalization.
+                for h, j in dace.map[0:heads, 0:num_entries]:
+                    colj = columns[j]
+                    e[h, j] = e[h, j] / softmax_sum[h, colj ]
+
                 output_perm = np.zeros((heads, N, num_out_features),
                                        dtype=dtype)  # H x N x F'
 
                 # This results in incorrect code (exceeding the max grid size).
                 # features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
-                # features_perm = dace.define_local((heads, N, num_out_features),
-                #                                   dtype=dtype)
-                # for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
-                #     features_perm[j, i, k] = features[i, j, k]
-                # We already have features_perm from calculating alpha.
-                e_perm = np.transpose(e, (1, 0))  # H x num_entries
 
                 # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
                 for h in range(heads):
-                    csrmm(rowptrs, columns, e_perm[h], features_perm[h],
+                    csrmm(rowptrs, columns, e[h], features_perm[h],
                           output_perm[h],
                           transA=True,
                           beta=1.0)
 
-                output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)),
-                                       (N, heads * num_out_features))
+                # TODO: This triggers a DtoD copy. Can we avoid it?
+                # output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)),
+                #                        (N, heads * num_out_features))
+                # if do_bias:
+                #     for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
+                #         output[i, j * heads + k] = output_perm[j, i, k]
+                # else:
+                for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
+                    output[i, j * (num_out_features) + k] = output_perm[j, i, k]
+                # output_tmp = np.empty((N, heads, num_out_features), dtype=dtype)
+                # for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
+                #     output_tmp[i, j, k] = output_perm[j, i, k]
+                # output[:] = np.reshape(output_tmp, (N, heads * num_out_features))
 
         if do_bias:
             def bias_prog(node_features, rowptrs, columns, lin_srcDOTweight,
