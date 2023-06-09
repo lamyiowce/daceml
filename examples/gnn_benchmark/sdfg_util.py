@@ -131,15 +131,18 @@ def set_library_node_implementation(sdfg: dace.SDFG,
     counter_already = 0
 
     for node, _ in sdfg.all_nodes_recursive():
-        if isinstance(node, nd.LibraryNode) and matches(node):
-            if node.implementation == implementation_name:
-                counter_already += 1
+        if isinstance(node, nd.LibraryNode):
+            if matches(node):
+                if node.implementation == implementation_name:
+                    counter_already += 1
+                else:
+                    print(
+                        f"📚  Setting impl {node} ({node.schedule}) from {node.implementation} to {implementation_name}.")
+                    node.implementation = implementation_name
+                    node.schedule = schedule or node.schedule
+                    counter += 1
             else:
-                print(
-                    f"📚  Setting impl {node} ({node.schedule}) from {node.implementation} to {implementation_name}.")
-                node.implementation = implementation_name
-                node.schedule = schedule or node.schedule
-                counter += 1
+                print(f"📚  Skipping node {node}.")
 
     print(
         f"📚 📚 📚  Set {counter} nodes of {node_name} / {node_class}  to {implementation_name}, {counter_already} were already set.")
@@ -198,6 +201,7 @@ def change_map_schedule(sdfg: dace.SDFG,
                         new_schedule: dace.dtypes.ScheduleType,
                         label_regex: str,
                         expected_params: List[str] = None):
+    print(f"⏲ ⏲ ⏲ Changing maps fitting {label_regex} schedules (params {expected_params}) to {new_schedule}")
     for node, _ in sdfg.all_nodes_recursive():
         if isinstance(node, dace.sdfg.nodes.MapEntry) \
                 and node.schedule == dace.dtypes.ScheduleType.GPU_Device \
@@ -207,5 +211,8 @@ def change_map_schedule(sdfg: dace.SDFG,
                     print(
                         f"⏲  Changing schedule: {node.map}: {node.schedule} --> {new_schedule}")
                     node.schedule = new_schedule
+                else:
+                    print(
+                        f"⏲  Keeping schedule: {node.map}: {node.schedule} (expected params: {expected_params})")
             else:
                 print("⏲  Keeping schedule: ", node.map, node.schedule)

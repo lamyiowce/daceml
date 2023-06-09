@@ -15,7 +15,7 @@ from examples.gnn_benchmark.implementations.common import SparseLayerBase, \
     SpecialInputType
 from examples.gnn_benchmark.sdfg_util import apply_dace_auto_optimize, \
     specialize_mem_onnx, make_maps_dynamic, change_map_schedule, \
-    simplify_hook
+    simplify_hook, set_library_node_implementation
 
 name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
     "gcn": {
@@ -85,12 +85,13 @@ def create_dace_model(model: torch.nn.Module,
 
     return dace_model_eval, dace_model_train
 
+
 def add_hook(dace_model: DaceModule, name: str, fn: Callable, backward: bool):
     if not backward:
         dace_model.append_post_onnx_hook(name + "_post_onnx", lambda model: fn(model.sdfg))
     else:
         dace_model.append_post_autodiff_hook(name + "_post_autodiff",
-                                         sdfg_util.apply_to_both(fn))
+                                             sdfg_util.apply_to_both(fn))
 
 
 def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
@@ -139,19 +140,27 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
     dace_model.prepend_post_onnx_hook("set_implementation",
                                       set_implementation)
 
-    dace_model.append_post_onnx_hook("make_outer_map_att",
-                                     lambda model: change_map_schedule(model.sdfg,
-                                                                       new_schedule=dace.dtypes.ScheduleType.Unrolled,
-                                                                       label_regex=r'examples_gnn_benchmark_implementations_gat_implementations_gat_op_\d+',
-                                                                       expected_params=['h']))
+    # if device.type == 'cuda':
+
+        # add_hook(dace_model, "make_outer_map_seq", change_out_map_schedule_fn, backward)
+
+        # set_coomm_implementation = functools.partial(
+        #     sdfg_util.set_library_node_implementation, implementation_name='cuSPARSE',
+        #     node_name='COOMM',
+        #     schedule=dace.dtypes.ScheduleType.GPU_Device)
+        #
+        # add_hook(dace_model, "set_coomm_implementation", set_coomm_implementation, backward)
+        #
+        # set_csrmm_implementation = functools.partial(
+        #     sdfg_util.set_library_node_implementation, implementation_name='cuSPARSE',
+        #     node_name='CSRMM',
+        #     schedule=dace.dtypes.ScheduleType.GPU_Device)
+        #
+        # add_hook(dace_model, "set_csrmm_implementation", set_csrmm_implementation, backward)
+
     if do_opt:
         print("---> Adding auto-opt hook.")
-        if backward:
-            dace_model.append_post_autodiff_hook("dace_auto_optimize",
-                                                 sdfg_util.apply_to_both(apply_dace_auto_optimize))
-        else:
-            dace_model.append_post_onnx_hook("dace_auto_optimize",
-                                             lambda model: apply_dace_auto_optimize(model.sdfg))
+        add_hook(dace_model, "dace_auto_optimize", apply_dace_auto_optimize, backward)
     fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(
         backward_sdfg, '__tmp3')
     dace_model.append_post_autodiff_hook("Set __tmp3 to register", fn)
@@ -160,15 +169,10 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
         backward_sdfg, '__tmp1', expected_shape=(1, 1))
     dace_model.append_post_autodiff_hook("Set __tmp1 to register", fn)
 
-    add_hook(dace_model, "simplify", simplify_hook, backward=backward)
+    # add_hook(dace_model, "simplify", simplify_hook, backward=backward)
 
-    dace_model.append_post_onnx_hook("make_outer_map_seq",
-                                     lambda model: change_map_schedule(model.sdfg,
-                                                                       new_schedule=dace.dtypes.ScheduleType.Sequential,
-                                                                       label_regex=r'call_\d+_map',
-                                                                       expected_params=['h']))
-
-    add_hook(dace_model, "flatten_blocks_for_1d_maps", sdfg_util.flatten_blocks_for_1d_maps, backward=backward)
+    add_hook(dace_model, "flatten_blocks_for_1d_maps", sdfg_util.flatten_blocks_for_1d_maps,
+             backward=backward)
 
     print("/////////////////////")
     print(">>> Model hooks:")
