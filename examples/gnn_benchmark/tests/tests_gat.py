@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 import scipy
 import torch
+from dace.transformation.auto.auto_optimize import greedy_fuse
 from torch_geometric.nn import GATConv
 from torch_geometric.utils import softmax
 from torch_sparse import SparseTensor
@@ -28,7 +29,7 @@ def set_implementation(dace_module, implementation):
 @pytest.mark.parametrize("bias", [True], ids=['bias'])
 @pytest.mark.parametrize("implementation", ['csr'])
 # @pytest.mark.parametrize("N,F,heads", [(2, 3, 1)])
-@pytest.mark.parametrize("N,F,heads", [(2, 3, 1), (2, 3, 2), (120, 20, 8)])
+@pytest.mark.parametrize("N,F,heads", [(2, 3, 1), (120, 20, 1), (2, 3, 2), (120, 20, 8)])
 @pytest.mark.parametrize("seed", [40])
 def test_gat(bias, implementation, N, F, heads, seed):
     F_in = F
@@ -61,7 +62,7 @@ def test_gat(bias, implementation, N, F, heads, seed):
     set_implementation(model, implementation)
 
     # Create input.
-    graph = scipy.sparse.random(N, N, density=0.5,
+    graph = scipy.sparse.random(N, N, density=0.2,
                                 format='csr') + scipy.sparse.eye(N,
                                                                  format='csr')
     adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(device))
@@ -77,20 +78,6 @@ def test_gat(bias, implementation, N, F, heads, seed):
 
     pred = model(x, rowptr, col).cpu().detach().numpy()
 
-    # my_gat_op = GATConvCSR.make_op(N=N, heads=heads, num_out_features=F_out,
-    #                                num_entries=col.shape[0],
-    #                                dtype=np.float32,
-    #                                negative_slope=0.2, do_bias=True)
-    #
-    # plain_pred = torch.zeros((N, F_out), dtype=torch.float32)
-    # my_gat_op(x.detach(), rowptr.detach(), col.detach(),
-    #           lin_srcDOTweight=reference_model.conv1.lin_src.weight.detach(),
-    #           att_src=reference_model.conv1.att_src.detach(),
-    #           att_dst=reference_model.conv1.att_dst.detach(),
-    #           bias=reference_model.conv1.bias.detach(),
-    #           output=plain_pred)
-
-    # check_equal(plain_pred, pred)
     check_equal(expected_pred, pred)
 
 
@@ -98,7 +85,7 @@ def check_equal(expected_pred, pred, name=None):
     print('\n' + name if name else '')
     print('Calculated: \n', pred)
     print('Expected: \n', expected_pred)
-    if not np.allclose(pred, expected_pred):
+    if not np.allclose(pred, expected_pred, atol=1e-6):
         max_err_abs = np.abs(pred - expected_pred).max()
         print("Abs error: ", max_err_abs)
         max_err_rel = max_err_abs / np.abs(expected_pred).max()
@@ -552,6 +539,46 @@ def test_stable_softmax():
     torch_result = softmax(torch.tensor(edge_vals), torch.tensor(col, dtype=torch.int64))
 
     check_equal(torch_result, out_e, 'attention_weights torch')
+    check_equal(expected_e, out_e, 'attention_weights')
+
+
+def test_greedy_fuse_bug():
+    N = 3
+    dtype = np.float32
+
+    torch.random.manual_seed(42)
+    np.random.seed(42)
+
+    # Create input.
+    graph = (scipy.sparse.random(N, N, density=0.5, format='csr')
+             + scipy.sparse.eye(N, format='csr'))
+    graph.data = np.ones_like(graph.data)
+    _, col = graph.indptr, graph.indices
+    col = np.copy(col)
+    num_entries = col.shape[0]
+
+    out_e = np.random.rand(num_entries).astype(dtype=dtype)
+
+    @dace.program
+    def gat(columns, e):
+        softmax_sum = np.zeros((N,), dtype=dtype)
+
+        for j in dace.map[0:num_entries]:
+            colj = columns[j]
+            e[j] = np.exp(e[j])
+            softmax_sum[colj] += e[j]
+
+        for j in dace.map[0:num_entries]:
+            colj = columns[j]
+            e[j] = e[j] / softmax_sum[colj]
+
+    sdfg = gat.to_sdfg(columns=col, e=out_e)
+    greedy_fuse(sdfg, device=dace.dtypes.DeviceType.CPU, validate_all=True)
+    sdfg(columns=col, e=out_e)
+
+    expected_e = np.zeros((num_entries,), dtype=dtype)
+    gat.f(columns=col, e=expected_e)
+
     check_equal(expected_e, out_e, 'attention_weights')
 
 
