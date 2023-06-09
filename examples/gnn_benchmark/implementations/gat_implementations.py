@@ -235,7 +235,7 @@ class GATConvCSR(GATConvBase):
                     # Softmax normalization.
                     for h, j in dace.map[0:heads, 0:num_entries]:
                         colj = columns[j]
-                        e[h, j] = e[h, j] / softmax_sum[h, colj ]
+                        e[h, j] = e[h, j] / softmax_sum[h, colj]
 
                     output_perm = np.zeros((heads, N, num_out_features),
                                            dtype=dtype)  # H x N x F'
@@ -250,22 +250,13 @@ class GATConvCSR(GATConvBase):
                               transA=True,
                               beta=1.0)
 
-                    # TODO: This triggers a DtoD copy. Can we avoid it?
                     # output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)),
                     #                        (N, heads * num_out_features))
-                    # if do_bias:
-                    #     for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
-                    #         output[i, j * heads + k] = output_perm[j, i, k]
-                    # else:
+
                     for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
                         output[i, j * num_out_features + k] = (
                                 output_perm[j, i, k]
                                 + bias[j * num_out_features + k])
-
-                    # output_tmp = np.empty((N, heads, num_out_features), dtype=dtype)
-                    # for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
-                    #     output_tmp[i, j, k] = output_perm[j, i, k]
-                    # output[:] = np.reshape(output_tmp, (N, heads * num_out_features))
         else:
             def gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
                        att_src, att_dst, output):
@@ -280,7 +271,6 @@ class GATConvCSR(GATConvBase):
                 """
 
                 # Compute node attention coefficients.
-                # This doesn't work because this einsum is not supported by dace.
                 if heads == 1:
                     # Transform input features.
                     # features: N x F'
@@ -371,8 +361,6 @@ class GATConvCSR(GATConvBase):
                               transA=True,
                               beta=1.0)
 
-                    # output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)),
-                    #                        (N, heads * num_out_features))
                     for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
                         output[i, j * num_out_features + k] = output_perm[
                             j, i, k]
