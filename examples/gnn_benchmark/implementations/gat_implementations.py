@@ -493,57 +493,104 @@ class GATConvCOO(GATConvBase):
             output: N x H * F'
             """
 
-            # Transform input features.
-            features = dace.define_local((N, heads, num_out_features),
-                                         dtype=dtype)
-            features_tmp = np.einsum('ij,kj->ik', node_features,
-                                     lin_srcDOTweight)
-
-            # features: N x H x F'
-            features[:] = np.reshape(features_tmp,
-                                     (N, heads, num_out_features))
-
-            alpha_src_tmp = dace.define_local((N, heads, num_out_features),
-                                              dtype=dtype)
-            alpha_dst_tmp = dace.define_local((N, heads, num_out_features),
-                                              dtype=dtype)
-            # Compute node attention coefficients.
-            # features * att_src: N x H x F
-            for k, j, i in dace.map[0:num_out_features, 0:heads, 0:N]:
-                alpha_src_tmp[i, j, k] = features[i, j, k] * att_src[0, j, k]
-                alpha_dst_tmp[i, j, k] = features[i, j, k] * att_dst[0, j, k]
-
-            alpha_src = np.sum(alpha_src_tmp, axis=-1)  # shape: N x H
-            alpha_dst = np.sum(alpha_dst_tmp, axis=-1)  # N x H
-
-            # Calculate attention weights.
-            e = np.empty((num_entries, heads), dtype=dtype)
-            softmax_sum = np.zeros((N, heads), dtype=dtype)
-
-            for i in dace.map[0:num_entries]:
-                row = rows[i]
-                col = columns[i]
-                e_tmp = alpha_src[row] + alpha_dst[col]
-                # # LeakyReLU
-                e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
-                e_tmp = np.exp(e_tmp)
-                e[i] = e_tmp
-
-                # # TODO: This is a workaround. With no schedule type, the results are incorrect with autoopt
-                # for i in dace.map[0:num_entries]@dace.dtypes.ScheduleType.Sequential:
-                # col = columns[i]
-                softmax_sum[col] += e[i]
-
-            # Softmax normalization.
-            for j in dace.map[0:num_entries]:
-                colj = columns[j]
-                e[j] = e[j] / softmax_sum[colj]
-
             if heads == 1:
+                # Transform input features.
+                features = dace.define_local((N, heads, num_out_features),
+                                             dtype=dtype)
+                features_tmp = np.einsum('ij,kj->ik', node_features,
+                                         lin_srcDOTweight)
+
+                # features: N x H x F'
+                features[:] = np.reshape(features_tmp,
+                                         (N, heads, num_out_features))
+
+                alpha_src_tmp = dace.define_local((N, heads, num_out_features),
+                                                  dtype=dtype)
+                alpha_dst_tmp = dace.define_local((N, heads, num_out_features),
+                                                  dtype=dtype)
+                # Compute node attention coefficients.
+                # features * att_src: N x H x F
+                for k, j, i in dace.map[0:num_out_features, 0:heads, 0:N]:
+                    alpha_src_tmp[i, j, k] = features[i, j, k] * att_src[0, j, k]
+                    alpha_dst_tmp[i, j, k] = features[i, j, k] * att_dst[0, j, k]
+
+                alpha_src = np.sum(alpha_src_tmp, axis=-1)  # shape: N x H
+                alpha_dst = np.sum(alpha_dst_tmp, axis=-1)  # N x H
+
+                # Calculate attention weights.
+                e = np.empty((num_entries, heads), dtype=dtype)
+                softmax_sum = np.zeros((N, heads), dtype=dtype)
+
+                for i in dace.map[0:num_entries]:
+                    row = rows[i]
+                    col = columns[i]
+                    e_tmp = alpha_src[row] + alpha_dst[col]
+                    # # LeakyReLU
+                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                    e_tmp = np.exp(e_tmp)
+                    e[i] = e_tmp
+
+                    # # TODO: This is a workaround. With no schedule type, the results are incorrect with autoopt
+                    # for i in dace.map[0:num_entries]@dace.dtypes.ScheduleType.Sequential:
+                    # col = columns[i]
+                    softmax_sum[col] += e[i]
+
+                # Softmax normalization.
+                for j in dace.map[0:num_entries]:
+                    colj = columns[j]
+                    e[j] = e[j] / softmax_sum[colj]
+
                 coomm(rows, columns, e,
                       features[:, 0, :], output,
                       transA=True, beta=0.0)
+
             else:
+                # Transform input features.
+                features = dace.define_local((N, heads, num_out_features),
+                                             dtype=dtype)
+                features_tmp = np.einsum('ij,kj->ik', node_features,
+                                         lin_srcDOTweight)
+
+                # features: N x H x F'
+                features[:] = np.reshape(features_tmp,
+                                         (N, heads, num_out_features))
+
+                alpha_src_tmp = dace.define_local((N, heads, num_out_features),
+                                                  dtype=dtype)
+                alpha_dst_tmp = dace.define_local((N, heads, num_out_features),
+                                                  dtype=dtype)
+                # Compute node attention coefficients.
+                # features * att_src: N x H x F
+                for k, j, i in dace.map[0:num_out_features, 0:heads, 0:N]:
+                    alpha_src_tmp[i, j, k] = features[i, j, k] * att_src[0, j, k]
+                    alpha_dst_tmp[i, j, k] = features[i, j, k] * att_dst[0, j, k]
+
+                alpha_src = np.sum(alpha_src_tmp, axis=-1)  # shape: N x H
+                alpha_dst = np.sum(alpha_dst_tmp, axis=-1)  # N x H
+
+                # Calculate attention weights.
+                e = np.empty((num_entries, heads), dtype=dtype)
+                softmax_sum = np.zeros((N, heads), dtype=dtype)
+
+                for i in dace.map[0:num_entries]:
+                    row = rows[i]
+                    col = columns[i]
+                    e_tmp = alpha_src[row] + alpha_dst[col]
+                    # # LeakyReLU
+                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                    e_tmp = np.exp(e_tmp)
+                    e[i] = e_tmp
+
+                    # # TODO: This is a workaround. With no schedule type, the results are incorrect with autoopt
+                    # for i in dace.map[0:num_entries]@dace.dtypes.ScheduleType.Sequential:
+                    # col = columns[i]
+                    softmax_sum[col] += e[i]
+
+                # Softmax normalization.
+                for j in dace.map[0:num_entries]:
+                    colj = columns[j]
+                    e[j] = e[j] / softmax_sum[colj]
+
                 output_perm = np.zeros((heads, N, num_out_features),
                                        dtype=dtype)  # H x N x F'
                 # features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
