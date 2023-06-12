@@ -24,8 +24,8 @@ DEFAULT_LABEL_MAP.update(
      range(3, 9)})
 
 DEFAULT_LABEL_MAP.update(
-    {f'{key}_compiled': f'{name} (compiled)' for key, name in DEFAULT_LABEL_MAP.items() if 'torch' in key})
-
+    {f'{key}_compiled': f'{name} (compiled)' for key, name in DEFAULT_LABEL_MAP.items() if
+     'torch' in key})
 
 
 def get_colors(names: pd.Series):
@@ -215,27 +215,28 @@ def main():
     # 06.06 Plot GAT fwd with multiple spmm kernels and permutations.
 
     arxiv_df, arxiv_bwd_df = read_many_dfs(
-        filenames=[#'05.06.15.33-gat-ogbn-arxiv-203058.csv',
-                   '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
-                   '06.06.16.48-pyg-gat-ogbn-arxiv-203173.csv',
-                   '07.06.17.32-gat-ogbn-arxiv-203297.csv',
-                   ],
+        filenames=[
+            '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
+            '06.06.16.48-pyg-gat-ogbn-arxiv-203173.csv',
+            '08.06.12.40-gat-ogbn-arxiv-203320.csv',
+            '09.06.12.55-gat-ogbn-arxiv-203470.csv',
+        ],
         backward=False
     )
     plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
-                  plot_title="GAT, OGB Arxiv")
+                  plot_title="GAT, OGB Arxiv", sizes=[8, 16, 32, 64, 128, 256])
 
     cora_df, cora_bwd_df = read_many_dfs(
         filenames=['18.05.14.43-pyg-gat-cora-198393.csv',
                    '18.05.14.59-pyg-gat-cora-198400.csv',
-                   #'05.06.15.28-gat-cora-203058.csv',
                    '06.06.16.41-pyg-gat-cora-203173.csv',
-                   '07.06.17.27-gat-cora-203297.csv',
+                   '08.06.12.33-gat-cora-203320.csv',
+                   '09.06.12.50-gat-cora-203470.csv'
                    ],
         backward=False
     )
     plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
-                  plot_title="GAT, Cora")
+                  plot_title="GAT, Cora", sizes=[8, 16, 32, 64, 128, 256])
 
     # # 06.06 Plot GCN after block size adaptation.
     # This is actually incorrect! some kernels are not run!!!!
