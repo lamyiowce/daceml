@@ -82,6 +82,10 @@ def my_auto_optimize(sdfg: SDFG,
                             expected_params=['h'])
         change_map_schedule(sdfg,
                             new_schedule=dtypes.ScheduleType.Sequential,
+                            label_regex=r'examples_gnn_benchmark_implementations_gat_implementations_gat_op_\d+',
+                            expected_params=['h'])
+        change_map_schedule(sdfg,
+                            new_schedule=dtypes.ScheduleType.Sequential,
                             label_regex=r'call_\d+_map',
                             expected_params=['h'])
 
