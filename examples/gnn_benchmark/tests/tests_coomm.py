@@ -82,7 +82,7 @@ def test_batched_spmm(A_batch_size, B_batch_size, transA):
     B = torch.rand(B_shape, dtype=torch.float32)
     C = torch.empty((C_batch_size, N, F), dtype=torch.float32)
     A_sparse = SparseTensor.from_dense(A.permute(1, 2, 0) if A_batch_size else A)
-    A_rowptrs, A_columns, A_vals = A_sparse.csr()
+    A_rows, A_columns, A_vals = A_sparse.coo()
     if A_batch_size:
         A_vals = torch.reshape(A_vals, (A_batch_size, -1))
         A_vals = A_vals.contiguous()
@@ -92,10 +92,10 @@ def test_batched_spmm(A_batch_size, B_batch_size, transA):
         expected_C = A.transpose(-1, -2) @ B + beta * C
 
     @dace.program
-    def spmm(A_rowptrs, A_columns, A_vals, B, C):
-        coomm(A_rowptrs, A_columns, A_vals, B, C, beta=beta, transA=transA)
+    def spmm(A_rows, A_columns, A_vals, B, C):
+        coomm(A_rows, A_columns, A_vals, B, C, beta=beta, transA=transA)
 
-    spmm(A_rowptrs, A_columns, A_vals, B, C)
+    spmm(A_rows, A_columns, A_vals, B, C)
 
     print('\nCalculated: \n', C)
     print('Expected: \n', expected_C)
