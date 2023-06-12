@@ -10,6 +10,7 @@ from torch_sparse import SparseTensor
 
 from daceml.torch.module import DaceModule
 from examples.gnn_benchmark.csrmm_libnode import csrmm
+from examples.gnn_benchmark.tests.common import check_equal
 from examples.gnn_benchmark.util import register_replacement_overrides
 
 torch.backends.cuda.matmul.allow_tf32 = False
@@ -79,19 +80,6 @@ def test_gat(bias, implementation, N, F, heads, seed):
     pred = model(x, rowptr, col).cpu().detach().numpy()
 
     check_equal(expected_pred, pred)
-
-
-def check_equal(expected_pred, pred, name=None):
-    print('\n' + name if name else '')
-    print('Calculated: \n', pred)
-    print('Expected: \n', expected_pred)
-    if not np.allclose(pred, expected_pred, atol=1e-6):
-        max_err_abs = np.abs(pred - expected_pred).max()
-        print("Abs error: ", max_err_abs)
-        max_err_rel = max_err_abs / np.abs(expected_pred).max()
-        print("Rel error: ",
-              max_err_rel)
-        assert False, f"{name} abs: {max_err_abs}, rel: {max_err_rel}"
 
 
 def test_gat_compare_gpu():

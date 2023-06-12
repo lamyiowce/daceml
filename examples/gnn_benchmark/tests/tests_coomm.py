@@ -5,10 +5,12 @@ import cupy
 import dace
 import numpy as np
 import pytest
+import scipy
 import torch
 from torch_sparse import SparseTensor
 
 from examples.gnn_benchmark.sparse_mm.coomm import coomm
+from examples.gnn_benchmark.tests.common import check_equal
 
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
@@ -64,47 +66,66 @@ def test_coomm_libnode(beta, transA):
 
 @pytest.mark.parametrize("transA", [True, False])
 @pytest.mark.parametrize("A_batch_size,B_batch_size", [(3, None), (None, 3), (3, 3)])
+# @pytest.mark.parametrize("transA", [True])
+# @pytest.mark.parametrize("A_batch_size,B_batch_size", [(None, 3)])
 def test_batched_spmm(A_batch_size, B_batch_size, transA):
+    if torch.cuda.is_available():
+        import cupy as xp
+    else:
+        import numpy as xp
+    xp.random.seed(23)
+    np.random.seed(34)
+
     C_batch_size = A_batch_size or B_batch_size
     N = 2
     M = 4
     F = 5
     A_shape = (N, M) if not transA else (M, N)
-    if A_batch_size:
-        A_shape = (A_batch_size, *A_shape)
-    num_zeros = N*M // 4
-    zero_x = torch.randint(low=0, high=A_shape[-2], size=(num_zeros,))
-    zero_y = torch.randint(low=0, high=A_shape[-1], size=(num_zeros,))
     B_shape = (B_batch_size, M, F) if B_batch_size else (M, F)
     beta = 0.0
-    A = torch.rand(A_shape, dtype=torch.float32)
-    A[..., zero_x, zero_y] = 0.0
-    B = torch.rand(B_shape, dtype=torch.float32)
-    C = torch.empty((C_batch_size, N, F), dtype=torch.float32)
-    A_sparse = SparseTensor.from_dense(A.permute(1, 2, 0) if A_batch_size else A)
-    A_rows, A_columns, A_vals = A_sparse.coo()
-    if A_batch_size:
-        A_vals = torch.reshape(A_vals, (A_batch_size, -1))
-        A_vals = A_vals.contiguous()
+    A = scipy.sparse.random(*A_shape, density=0.5, format='coo')
+    B = xp.random.rand(*B_shape).astype(xp.float32)
+    C = xp.zeros((C_batch_size, N, F), dtype=xp.float32)
+
+    A_rows, A_columns = A.row, A.col
+    A_rows = xp.ascontiguousarray(xp.asarray(A_rows))
+    A_columns = xp.ascontiguousarray(xp.asarray(A_columns))
+    A_batch_size = 1 if A_batch_size is None else A_batch_size
+    A_vals = xp.random.rand(A_batch_size, A.nnz).astype(xp.float32)
+
+    A_dense = xp.zeros((A_batch_size, *A_shape), dtype=xp.float32)
+    for i in range(A_batch_size):
+        A_dense[i, A_rows, A_columns] = A_vals[i]
+    A_vals = xp.copy(A_vals.squeeze())
+
     if not transA:
-        expected_C = A @ B + beta * C
+        expected_C = A_dense @ B + beta * C
     else:
-        expected_C = A.transpose(-1, -2) @ B + beta * C
+        expected_C = xp.transpose(A_dense, (0, -1, -2)) @ B + beta * C
 
     @dace.program
     def spmm(A_rows, A_columns, A_vals, B, C):
         coomm(A_rows, A_columns, A_vals, B, C, beta=beta, transA=transA)
 
-    spmm(A_rows, A_columns, A_vals, B, C)
+    sdfg = spmm.to_sdfg(A_rows, A_columns, A_vals, B, C)
+    if os.environ.get('CUDA_VISIBLE_DEVICES', '') != '':
+        sdfg.apply_gpu_transformations()
 
-    print('\nCalculated: \n', C)
-    print('Expected: \n', expected_C)
-    assert np.allclose(C, expected_C)
+    sdfg(A_rows, A_columns, A_vals, B, C)
+
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
     sleep(3)
+    check_equal(expected_pred=expected_C, pred=C)
 
 
 if __name__ == '__main__':
-    test_coomm_libnode(beta=0.0, transA=True)
-    test_coomm_libnode(beta=1.0, transA=True)
-    test_coomm_libnode(beta=0.0, transA=False)
-    test_coomm_libnode(beta=1.0, transA=False)
+    test_batched_spmm(A_batch_size=None, B_batch_size=3, transA=True)
+    test_batched_spmm(A_batch_size=3, B_batch_size=None, transA=True)
+    test_batched_spmm(A_batch_size=3, B_batch_size=3, transA=True)
+    # test_batched_spmm(A_batch_size=3, B_batch_size=3, transA=True)
+    # test_coomm_libnode(beta=0.0, transA=True)
+    # test_coomm_libnode(beta=1.0, transA=True)
+    # test_coomm_libnode(beta=0.0, transA=False)
+    # test_coomm_libnode(beta=1.0, transA=False)
