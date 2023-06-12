@@ -233,41 +233,56 @@ class ExpandCOOMMCpp(ExpandTransformation):
         opt['alpha'] = alpha
         opt['beta'] = beta
 
-        opt['num_entries'] = avalues_shape[0]
-        opt['nrows'] = c_shape[0]
-        opt['ncols'] = c_shape[1]
+        # Using reverse indexing, because the first dimension can be the batch size.
+        opt['num_entries'] = avalues_shape[-1]
+        opt['nrows'] = c_shape[-2]
+        opt['ncols'] = c_shape[-1]
 
-        opt['bcols'] = b_shape[1]
+        opt['bcols'] = b_shape[-1]
+
+        opt['batch_size'] = c_shape[0] if len(c_shape) > 2 else 1
+        opt['avals_batch_stride'] = avalues_shape[1] if len(avalues_shape) > 1 else 0
+        opt['b_batch_stride'] = b_shape[1] * b_shape[2] if len(b_shape) > 2 else 0
+        opt['c_batch_stride'] = c_shape[1] * c_shape[2] if len(c_shape) > 2 else 0
 
         if node.transA:
             code = """
-                for (int i = 0; i < {nrows}; i++) {{
-                    for (int k = 0; k < {ncols}; k++) {{
-                        _c[i * {ncols} + k] *= {beta};
+                for (int b = 0; b < {batch_size}; b++) {{
+                    for (int i = 0; i < {nrows}; i++) {{
+                        for (int k = 0; k < {ncols}; k++) {{
+                            _c[b * {c_batch_stride} + i * {ncols} + k] *= {beta};
+                        }}
                     }}
                 }}
-                for (int i = 0; i < {num_entries}; i++) {{
-                    for (int k = 0; k < {ncols}; k++) {{
-                        auto column = _a_cols[i];
-                        auto row = _a_rows[i];
-                        {dtype} mult = {alpha} * _b[row * {bcols} + k] * _a_vals[i];
-                        _c[column * {ncols} + k] += mult;
+                
+               for (int b = 0; b < {batch_size}; b++) {{
+                    for (int i = 0; i < {num_entries}; i++) {{
+                        for (int k = 0; k < {ncols}; k++) {{
+                            auto column = _a_cols[i];
+                            auto row = _a_rows[i];
+                            {dtype} mult = {alpha} * _b[b * {b_batch_stride} + row * {bcols} + k] * _a_vals[b * {avals_batch_stride} + i];
+                            _c[b * {c_batch_stride} + column * {ncols} + k] += mult;
+                        }}
                     }}
                 }}
             """.format_map(opt)
         else:
             code = """
-                for (int i = 0; i < {nrows}; i++) {{
-                    for (int k = 0; k < {ncols}; k++) {{
-                        _c[i * {ncols} + k] *= {beta};
+                for (int b = 0; b < {batch_size}; b++) {{
+                    for (int i = 0; i < {nrows}; i++) {{
+                        for (int k = 0; k < {ncols}; k++) {{
+                            _c[b * {c_batch_stride} + i * {ncols} + k] *= {beta};
+                        }}
                     }}
                 }}
-                for (int i = 0; i < {num_entries}; i++) {{
-                    for (int k = 0; k < {ncols}; k++) {{
-                        auto column = _a_cols[i];
-                        auto row = _a_rows[i];
-                        {dtype} mult = {alpha} * _b[column * {bcols} + k] * _a_vals[i];
-                        _c[row * {ncols} + k] += mult;
+                for (int b = 0; b < {batch_size}; b++) {{
+                    for (int i = 0; i < {num_entries}; i++) {{
+                        for (int k = 0; k < {ncols}; k++) {{
+                            auto column = _a_cols[i];
+                            auto row = _a_rows[i];
+                            {dtype} mult = {alpha} * _b[b * {b_batch_stride} + column * {bcols} + k]* _a_vals[b * {avals_batch_stride} + i];
+                            _c[b * {c_batch_stride} + row * {ncols} + k] += mult;
+                        }}
                     }}
                 }}
             """.format_map(opt)
@@ -345,23 +360,60 @@ class COOMM(dace.sdfg.nodes.LibraryNode):
         out_subset.squeeze()
         sizes['_out'] = out_subset.size()
 
-        # Check all are 2d matrices.
+        # Check all dense matrices are 2d or 3d.
         wrong_size_lens = {k: len(v) for k, v in sizes.items() if
-                           v is not None and len(v) != 2 and '_a_' not in k}
+                           v is not None and len(v) not in [2, 3] and '_a_' not in k}
         if len(wrong_size_lens) > 0:
             raise ValueError(
-                f"matrix-matrix product only supported on matrices. Got: {wrong_size_lens}")
+                f"matrix-matrix product only supported on matrices. Got dimensions: {wrong_size_lens}")
 
-        B_rows, B_cols = sizes['_b']
+        B_rows, B_cols = sizes['_b'][-2:]
 
         if sizes['_cin'] is not None and sizes['_cin'] != sizes['_out']:
             raise ValueError("Input C matrix must match output matrix.")
 
         if not self.transA:
-            if sizes['_out'][1] != B_cols:
+            if sizes['_out'][-1] != B_cols:
                 raise ValueError(
                     "Output to matrix-matrix product must agree in the m and n "
                     "dimensions")
+
+        if sizes['_a_cols'][0] != sizes['_a_vals'][-1]:
+            raise ValueError(f"A_cols and A_vals must have the same NNZ size, got {sizes['_a_cols']} "
+                             f"and {sizes['_a_vals']}")
+
+        if len(sizes['_a_cols']) != 1 or len(sizes['_a_rows']) != 1:
+            raise NotImplementedError(f"A_rows and A_cols must be 1d, got {sizes['_a_cols']} "
+                                      f"and {sizes['_a_rows']}. Batched SpMM supported only for the"
+                                      f" same sparsity pattern for all batches.")
+
+        # Check that all 3d matrices have the same batch dim.
+        batch_dim_b = sizes['_b'][0] if len(sizes['_b']) == 3 else None
+        batch_dim_out = sizes['_out'][0] if len(sizes['_out']) == 3 else None
+        batch_dim_avals = sizes['_a_vals'][0] if len(sizes['_a_vals']) == 2 else None
+        
+
+        
+        batch_dims = {'_b': batch_dim_b, '_out': batch_dim_out, '_a_vals': batch_dim_avals}
+        batch_dims = {k: v for k, v in batch_dims.items() if v is not None}
+        
+        # If it's a batched op, then out has to have a batch dim and at least one of b and a has to
+        # be batched as well.
+        if len(batch_dims) > 0 and batch_dim_out is None:
+            raise ValueError(
+                "Output of matrix-matrix product must have a batch dimension if any of the inputs "
+                "have a batch dimension.")
+        if len(batch_dims) > 0 and batch_dim_b is None and batch_dim_avals is None:
+            raise ValueError(
+                "Either B or A_values must have a batch dimension in matrix-matrix product.")
+        if len(batch_dims) > 0 and len(set(batch_dims.values())) != 1:
+            raise ValueError(
+                "Batch dimensions of B, A_values and output must match in matrix-matrix product. "
+                f"Got {batch_dims}")
+        if batch_dim_b is not None and batch_dim_out is not None and batch_dim_b != batch_dim_out:
+            raise ValueError(
+                f"Batch dimension of B and output must match in matrix-matrix product. Got "
+                f"{batch_dim_b} and {batch_dim_out}")
 
 
 # Number of rows and columns in A.
