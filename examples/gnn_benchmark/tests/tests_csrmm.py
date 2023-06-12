@@ -58,21 +58,26 @@ def test_spmm_pure():
     print('Expected: \n', expected_C)
     assert np.allclose(C, expected_C)
 
-
+@pytest.mark.parametrize("transA", [True, False])
 def test_batched_spmm(transA):
     batch_size = 3
     N = 2
     M = 4
     F = 5
+    beta = 0.0
     A = torch.rand((batch_size, N, M), dtype=torch.float32)
+    zero_x = torch.randint(0, N)
+    zero_y = torch.randint(0, M)
+    A[:, zero_x, zero_y] = 0.0
     B = torch.rand((batch_size, M, F), dtype=torch.float32)
     C = torch.empty((batch_size, N, F), dtype=torch.float32)
     A_sparse = SparseTensor.from_dense(A)
     A_rowptrs, A_columns, A_vals = A_sparse.csr()
+
     if not transA:
         expected_C = A @ B + beta * C
     else:
-        expected_C = A.T @ B + beta * C
+        expected_C = np.transpose(A, (0, 2, 1)) @ B + beta * C
 
     @dace.program
     def spmm(A_rowptrs, A_columns, A_vals, B, C):
