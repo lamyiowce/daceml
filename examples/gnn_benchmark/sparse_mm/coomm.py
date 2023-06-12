@@ -87,7 +87,7 @@ class ExpandCOOMMCuSPARSE(ExpandTransformation):
         idx_dtype = acols.dtype.base_type
         if acols.dtype.base_type not in [dace.int32, dace.int64]:
             raise ValueError(
-                f"Unsupported index type: {idx_dtype} (only int32 supported).")
+                f"Unsupported index type: {idx_dtype} (only int32 and int64 supported).")
 
         # Set up options for code formatting
         opt = {}
@@ -108,26 +108,42 @@ class ExpandCOOMMCuSPARSE(ExpandTransformation):
         opt['opB'] = 'CUSPARSE_OPERATION_NON_TRANSPOSE'
 
         # Get sizes.
-        opt['nnz'] = avalues_shape[0]
-        opt['nrows'] = c_shape[0]
-        opt['ncols'] = c_shape[1]
+        opt['nnz'] = avalues_shape[-1]
+        opt['nrows'] = c_shape[-2]
+        opt['ncols'] = c_shape[-1]
         opt['ldc'] = opt['ncols']
 
         if not node.transA:
-            opt['arows'] = c_shape[0]
-            opt['acols'] = b_shape[0]
+            opt['arows'] = c_shape[-2]
+            opt['acols'] = b_shape[-2]
         else:
-            opt['arows'] = b_shape[0]
-            opt['acols'] = c_shape[0]
+            opt['arows'] = b_shape[-2]
+            opt['acols'] = c_shape[-2]
 
-        opt['brows'] = b_shape[0]
-        opt['bcols'] = b_shape[1]
+        opt['brows'] = b_shape[-2]
+        opt['bcols'] = b_shape[-1]
         opt['ldb'] = opt['bcols']
+
+        opt['num_batches'] = c_shape[0] if len(c_shape) > 2 else 1
+        opt['avals_batch_stride'] = avalues_shape[1] if len(avalues_shape) > 1 else 0
+        opt['b_batch_stride'] = b_shape[1] * b_shape[2] if len(b_shape) > 2 else 0
+        opt['c_batch_stride'] = c_shape[1] * c_shape[2] if len(c_shape) > 2 else 0
 
         opt['compute'] = f'CUDA_R_{to_cublas_computetype(dtype)}'
         opt['layout'] = 'CUSPARSE_ORDER_ROW'
 
         opt['algo'] = 'CUSPARSE_SPMM_COO_ALG4'
+
+        if opt['num_batches'] > 1:
+            set_batches = """
+                    // Set batch sizes and strides.
+                    dace::sparse::CheckCusparseError( cusparseDnMatSetStridedBatch(matC, {num_batches}, {c_batch_stride}) );
+                    dace::sparse::CheckCusparseError( cusparseDnMatSetStridedBatch(matB, {num_batches}, {b_batch_stride}) );
+                    dace::sparse::CheckCusparseError( cusparseCooSetStridedBatch(matA, {num_batches}, {avals_batch_stride}) );
+                """
+        else:
+            set_batches = ""
+        opt['set_batch_sizes_and_strides'] = set_batches.format_map(opt)
 
         call = """
                     cusparseSpMatDescr_t matA;
@@ -151,21 +167,19 @@ class ExpandCOOMMCuSPARSE(ExpandTransformation):
                     // Create dense matrix C
                     dace::sparse::CheckCusparseError( cusparseCreateDnMat(&matC, {nrows}, {ncols}, {ldc}, _c,
                                                         {compute}, {layout}) );
-
+                    
+                    {set_batch_sizes_and_strides}                    
                     // Get the size of the additional buffer that's needed.
-                    // TODO: temp solution for dace_stream = nullptr.
-  /*                  size_t bufferSize;
+                    size_t bufferSize;
                     dace::sparse::CheckCusparseError( cusparseSpMM_bufferSize(
                                                     {handle},
                                                     {opA},
                                                     {opB},
                                                     {alpha}, matA, matB, {beta}, matC, {compute},
-                                                    {algo}, &bufferSize)
-                                                     );
-                    void* dBuffer = __state->cusparse_handle.Buffer(__dace_cuda_device, 
-                                                                    __dace_current_stream_id, 
-                                                                    bufferSize);
-*/ void* dBuffer = NULL;
+                                                    {algo}, &bufferSize) );
+                    void* dBuffer = __state->cusparse_handle.Buffer(__dace_cuda_device, __dace_current_stream_id, bufferSize);
+
+
                     // execute SpMM
                     dace::sparse::CheckCusparseError( cusparseSpMM({handle},
                                                     {opA},
@@ -391,12 +405,16 @@ class COOMM(dace.sdfg.nodes.LibraryNode):
         batch_dim_b = sizes['_b'][0] if len(sizes['_b']) == 3 else None
         batch_dim_out = sizes['_out'][0] if len(sizes['_out']) == 3 else None
         batch_dim_avals = sizes['_a_vals'][0] if len(sizes['_a_vals']) == 2 else None
-        
 
-        
         batch_dims = {'_b': batch_dim_b, '_out': batch_dim_out, '_a_vals': batch_dim_avals}
         batch_dims = {k: v for k, v in batch_dims.items() if v is not None}
-        
+
+        # We're using CUDA 11.4 which has a bug regarding the mode Ci = Ai @ B, so all matrices
+        # require to be batched. (https://github.com/NVIDIA/CUDALibrarySamples/issues/81)
+        # if len(batch_dims) not in [0, 3]:
+        #     raise ValueError(
+        #         "Either all or none of inputs and outputs to matrix-matrix product must be batched.")
+
         # If it's a batched op, then out has to have a batch dim and at least one of b and a has to
         # be batched as well.
         if len(batch_dims) > 0 and batch_dim_out is None:
