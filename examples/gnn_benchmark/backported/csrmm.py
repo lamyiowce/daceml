@@ -1,6 +1,7 @@
 # Copyright 2019-2022 ETH Zurich and the DaCe authors. All rights reserved.
 import os
 from copy import deepcopy as dc
+import copy
 
 import dace.library
 import dace.sdfg.nodes
@@ -455,21 +456,21 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         opt['alpha'] = alpha
         opt['beta'] = beta
 
-        opt['nrows'] = c_shape[0]
-        opt['ncols'] = c_shape[1]
+        opt['nrows'] = c_shape[-2]
+        opt['ncols'] = c_shape[-1]
         opt['ldc'] = opt['ncols']
 
-        opt['brows'] = b_shape[0]
-        opt['bcols'] = b_shape[1]
+        opt['brows'] = b_shape[-2]
+        opt['bcols'] = b_shape[-1]
         opt['ldb'] = opt['bcols']
 
-        opt['arows'] = c_shape[0]
+        opt['arows'] = c_shape[-2]
         if node.transB:
-            opt['acols'] = b_shape[1]
+            opt['acols'] = b_shape[-1]
         else:
-            opt['acols'] = b_shape[0]
+            opt['acols'] = b_shape[-2]
 
-        opt['annz'] = avals_shape[0]
+        opt['annz'] = avals_shape[-1]
 
         opt['algo'] = 'CUSPARSE_SPMM_CSR_ALG2'
 
@@ -592,7 +593,7 @@ class ExpandCSRMMCpp(ExpandTransformation):
         operands = _get_csrmm_operands(node, state, sdfg)
         # For getting the shape, we need to use the shape returned from _get_csrmm_operands
         # because then it is squeezed.
-        avals = operands['_a_vals'][1]
+        _, avals, avals_shape, _ = operands['_a_vals']
         b_shape = operands['_b'][2]
         c_shape = operands['_c'][2]
 
@@ -620,62 +621,62 @@ class ExpandCSRMMCpp(ExpandTransformation):
 
         opt['func'] = func
         opt['dtype'] = cdtype
-        if node.transA:
-            opt['opA'] = 'CUSPARSE_OPERATION_TRANSPOSE'
-        else:
-            opt['opA'] = 'CUSPARSE_OPERATION_NON_TRANSPOSE'
-
-        if node.transB:
-            opt['opB'] = 'CUSPARSE_OPERATION_TRANSPOSE'
-        else:
-            opt['opB'] = 'CUSPARSE_OPERATION_NON_TRANSPOSE'
 
         opt['alpha'] = alpha
         opt['beta'] = beta
 
-        opt['nrows'] = c_shape[0]
-        opt['ncols'] = c_shape[1]
+        opt['nrows'] = c_shape[-2]
+        opt['ncols'] = c_shape[-1]
         opt['ldc'] = opt['ncols']
 
-        opt['brows'] = b_shape[0]
-        opt['bcols'] = b_shape[1]
+        opt['brows'] = b_shape[-2]
+        opt['bcols'] = b_shape[-1]
 
-        opt['arows'] = c_shape[0]
-        if node.transB:
-            opt['acols'] = b_shape[1]
-        else:
-            opt['acols'] = b_shape[0]
+        opt['arows'] = c_shape[-2]
+
+        opt['batch_size'] = c_shape[0] if len(c_shape) > 2 else 1
+        opt['avals_batch_stride'] = avals_shape[1] if len(avals_shape) > 1 else 0
+        opt['b_batch_stride'] = b_shape[1] * b_shape[2] if len(b_shape) > 2 else 0
+        opt['c_batch_stride'] = c_shape[1] * c_shape[2] if len(c_shape) > 2 else 0
 
         if node.transA:
             code = """
-                for (int i = 0; i < {nrows}; i++) {{
-                    for (int k = 0; k < {ncols}; k++) {{
-                        _c[i * {ncols} + k] *= {beta};
+                for (int b = 0; b < {batch_size}; b++) {{
+                    for (int i = 0; i < {nrows}; i++) {{
+                        for (int k = 0; k < {ncols}; k++) {{
+                            _c[b * {c_batch_stride} + i * {ncols} + k] *= {beta};
+                        }}
                     }}
                 }}
-                for (int i = 0; i < {nrows}; i++) {{
-                    for (int k = 0; k < {ncols}; k++) {{
-                        for (int j = _a_rows[i]; j < _a_rows[i + 1]; j++) {{
-                            auto column = _a_cols[j];
-                            {dtype} mult = {alpha} * _b[i * {bcols} + k] * _a_vals[j];
-                            _c[column * {ncols} + k] += mult;
+                for (int b = 0; b < {batch_size}; b++) {{
+                    for (int i = 0; i < {nrows}; i++) {{
+                        for (int k = 0; k < {ncols}; k++) {{
+                            for (int j = _a_rows[i]; j < _a_rows[i + 1]; j++) {{
+                                auto column = _a_cols[j];
+                                {dtype} mult = {alpha} * _b[b * {b_batch_stride} + i * {bcols} + k] * _a_vals[b * {avals_batch_stride} + j];
+                                _c[b * {c_batch_stride} + column * {ncols} + k] += mult;
+                            }}
                         }}
                     }}
                 }}
             """.format_map(opt)
         else:
             code = """
-                for (int i = 0; i < {nrows}; i++) {{
-                    for (int k = 0; k < {ncols}; k++) {{
-                        _c[i * {ncols} + k] *= {beta};
+                for (int b = 0; b < {batch_size}; b++) {{
+                    for (int i = 0; i < {nrows}; i++) {{
+                        for (int k = 0; k < {ncols}; k++) {{
+                            _c[b * {c_batch_stride} + i * {ncols} + k] *= {beta};
+                        }}
                     }}
                 }}
-                for (int i = 0; i < {nrows}; i++) {{
-                    for (int k = 0; k < {ncols}; k++) {{
-                        for (int j = _a_rows[i]; j < _a_rows[i + 1]; j++) {{
-                            auto column = _a_cols[j];
-                            {dtype} mult = {alpha} * _b[column * {bcols} + k] * _a_vals[j];
-                            _c[i * {ncols} + k] += mult;
+                for (int b = 0; b < {batch_size}; b++) {{
+                    for (int i = 0; i < {nrows}; i++) {{
+                        for (int k = 0; k < {ncols}; k++) {{
+                            for (int j = _a_rows[i]; j < _a_rows[i + 1]; j++) {{
+                                auto column = _a_cols[j];
+                                {dtype} mult = {alpha} * _b[b * {b_batch_stride} + column * {bcols} + k] * _a_vals[b * {avals_batch_stride} + j];
+                                _c[b * {c_batch_stride} + i * {ncols} + k] += mult;
+                            }}
                         }}
                     }}
                 }}
@@ -733,51 +734,91 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
         if len(in_edges) not in [4, 5]:
             raise ValueError("Expected 4 or 5 inputs to CSRMM")
         size4 = None
+
+        sizes = {}
+        for _, _, _, dst_conn, memlet in state.in_edges(self):
+            subset = copy.deepcopy(memlet.subset)
+            subset.squeeze()
+            sizes[dst_conn] = subset.size()
+
         for _, _, _, dst_conn, memlet in state.in_edges(self):
             if dst_conn == '_a_rows':
                 subset = dc(memlet.subset)
                 subset.squeeze()
-                size0 = subset.size()
-            if dst_conn == '_a_cols':
-                subset = dc(memlet.subset)
-                subset.squeeze()
-                size1 = subset.size()
-            if dst_conn == '_a_vals':
-                subset = dc(memlet.subset)
-                subset.squeeze()
-                size2 = subset.size()
+                sizes['_a_rows'] = subset.size()
             if dst_conn == '_b':
                 subset = dc(memlet.subset)
                 subset.squeeze()
-                size3 = subset.size()
+                sizes['_b']= subset.size()
             if dst_conn == '_cin':
                 subset = dc(memlet.subset)
                 subset.squeeze()
-                size4 = subset.size()
+                sizes['_cin'] = subset.size()
 
+        # Get output size.
         out_edges = state.out_edges(self)
         if len(out_edges) != 1:
-            raise ValueError("Expected exactly one output from matrix-matrix product")
+            raise ValueError(
+                "Expected exactly one output from matrix-matrix product")
         out_memlet = out_edges[0].data
-        # Function is symmetric, edge order does not matter
-        if len(size3) != 2:
-            raise ValueError("matrix-matrix product only supported on matrices")
-
-        A_rows = size0[0] - 1
-        if self.transB:
-            B_cols = size3[0]
-        else:
-            B_cols = size3[1]
-
-        # if size0[1] != size1[0]:
-        #     raise ValueError("Inputs to matrix-matrix product " "must agree in the k-dimension")
-        out_subset = dc(out_memlet.subset)
+        out_subset = copy.deepcopy(out_memlet.subset)
         out_subset.squeeze()
-        size5 = out_subset.size()
-        if size4 is not None and size4 != size5:
+        sizes['_out'] = out_subset.size()
+
+        # Function is symmetric, edge order does not matter
+        if len(sizes['_b']) not in [2, 3]:
+            raise ValueError("matrix-matrix product only supported on matrices or batched matrices.")
+
+        A_rows = sizes['_a_rows'][0] - 1
+        if self.transB:
+            B_cols = sizes['_b'][0]
+        else:
+            B_cols = sizes['_b'][1]
+
+        # if sizes['_a_rows'][1] != size1[0]:
+        #     raise ValueError("Inputs to matrix-matrix product " "must agree in the k-dimension")
+
+        if '_cin' in sizes and sizes['_cin'] != sizes['_out']:
             raise ValueError("Input C matrix must match output matrix.")
-        if len(size5) != 2:
-            raise ValueError("matrix-matrix product only supported on matrices")
-        if len(size5) == 2 and list(size5) != [A_rows, B_cols]:
+        if len(sizes['_out']) not in [2, 3]:
+            raise ValueError("matrix-matrix product only supported on matrices or batched matrices.")
+        if not self.transA and len(sizes['_out']) == 2 and list(sizes['_out']) != [A_rows, B_cols]:
             raise ValueError("Output to matrix-matrix product must agree in the m and n "
                              "dimensions")
+
+        if len(sizes['_a_cols']) != 1 or len(sizes['_a_rows']) != 1:
+            raise NotImplementedError(f"A_rows and A_cols must be 1d, got {sizes['_a_cols']} "
+                                      f"and {sizes['_a_rows']}. Batched SpMM supported only for the"
+                                      f" same sparsity pattern for all batches.")
+
+        # Check that all 3d matrices have the same batch dim.
+        batch_dim_b = sizes['_b'][0] if len(sizes['_b']) == 3 else None
+        batch_dim_out = sizes['_out'][0] if len(sizes['_out']) == 3 else None
+        batch_dim_avals = sizes['_a_vals'][0] if len(sizes['_a_vals']) == 2 else None
+
+        batch_dims = {'_b': batch_dim_b, '_out': batch_dim_out, '_a_vals': batch_dim_avals}
+        batch_dims = {k: v for k, v in batch_dims.items() if v is not None}
+
+        # We're using CUDA 11.4 which has a bug regarding the mode Ci = Ai @ B, so all matrices
+        # require to be batched. (https://github.com/NVIDIA/CUDALibrarySamples/issues/81)
+        # if len(batch_dims) not in [0, 3]:
+        #     raise ValueError(
+        #         "Either all or none of inputs and outputs to matrix-matrix product must be batched.")
+
+        # If it's a batched op, then out has to have a batch dim and at least one of b and a has to
+        # be batched as well.
+        if len(batch_dims) > 0 and batch_dim_out is None:
+            raise ValueError(
+                "Output of matrix-matrix product must have a batch dimension if any of the inputs "
+                "have a batch dimension.")
+        if len(batch_dims) > 0 and batch_dim_b is None and batch_dim_avals is None:
+            raise ValueError(
+                "Either B or A_values must have a batch dimension in matrix-matrix product.")
+        if len(batch_dims) > 0 and len(set(batch_dims.values())) != 1:
+            raise ValueError(
+                "Batch dimensions of B, A_values and output must match in matrix-matrix product. "
+                f"Got {batch_dims}")
+        if batch_dim_b is not None and batch_dim_out is not None and batch_dim_b != batch_dim_out:
+            raise ValueError(
+                f"Batch dimension of B and output must match in matrix-matrix product. Got "
+                f"{batch_dim_b} and {batch_dim_out}")
