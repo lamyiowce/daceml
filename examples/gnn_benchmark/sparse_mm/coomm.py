@@ -432,7 +432,11 @@ class COOMM(dace.sdfg.nodes.LibraryNode):
             raise ValueError(
                 f"Batch dimension of B and output must match in matrix-matrix product. Got "
                 f"{batch_dim_b} and {batch_dim_out}")
-
+        if batch_dim_out is not None and batch_dim_b is None:
+            raise ValueError(
+                "Batch SpMM with broadcasting the dense input matrix is "
+                "unsupported in cuSPARSE 11.4 due to a bug. "
+                "(https://github.com/NVIDIA/CUDALibrarySamples/issues/81)")
 
 # Number of rows and columns in A.
 N = dace.symbol('N')
