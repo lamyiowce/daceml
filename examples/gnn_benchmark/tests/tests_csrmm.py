@@ -66,7 +66,6 @@ def test_spmm_libnode(beta, transA):
     check_equal(expected_pred=expected_C, pred=C)
 
 
-
 def test_spmm_pure():
     A = torch.tensor([[1, 0, 3], [0, 2, 0], [0, 2., 4.5]])
     B = torch.tensor([[1., 1], [0, 0], [1, 0]])
@@ -80,8 +79,10 @@ def test_spmm_pure():
     print('Expected: \n', expected_C)
     assert np.allclose(C, expected_C)
 
+
 @pytest.mark.parametrize("transA", [True, False])
-@pytest.mark.parametrize("A_batch_size,B_batch_size", [(None, None), (None, 3), (3, 3)])
+@pytest.mark.parametrize("A_batch_size,B_batch_size",
+                         [(None, None), (None, 3), (3, 3)])
 # @pytest.mark.parametrize("transA", [True])
 # @pytest.mark.parametrize("A_batch_size,B_batch_size", [(None, 3)])
 def test_batched_spmm(A_batch_size, B_batch_size, transA):
@@ -109,7 +110,9 @@ def test_batched_spmm(A_batch_size, B_batch_size, transA):
     A_rowptrs = xp.copy(xp.asarray(A_rowptrs))
     A_columns = xp.copy(xp.asarray(A_columns))
     A_batch_size = 1 if A_batch_size is None else A_batch_size
-    A_vals = xp.ones((A_batch_size, A.nnz), dtype=xp.float32)
+    A_vals = xp.random.randint(low=-1, high=2,
+                               size=(A_batch_size, A.nnz)).astype(
+        dtype=xp.float32)
 
     print("NNZ: ", A.nnz)
     A_dense = xp.zeros((A_batch_size, *A_shape), dtype=xp.float32)
@@ -171,7 +174,8 @@ def test_many_stream_spmm():
         csrmm(A_rowptrs, A_cols, A_vals, B, C3, transA=False)
         C_sum[:] = C1 + C2 + C3
 
-    sdfg = compute_spmms.to_sdfg(A_rowptrs, A_columns, A_values, B, C1, C2, C3, C_sum)
+    sdfg = compute_spmms.to_sdfg(A_rowptrs, A_columns, A_values, B, C1, C2, C3,
+                                 C_sum)
     sdfg.apply_gpu_transformations()
     sdfg(A_rowptrs, A_columns, A_values, B, C1, C2, C3, C_sum)
 
