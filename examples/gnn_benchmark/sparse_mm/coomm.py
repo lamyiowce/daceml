@@ -437,6 +437,11 @@ class COOMM(dace.sdfg.nodes.LibraryNode):
                 "Batch SpMM with broadcasting the dense input matrix is "
                 "unsupported in cuSPARSE 11.4 due to a bug. "
                 "(https://github.com/NVIDIA/CUDALibrarySamples/issues/81)")
+        if len(batch_dims) == 3:
+            raise ValueError(
+                "Batch COOMM is buggy and gives incorrect results :( Only "
+                "batching of A is supported.")
+
 
 # Number of rows and columns in A.
 N = dace.symbol('N')
