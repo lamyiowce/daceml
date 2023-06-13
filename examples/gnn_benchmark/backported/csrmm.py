@@ -594,6 +594,7 @@ class ExpandCSRMMCpp(ExpandTransformation):
         # For getting the shape, we need to use the shape returned from _get_csrmm_operands
         # because then it is squeezed.
         _, avals, avals_shape, _ = operands['_a_vals']
+        _, _, arows_shape, _ = operands['_a_rows']
         b_shape = operands['_b'][2]
         c_shape = operands['_c'][2]
 
@@ -619,7 +620,6 @@ class ExpandCSRMMCpp(ExpandTransformation):
         # Set up options for code formatting
         opt = {}
 
-        opt['func'] = func
         opt['dtype'] = cdtype
 
         opt['alpha'] = alpha
@@ -627,12 +627,10 @@ class ExpandCSRMMCpp(ExpandTransformation):
 
         opt['nrows'] = c_shape[-2]
         opt['ncols'] = c_shape[-1]
-        opt['ldc'] = opt['ncols']
 
         opt['brows'] = b_shape[-2]
         opt['bcols'] = b_shape[-1]
-
-        opt['arows'] = c_shape[-2]
+        opt['arows'] = arows_shape[0] - 1
 
         opt['batch_size'] = c_shape[0] if len(c_shape) > 2 else 1
         opt['avals_batch_stride'] = avals_shape[1] if len(avals_shape) > 1 else 0
@@ -649,7 +647,7 @@ class ExpandCSRMMCpp(ExpandTransformation):
                     }}
                 }}
                 for (int b = 0; b < {batch_size}; b++) {{
-                    for (int i = 0; i < {nrows}; i++) {{
+                    for (int i = 0; i < {arows}; i++) {{
                         for (int k = 0; k < {ncols}; k++) {{
                             for (int j = _a_rows[i]; j < _a_rows[i + 1]; j++) {{
                                 auto column = _a_cols[j];
@@ -670,7 +668,7 @@ class ExpandCSRMMCpp(ExpandTransformation):
                     }}
                 }}
                 for (int b = 0; b < {batch_size}; b++) {{
-                    for (int i = 0; i < {nrows}; i++) {{
+                    for (int i = 0; i < {arows}; i++) {{
                         for (int k = 0; k < {ncols}; k++) {{
                             for (int j = _a_rows[i]; j < _a_rows[i + 1]; j++) {{
                                 auto column = _a_cols[j];

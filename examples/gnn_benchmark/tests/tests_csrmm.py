@@ -102,6 +102,7 @@ def test_batched_spmm(A_batch_size, B_batch_size, transA):
     A_vals = xp.copy(A_vals.squeeze())
 
     print("A: ", A_dense)
+    print("B: ", B)
     if not transA:
         expected_C = A_dense @ B + beta * C
     else:
