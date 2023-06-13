@@ -83,9 +83,11 @@ def test_spmm_pure():
 @pytest.mark.parametrize("transA", [True, False])
 @pytest.mark.parametrize("A_batch_size,B_batch_size",
                          [(None, None), (None, 3), (3, 3)])
+@pytest.mark.parametrize("N,M,F", [(3, 4, 2), (40, 30, 20)])
+@pytest.mark.parametrize("beta", [0.0, 1.0])
 # @pytest.mark.parametrize("transA", [True])
 # @pytest.mark.parametrize("A_batch_size,B_batch_size", [(None, 3)])
-def test_batched_spmm(A_batch_size, B_batch_size, transA):
+def test_batched_spmm(A_batch_size, B_batch_size, transA, N, M, F, beta):
     if torch.cuda.is_available():
         import cupy as xp
         import cupyx.scipy.sparse as xps
@@ -96,19 +98,16 @@ def test_batched_spmm(A_batch_size, B_batch_size, transA):
     np.random.seed(34)
 
     C_batch_size = A_batch_size or B_batch_size or 1
-    N = 3
-    M = 4
-    F = 2
     A_shape = (N, M) if not transA else (M, N)
     B_shape = (B_batch_size, M, F) if B_batch_size else (M, F)
-    beta = 0.0
     A = xps.random(*A_shape, density=0.5, format='csr')
     B = xp.random.randint(low=-2, high=2, size=B_shape).astype(xp.float32)
-    C = xp.zeros((C_batch_size, N, F), dtype=xp.float32)
+    C = xp.random.randint(low=-2, high=3, size=(C_batch_size, N, F)).astype(xp.float32) * 10
 
     A_rowptrs, A_columns = A.indptr, A.indices
     A_rowptrs = xp.copy(xp.asarray(A_rowptrs))
     A_columns = xp.copy(xp.asarray(A_columns))
+    A_columns = xp.copy(xp.concatenate([A_columns] * A_batch_size, axis=0))
     A_batch_size = 1 if A_batch_size is None else A_batch_size
     A_vals = xp.random.randint(low=-1, high=2,
                                size=(A_batch_size, A.nnz)).astype(
