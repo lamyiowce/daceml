@@ -29,11 +29,23 @@ def set_implementation(dace_module, implementation):
 @pytest.mark.parametrize("beta", [0.0, 1.0])
 @pytest.mark.parametrize("transA", [True, False])
 def test_spmm_libnode(beta, transA):
-    A = torch.tensor([[1, 0, 3], [0, 2, 0], [0, 2., 4.5]])
-    B = torch.tensor([[1., 1], [0, 0], [1, 0]])
-    C = torch.zeros((3, 2)) if beta == 0.0 else torch.rand(3, 2)
-    A_sparse = SparseTensor.from_dense(A)
-    A_rowptrs, A_columns, A_vals = A_sparse.csr()
+    if torch.cuda.is_available():
+        import cupy as xp
+        import cupyx.scipy.sparse as xps
+    else:
+        import numpy as xp
+        import scipy.sparse as xps
+
+    A = xp.array([[1, 0, 3], [0, 2, 0], [0, 2., 4.5]])
+    B = xp.array([[1., 1], [0, 0], [1, 0]])
+    C = xp.random.rand(3, 2)
+
+    A_sparse = xps.csr_matrix(A)
+
+    A_rowptrs = xp.array(A_sparse.indptr)
+    A_columns = xp.array(A_sparse.indices)
+    A_vals = xp.array(A_sparse.data)
+
     if not transA:
         expected_C = A @ B + beta * C
     else:
@@ -43,11 +55,16 @@ def test_spmm_libnode(beta, transA):
     def spmm(A_rowptrs, A_columns, A_vals, B, C):
         csrmm(A_rowptrs, A_columns, A_vals, B, C, beta=beta, transA=transA)
 
-    spmm(A_rowptrs, A_columns, A_vals, B, C)
+    sdfg = spmm.to_sdfg(A_rowptrs, A_columns, A_vals, B, C)
 
-    print('\nCalculated: \n', C)
-    print('Expected: \n', expected_C)
-    assert np.allclose(C, expected_C)
+    if os.environ.get('CUDA_VISIBLE_DEVICES', '') != '':
+        sdfg.apply_gpu_transformations()
+
+    sdfg(A_rowptrs, A_columns, A_vals, B, C)
+
+    sleep(1)
+    check_equal(expected_pred=expected_C, pred=C)
+
 
 
 def test_spmm_pure():
@@ -64,14 +81,16 @@ def test_spmm_pure():
     assert np.allclose(C, expected_C)
 
 @pytest.mark.parametrize("transA", [True, False])
-@pytest.mark.parametrize("A_batch_size,B_batch_size", [(None, None), (3, None), (None, 3), (3, 3)])
+@pytest.mark.parametrize("A_batch_size,B_batch_size", [(None, None), (None, 3), (3, 3)])
 # @pytest.mark.parametrize("transA", [True])
 # @pytest.mark.parametrize("A_batch_size,B_batch_size", [(None, 3)])
 def test_batched_spmm(A_batch_size, B_batch_size, transA):
     if torch.cuda.is_available():
         import cupy as xp
+        import cupyx.scipy.sparse as xps
     else:
         import numpy as xp
+        import scipy.sparse as xps
     xp.random.seed(23)
     np.random.seed(34)
 
@@ -82,24 +101,22 @@ def test_batched_spmm(A_batch_size, B_batch_size, transA):
     A_shape = (N, M) if not transA else (M, N)
     B_shape = (B_batch_size, M, F) if B_batch_size else (M, F)
     beta = 0.0
-    A = scipy.sparse.random(*A_shape, density=0.5, format='csr')
-    # B = xp.random.rand(*B_shape).astype(xp.float32)
-    B = xp.random.randint(low=-2, high=2, size=B_shape)
+    A = xps.random(*A_shape, density=0.5, format='csr')
+    B = xp.random.randint(low=-2, high=2, size=B_shape).astype(xp.float32)
     C = xp.zeros((C_batch_size, N, F), dtype=xp.float32)
 
     A_rowptrs, A_columns = A.indptr, A.indices
     A_rowptrs = xp.copy(xp.asarray(A_rowptrs))
     A_columns = xp.copy(xp.asarray(A_columns))
     A_batch_size = 1 if A_batch_size is None else A_batch_size
-    # A_vals = xp.random.rand(A_batch_size, A.nnz).astype(xp.float32)
     A_vals = xp.ones((A_batch_size, A.nnz), dtype=xp.float32)
 
     print("NNZ: ", A.nnz)
     A_dense = xp.zeros((A_batch_size, *A_shape), dtype=xp.float32)
     for i in range(A_batch_size):
         A.data[:] = A_vals[i]
-        A_dense[i] = xp.copy(A.todense())
-    A_vals = xp.copy(A_vals.squeeze())
+        A_dense[i, :, :] = A.todense()
+    A_vals = A_vals.squeeze()
 
     print("A: ", A_dense)
     print("B: ", B)
@@ -115,6 +132,9 @@ def test_batched_spmm(A_batch_size, B_batch_size, transA):
     sdfg = spmm.to_sdfg(A_rowptrs, A_columns, A_vals, B, C)
     if os.environ.get('CUDA_VISIBLE_DEVICES', '') != '':
         sdfg.apply_gpu_transformations()
+
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
 
     sdfg(A_rowptrs, A_columns, A_vals, B, C)
 
@@ -166,3 +186,12 @@ def test_many_stream_spmm():
     assert np.allclose(C3.cpu().numpy(), expected_single)
     assert np.allclose(C1.cpu().numpy(), expected_single)
     assert np.allclose(C_sum.cpu().numpy(), 3 * expected_single)
+
+
+if __name__ == '__main__':
+    test_batched_spmm(A_batch_size=None, B_batch_size=None, transA=False)
+    test_batched_spmm(A_batch_size=None, B_batch_size=None, transA=True)
+    test_batched_spmm(A_batch_size=None, B_batch_size=2, transA=False)
+    test_batched_spmm(A_batch_size=None, B_batch_size=2, transA=True)
+    test_batched_spmm(A_batch_size=2, B_batch_size=2, transA=False)
+    test_batched_spmm(A_batch_size=2, B_batch_size=2, transA=True)

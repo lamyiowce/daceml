@@ -492,7 +492,7 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
                     // Set batch sizes and strides.
                     dace::sparse::CheckCusparseError( cusparseDnMatSetStridedBatch(matC, {num_batches}, {c_batch_stride}) );
                     dace::sparse::CheckCusparseError( cusparseDnMatSetStridedBatch(matB, {num_batches}, {b_batch_stride}) );
-                    dace::sparse::CheckCusparseError( cusparseCsrSetStridedBatch(matA, {num_batches}, {avals_batch_stride}) );
+                    dace::sparse::CheckCusparseError( cusparseCsrSetStridedBatch(matA, {num_batches}, /*rowptrs_batch_stride=*/0, {avals_batch_stride}) );
                 """
         else:
             set_batches = ""
@@ -846,3 +846,8 @@ class CSRMM(dace.sdfg.nodes.LibraryNode):
             raise ValueError(
                 f"Batch dimension of B and output must match in matrix-matrix product. Got "
                 f"{batch_dim_b} and {batch_dim_out}")
+        if batch_dim_out is not None and batch_dim_b is None:
+            raise ValueError(
+                "Batch SpMM with broadcasting the dense input matrix is "
+                "unsupported in cuSPARSE 11.4 due to a bug. "
+                "(https://github.com/NVIDIA/CUDALibrarySamples/issues/81)")
