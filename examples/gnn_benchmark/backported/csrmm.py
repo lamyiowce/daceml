@@ -350,16 +350,14 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         node.validate(sdfg, state)
 
         operands = _get_csrmm_operands(node, state, sdfg)
-        arows = operands['_a_rows'][1]
+        _, arows, arows_shape, _ = operands['_a_rows']
         acols = operands['_a_cols'][1]
-        avals = operands['_a_vals'][1]
-        bdesc = operands['_b'][1]
+        _, avals, avals_shape, _ = operands['_a_vals']
+        _, bdesc, b_shape, _ = operands['_b']
         cdesc = sdfg.arrays[state.out_edges(node)[0].data.data]
         # We need to use the shapes computed by _get_csrmm_operands, because it holds the
         # squeezed shapes. Otherwise, we would get the wrong shapes in case the input has
         # shape 2, 1, 4, for example.
-        avals_shape = operands['_a_vals'][2]
-        b_shape = operands['_b'][2]
         c_shape = operands['_c'][2]
 
         # If buffers are not on the GPU, copy them.
@@ -456,6 +454,7 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         opt['alpha'] = alpha
         opt['beta'] = beta
 
+        # We use reverse indexing to support the batched case.
         opt['nrows'] = c_shape[-2]
         opt['ncols'] = c_shape[-1]
         opt['ldc'] = opt['ncols']
@@ -464,15 +463,40 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
         opt['bcols'] = b_shape[-1]
         opt['ldb'] = opt['bcols']
 
-        opt['arows'] = c_shape[-2]
-        if node.transB:
+        opt['arows'] = arows_shape[-1] - 1
+        if node.transA:
+            # Number of A cols is the number of rows in C.
+            # A: M x N (to be transposed), B: M x K, C: N x K
+            opt['acols'] = c_shape[-2]
+        elif not node.transA and node.transB:
+            # Number of A cols is the number of columns in B.
+            # A: N x M, B: K x M (to be transposed), C: N x K
             opt['acols'] = b_shape[-1]
-        else:
+        elif not node.transA and not node.transB:
+            # Number of A cols is the number of rows in B.
+            # A: N x M, B: M x K, C: N x K
             opt['acols'] = b_shape[-2]
+
 
         opt['annz'] = avals_shape[-1]
 
         opt['algo'] = 'CUSPARSE_SPMM_CSR_ALG2'
+
+        opt['num_batches'] = c_shape[0] if len(c_shape) > 2 else 1
+        opt['avals_batch_stride'] = avals_shape[1] if len(avals_shape) > 1 else 0
+        opt['b_batch_stride'] = b_shape[1] * b_shape[2] if len(b_shape) > 2 else 0
+        opt['c_batch_stride'] = c_shape[1] * c_shape[2] if len(c_shape) > 2 else 0
+
+        if opt['num_batches'] > 1:
+            set_batches = """
+                    // Set batch sizes and strides.
+                    dace::sparse::CheckCusparseError( cusparseDnMatSetStridedBatch(matC, {num_batches}, {c_batch_stride}) );
+                    dace::sparse::CheckCusparseError( cusparseDnMatSetStridedBatch(matB, {num_batches}, {b_batch_stride}) );
+                    dace::sparse::CheckCusparseError( cusparseCsrSetStridedBatch(matA, {num_batches}, {avals_batch_stride}) );
+                """
+        else:
+            set_batches = ""
+        opt['set_batch_sizes_and_strides'] = set_batches.format_map(opt)
 
         call = """
             cusparseSpMatDescr_t matA;
@@ -488,7 +512,9 @@ class ExpandCSRMMCuSPARSE(ExpandTransformation):
             // Create dense matrix C
             dace::sparse::CheckCusparseError( cusparseCreateDnMat(&matC, {nrows}, {ncols}, {ldc}, {arr_prefix}_c,
                                                 {compute}, {layout}) );
-                                                
+            
+            {set_batch_sizes_and_strides}
+            
             // Get the size of the additional buffer that's needed.
             size_t bufferSize;
             dace::sparse::CheckCusparseError( cusparseSpMM_bufferSize(
