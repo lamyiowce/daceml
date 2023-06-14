@@ -1,4 +1,7 @@
+from typing import Tuple
+
 import dace
+import numpy as np
 
 
 class MeasurableOp:
@@ -52,10 +55,31 @@ class Csrmm(MeasurableOp):
 
     def min_memory(self):
         # Load: entry values, input matrix, output matrix.
-        val_bytes = (
-                            self.nnz + self.N * self.M + self.N * self.F) * self.val_bytes
+        val_count = self.nnz + self.N * self.M + self.N * self.F
+        val_bytes = val_count * self.val_bytes
         # Load: column indices, rowptrs.
         idx_bytes = (self.nnz + self.N + 1) * self.idx_bytes
         return val_bytes + idx_bytes
 
 
+class Reduce(MeasurableOp):
+    def __init__(self, shape: Tuple, axis: int,
+                 val_dtype: dace.dtypes.typeclass):
+        self.shape = shape
+        self.axis = axis
+        self.val_dtype = val_dtype
+
+    def flops(self):
+        # The reduction operation requires (M-1) additions for each axis entry,
+        # where M is the size of the axis. We need to perform this for all
+        # other axes.
+        axis_size = self.shape[self.axis]
+        other = np.prod(self.shape[:self.axis] + self.shape[self.axis + 1:])
+        return (axis_size - 1) * other
+
+    def min_memory(self):
+        input_bytes = np.prod(self.shape) * self.val_dtype.bytes
+        # We only need to load the whole output shape reduced along chosen axis.
+        other = np.prod(self.shape[:self.axis] + self.shape[self.axis + 1:])
+        output_bytes = other * self.val_dtype.bytes
+        return input_bytes + output_bytes
