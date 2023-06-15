@@ -42,3 +42,6 @@ for dataset in $datasets; do
     done
   done
 done
+
+echo "Done :)"
+
