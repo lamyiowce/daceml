@@ -66,7 +66,7 @@ def make_roofline_plot(full_df, name, dataset: str, backward: bool,
         # Plot the different problem sizes with size labels at each point.
         plt.plot(x_df[col], y_df[col], label=DEFAULT_LABEL_MAP[col],
                  marker='o', markersize=5, linewidth=1, alpha=0.8)
-        for i, row in x_df[col].iteritems():
+        for i, row in x_df[col].items():
             plt.annotate(f'{i}', (row, y_df[col][i]),
                          xytext=(row * 1.01, y_df[col][i] * 1.01), fontsize=8)
 
