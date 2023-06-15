@@ -2,78 +2,76 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 
-
-def get_flops_df(full_df, name):
-    df = full_df.pivot(index='Size', columns='Name', values='Mean')
-    if name == 'gcn-single-ogbn-arxiv':
-        num_nodes = 169343
-        num_edges = 1166243
-        num_features = 128
-    elif name == 'gcn-single-cora':
-        num_nodes = 2708
-        num_edges = 10556
-        num_features = 1433
-    else:
-        raise ValueError(f'Unknown name: {name}')
-    # This just need to be multiplied by hidden_size:
-    # flop = 2 * num_nodes * num_features * hidden_size + 2 * num_edges * hidden_size + num_nodes * hidden_size
-    flop_base = 2 * num_nodes * num_features + 2 * num_edges + num_nodes
-    print(df)
-    flop = df.index * flop_base / (1000 * 1000 * 1000 * 1000)  # tflops
-    print(df)
-    df_flops = pd.DataFrame()
-    print(df_flops)
-    for col in df.columns:
-        df_flops[col] = flop / (df[col] / 1000)
-    print(df_flops)
-
-    mem = 4 * (
-            4 * num_nodes * df.index + num_nodes * num_nodes + 4 * df.index * num_edges + df.index) / 1000 / 1000 / 1000
-    op_int = np.zeros((len(df.index), len(df.columns)))
-    for i, col in enumerate(df_flops.columns):
-        op_int[:, i] = df_flops[col] * 1000 / mem  # FLOPS / B
-
-    df_op_int = pd.DataFrame(op_int, index=df.index, columns=df.columns)
-    print(op_int)
-    print("FLOPS", df_flops)
-    print("Op INT", df_op_int)
-    return df, df_flops, df_op_int
+from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
+    DEFAULT_LABEL_MAP
+from examples.gnn_benchmark.report.plot_performance import get_numbers
 
 
-def make_roofline_plot(df, name):
+def make_roofline_plot(full_df, name, dataset: str, backward: bool,
+                       labels=None, title=None):
     """Make a roofline plot for V100-PCIE-16GB."""
-    _, df_flops, df_op_int = get_flops_df(df, name)
-    df_flops = df_flops * 1000  # GFLOPS
+    assert 'single' in name
+    df = get_numbers(full_df, dataset, backward=backward)
+    y_df = df.pivot(index='Size', columns='Name', values='Performance')
+    x_df = df.pivot(index='Size', columns='Name', values='Op intensity')
+
     ax = plt.figure(figsize=(8, 5))
     # Set both axes to logarithmic scaling.
     plt.xscale('log')
     plt.yscale('log')
 
     # Set axis limits.
-    # plt.xlim(1e-1, 1e2)
-    plt.ylim(1e-1, 1e5)
+    # plt.xlim(x_df.min().min() * 0.9, x_df.max().max()* 1.1)
+    # plt.ylim(1e-1, 1e5)
 
     # Set axis labels.
     plt.xlabel('Operational Intensity [FLOP/Byte]')
-    plt.ylabel('Performance [GFLOP/s]')
+    plt.ylabel('Performance [TFLOP/s]')
 
     # Plot the theoretical performance peak for V100.
-    peak_v100 = 14 * 1000  # https://images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf
-    plt.plot([1e-1, 1e2], [peak_v100, peak_v100], color='black')
-    plt.text(1, peak_v100 * 1.1, f'Theoretical FP32: {peak_v100 / 1000} TFLOP/s', rotation=0,
+    peak_v100 = 14  # https://images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf
+    mem_bound = 900 / 1024  # tb / s
+
+    intersect_x = peak_v100 / mem_bound
+    intersect_y = peak_v100
+
+    plt.plot([0, intersect_x], [peak_v100, intersect_y], color='gray',
+             linestyle='--',
+             linewidth=1)
+    plt.plot([intersect_x, 1e6], [intersect_y, peak_v100], color='black',
+             linestyle='-',
+             linewidth=1)
+
+    plt.text(intersect_x * 1.2, intersect_y,
+             f'Theoretical FP32: {peak_v100} TFLOP/s', rotation=0,
              verticalalignment='bottom',
              horizontalalignment='left', fontsize=12)
 
     # Plot the memory bound.
-    mem_bound = 900  # gb / s
-    plt.plot([1 / mem_bound, peak_v100 / mem_bound], [1, peak_v100], color='black')
-    plt.text(1, mem_bound * 1.1, f'HBM bandwidth: {mem_bound} GB/s', rotation=32,
+    plt.plot([0, intersect_x], [0, intersect_y], color='black', linestyle='-',
+             linewidth=1)
+    plt.plot([intersect_x, peak_v100 * 1.5],
+             [intersect_y, mem_bound * peak_v100 * 1.5],
+             color='gray', linestyle='--', linewidth=1)
+    plt.text(1, mem_bound * 1.1, f'HBM bandwidth: {mem_bound * 1024} GB/s',
+             rotation=45,
              rotation_mode='anchor',
-             fontsize=12)
+             fontsize=12, transform_rotates_text=True)
 
-    for col in df_flops.columns:
-        plt.plot(df_op_int[col], df_flops[col], label=col)
+    L2_mem_bound = 4198 / 1024
+    plt.plot([0, peak_v100], [0, L2_mem_bound * peak_v100], color='gray',
+             linestyle='--', linewidth=1)
 
+    for col in x_df.columns:
+        # Plot the different problem sizes with size labels at each point.
+        plt.plot(x_df[col], y_df[col], label=DEFAULT_LABEL_MAP[col],
+                 marker='o', markersize=5, linewidth=1, alpha=0.8)
+        for i, row in x_df[col].iteritems():
+            plt.annotate(f'{i}', (row, y_df[col][i]),
+                         xytext=(row * 1.01, y_df[col][i] * 1.01), fontsize=8)
+
+    if title is not None:
+        plt.title(title)
     plt.legend()
     plt.tight_layout()
     plt.savefig(f'{name}-roofline.pdf')
@@ -81,9 +79,15 @@ def make_roofline_plot(df, name):
 
 
 def main():
-    cora_single_df = pd.read_csv('gcn-single-cora.csv')
-    make_roofline_plot(cora_single_df, name='gcn-single-cora',)
-    # make_roofline_plot(arxiv_single_df, name='gcn-single-ogbn-arxiv',)
+    cora_filenames = ['15.06.11.23-gcn_single_layer-cora-203685.csv']
+    cora_df, cora_bwd_df = read_many_dfs(cora_filenames, backward=True)
+    make_roofline_plot(cora_df, name='gcn-single-cora', dataset='cora',
+                       backward=False, title='GCN Cora FWD')
+
+    arxiv_filenames = ['15.06.12.59-gcn_single_layer-ogbn-arxiv-203691.csv']
+    arxiv_df, arxiv_bwd_df = read_many_dfs(arxiv_filenames, backward=True)
+    make_roofline_plot(arxiv_df, name='gcn-single-arxiv', dataset='arxiv',
+                       backward=False, title='GCN OGB Arxiv FWD')
 
 
 if __name__ == '__main__':

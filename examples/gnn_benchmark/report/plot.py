@@ -1,31 +1,9 @@
-from pathlib import Path
-
-import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
-DATA_FOLDER = Path(__file__).parent / 'data'
-PLOT_FOLDER = Path(__file__).parent / 'plots'
+from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
+    DATA_FOLDER, PLOT_FOLDER, DEFAULT_LABEL_MAP
 
-DEFAULT_LABEL_MAP = {
-    'torch_csr': 'Torch CSR',
-    'torch_edge_list': 'Torch Edge List',
-    'torch_dgnn': 'Torch DGNN-GAT',
-    'dace_csr': 'Dace CSR',
-    'dace_csr_adapt': 'Dace CSR (adapt MM order)',
-    'dace_coo': 'Dace COO',
-    'dace_coo_adapt': 'Dace COO (adapt MM order)',
-    'dace_csc': 'Dace CSC',
-    'dace_csr_coo_adapt': 'Dace CSR/COO adapt, CSR 50%',
-    'dace_csr_coo': 'Dace CSR/COO, CSR 50%',
-}
-DEFAULT_LABEL_MAP.update(
-    {f'dace_csr_coo_adapt-0.{i}': f'Dace CSR/COO adapt, CSR {i}0%' for i in
-     range(3, 9)})
-
-DEFAULT_LABEL_MAP.update(
-    {f'{key}_compiled': f'{name} (compiled)' for key, name in DEFAULT_LABEL_MAP.items() if
-     'torch' in key})
 
 
 def get_colors(names: pd.Series):
@@ -50,7 +28,7 @@ def get_colors(names: pd.Series):
 
 def prep_df(full_df):
     full_df = full_df.drop_duplicates(subset=['Size', 'Model', 'Name'])
-    df = full_df.pivot(index='Size', columns='Name', values='Mean')
+    df = full_df.pivot(index='Size', columns='Name', values='Median')
     std_df = full_df.pivot(index='Size', columns='Name', values='Stdev')
     print(df)
     sorted_cols = sorted(df.columns,
@@ -126,75 +104,6 @@ def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False):
         PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {name}.pdf',
         bbox_inches='tight')
     plt.show()
-
-
-def make_performance_plot(full_df, name, labels=None, title=None):
-    assert 'single' in name
-    df, df_flops, _ = get_flops_df(full_df, name)
-
-    colors = get_colors(df.columns)
-    default_labels = DEFAULT_LABEL_MAP.copy()
-    default_labels.update(labels or {})
-    labels = default_labels
-
-    ax = df_flops.plot(figsize=(5, 5), kind='barh', ylabel='Runtime [ms]',
-                       xlabel='Hidden size', color=colors)
-    ax.set_axisbelow(True)
-    ax.yaxis.grid(color='lightgray', linestyle='--')
-    ax.set_xlabel("Performance [TFLOP / s]")
-    ax.set_ylabel("Hidden size")
-
-    labels = [labels.get(name, name) for name in df.columns]
-    plt.legend(labels, loc='lower center')
-    peak_v100 = 14  # https://images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf
-    ax.plot([peak_v100, peak_v100], [-10, 10], color='black', linestyle='--',
-            linewidth=1)
-    ax.text(peak_v100 * 0.95, 1, f'V100 peak: {peak_v100} TFLOP / s',
-            rotation=90,
-            verticalalignment='center',
-            horizontalalignment='left', fontsize=12)
-    ax.set_xlim(xmax=peak_v100 * 1.1)
-    plt.title(title or name.upper())
-    plt.xticks(rotation=0)
-
-    for container in ax.containers:
-        if hasattr(container, 'patches'):
-            ax.bar_label(container, fmt="%.2f")
-
-    plt.tight_layout()
-    plt.savefig(
-        PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {name}-performance.pdf',
-        bbox_inches='tight')
-    plt.show()
-
-
-def read_many_dfs(filenames, name_to_replace=None, backward: bool = True,
-                  names=None, name_fns=None):
-    dfs = []
-    bwd_dfs = []
-    names = names or filenames
-    name_fns = name_fns or [None] * len(filenames)
-    assert len(names) == len(filenames)
-    assert len(name_fns) == len(filenames)
-    for filename, name, name_fn in zip(filenames, names, name_fns):
-        df_temp = pd.read_csv(DATA_FOLDER / filename, comment='#')
-        if name_to_replace:
-            dace_rows = df_temp['Name'].str.contains(name_to_replace)
-            df_temp.loc[dace_rows, 'Name'] = df_temp.loc[
-                dace_rows, 'Name'].apply(
-                name_fn) if name_fn else name
-        dfs.append(df_temp)
-        if backward:
-            bwd_path = DATA_FOLDER / filename.replace('.csv', '-bwd.csv')
-            df_temp = pd.read_csv(bwd_path, comment='#')
-            if name_to_replace:
-                dace_rows = df_temp['Name'].str.contains(name_to_replace)
-                df_temp.loc[dace_rows, 'Name'] = df_temp.loc[
-                    dace_rows, 'Name'].apply(
-                    name_fn) if name_fn else name
-            bwd_dfs.append(df_temp)
-
-    return pd.concat(dfs), pd.concat(bwd_dfs) if backward else None
 
 
 def plot_compare_csr_coo_cutoffs():
