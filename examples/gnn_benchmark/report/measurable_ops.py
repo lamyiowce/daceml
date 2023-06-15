@@ -3,6 +3,8 @@ from typing import Tuple
 import dace
 import numpy as np
 
+WRITE_FACTOR = 2
+
 
 class MeasurableOp:
     """Base class for operations that can be measured in terms of FLOPS and
@@ -21,6 +23,7 @@ class Matmul(MeasurableOp):
     # A @ B
     # A: N x M
     # B: M x F
+    # Output: N x F
     def __init__(self, N: int, M: int, F: int,
                  val_dtype: dace.dtypes.typeclass):
         self.N = N
@@ -32,8 +35,9 @@ class Matmul(MeasurableOp):
         return 2 * self.N * self.M * self.F
 
     def min_memory(self):
-        return (
-                self.N * self.M + self.M * self.F + self.N * self.F) * self.val_dtype.bytes
+        # Load A, B, store C (requires read and write).
+        mem_count = self.N * self.M + self.M * self.F + WRITE_FACTOR * self.N * self.F
+        return mem_count * self.val_dtype.bytes
 
 
 class Csrmm(MeasurableOp):
@@ -54,8 +58,9 @@ class Csrmm(MeasurableOp):
         return 2 * self.nnz * self.F
 
     def min_memory(self):
-        # Load: entry values, input matrix, output matrix.
-        val_count = self.nnz + self.N * self.M + self.N * self.F
+        # Load: entry values, input matrix, output matrix (write requires read
+        # and write).
+        val_count = self.nnz + self.N * self.M + WRITE_FACTOR * self.N * self.F
         val_bytes = val_count * self.val_bytes
         # Load: column indices, rowptrs.
         idx_bytes = (self.nnz + self.N + 1) * self.idx_bytes
@@ -80,6 +85,27 @@ class Reduce(MeasurableOp):
     def min_memory(self):
         input_bytes = np.prod(self.shape) * self.val_dtype.bytes
         # We only need to load the whole output shape reduced along chosen axis.
-        other = np.prod(self.shape[:self.axis] + self.shape[self.axis + 1:])
-        output_bytes = other * self.val_dtype.bytes
+        output_count = np.prod(self.shape[:self.axis] + self.shape[self.axis + 1:])
+        output_bytes = WRITE_FACTOR * output_count * self.val_dtype.bytes
         return input_bytes + output_bytes
+
+
+class AddBias(MeasurableOp):
+    # A = A + b, where A is a tensor (e.g., N x M) and b is a vector (e. g., M).
+    def __init__(self, shape: Tuple, axis: int,
+                 val_dtype: dace.dtypes.typeclass):
+        assert len(shape) < axis
+        self.shape = shape
+        self.axis = axis
+        self.val_dtype = val_dtype
+
+    def flops(self):
+        # We need to add the bias to each entry of the input.
+        op_count = np.prod(self.shape)
+        return op_count
+
+    def min_memory(self):
+        input_bytes = np.prod(self.shape) * self.val_dtype.bytes
+        bias_bytes = self.shape[self.axis] * self.val_dtype.bytes
+        output_bytes = WRITE_FACTOR * np.prod(self.shape) * self.val_dtype.bytes
+        return input_bytes + output_bytes + bias_bytes
