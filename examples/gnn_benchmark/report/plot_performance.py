@@ -55,7 +55,7 @@ def make_performance_plot(full_df, name, dataset: str, backward: bool,
             linewidth=1)
     ax.text(peak_v100 * 0.95, 1, f'V100 peak: {peak_v100} TFLOP / s',
             rotation=90,
-            verticalalignment='center',
+            verticalalignment='bottom',
             horizontalalignment='left', fontsize=12)
     ax.set_xlim(xmax=peak_v100 * 1.1)
     plt.title(title or name.upper())
