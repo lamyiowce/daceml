@@ -4,7 +4,16 @@ from examples.gnn_benchmark.report.measurable_ops import MeasurableOp, Csrmm, \
     Matmul, Reduce, AddBias
 
 
-class GCNConvCSR(MeasurableOp):
+class CompositeOp(MeasurableOp):
+
+    def flops(self):
+        return sum([op.flops() for op in self.subops])
+
+    def min_memory(self):
+        return sum([op.min_memory() for op in self.subops])
+
+
+class GCNConvCSR(CompositeOp):
     """Estimations for GCNConvCSR node."""
     impl_name = 'csr'
 
@@ -19,21 +28,15 @@ class GCNConvCSR(MeasurableOp):
         self.idx_dtype = idx_dtype
         self.do_bias = do_bias
 
-        self.sub_ops = [
+        self.subops = [
             Csrmm(N=num_nodes, M=num_nodes, F=F_out, nnz=num_entries,
                   val_dtype=val_dtype, idx_dtype=idx_dtype),
             Matmul(N=num_nodes, M=F_in, F=F_out, val_dtype=val_dtype),
             AddBias(shape=(num_nodes, F_out), axis=1, val_dtype=val_dtype)
         ]
 
-    def flops(self):
-        return sum([op.flops() for op in self.sub_ops])
 
-    def min_memory(self):
-        return sum([op.min_memory() for op in self.sub_ops])
-
-
-class GCNConvCSRAdapt(MeasurableOp):
+class GCNConvCSRAdapt(CompositeOp):
     """Estimations for GCNConvCSRAdapt node."""
     impl_name = 'csr_adapt'
 
@@ -49,21 +52,15 @@ class GCNConvCSRAdapt(MeasurableOp):
         self.do_bias = do_bias
 
         # A.t @ (X @ W) or (A.t @ X) @ W, whichever is cheaper.
-        self.sub_ops = [
+        self.subops = [
             Csrmm(N=num_nodes, M=num_nodes, F=min(F_in, F_out), nnz=num_entries,
                   val_dtype=val_dtype, idx_dtype=idx_dtype),
             Matmul(N=num_nodes, M=F_in, F=F_out, val_dtype=val_dtype),
             AddBias(shape=(num_nodes, F_out), axis=1, val_dtype=val_dtype)
         ]
 
-    def flops(self):
-        return sum([op.flops() for op in self.sub_ops])
 
-    def min_memory(self):
-        return sum([op.min_memory() for op in self.sub_ops])
-
-
-class BackwardGCNConvCSR(MeasurableOp):
+class BackwardGCNConvCSR(CompositeOp):
     impl_name = 'csr'
 
     def __init__(self, num_nodes: int, F_in: int, F_out: int,
@@ -98,15 +95,9 @@ class BackwardGCNConvCSR(MeasurableOp):
 
         self.subops = weight_grad_subops + input_grad_subops + bias_grad_subops
 
-    def flops(self):
-        return sum([op.flops() for op in self.subops])
 
-    def min_memory(self):
-        return sum([op.min_memory() for op in self.subops])
-
-
-class BackwardGCNConvCSRAdapt(MeasurableOp):
-    impl_name = 'csr'
+class BackwardGCNConvCSRAdapt(CompositeOp):
+    impl_name = 'csr_adapt'
 
     def __init__(self, num_nodes: int, F_in: int, F_out: int,
                  num_entries: int, val_dtype: dace.dtypes.typeclass,
@@ -141,14 +132,9 @@ class BackwardGCNConvCSRAdapt(MeasurableOp):
 
         self.subops = weight_grad_subops + input_grad_subops + bias_grad_subops
 
-    def flops(self):
-        return sum([op.flops() for op in self.subops])
-
-    def min_memory(self):
-        return sum([op.min_memory() for op in self.subops])
 
 
-# class GATConvCSR(MeasurableOp):
+# class GATConvCSR(CompositeOp):
 #     def __init__(self, num_nodes: int, heads: int, F_in: int, F_out: int,
 #                  num_entries: int, val_dtype: dace.dtypes.typeclass,
 #                  idx_dtype: dace.dtypes.typeclass, do_bias: bool):

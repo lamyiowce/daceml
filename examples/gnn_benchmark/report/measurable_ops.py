@@ -94,7 +94,7 @@ class AddBias(MeasurableOp):
     # A = A + b, where A is a tensor (e.g., N x M) and b is a vector (e. g., M).
     def __init__(self, shape: Tuple, axis: int,
                  val_dtype: dace.dtypes.typeclass):
-        assert len(shape) < axis
+        assert axis < len(shape)
         self.shape = shape
         self.axis = axis
         self.val_dtype = val_dtype
