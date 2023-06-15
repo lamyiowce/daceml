@@ -5,7 +5,6 @@ from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
     DATA_FOLDER, PLOT_FOLDER, DEFAULT_LABEL_MAP
 
 
-
 def get_colors(names: pd.Series):
     reds_intense = ['gold', 'orange', 'darkorange']
     reds = ['indianred', 'lightcoral', 'lightsalmon', 'pink']
@@ -121,31 +120,53 @@ def plot_compare_csr_coo_cutoffs():
 
 
 def main():
-    # 06.06 Plot GAT fwd with multiple spmm kernels and permutations.
-
+    # 15.06 plot GCN forward single layer.
     arxiv_df, arxiv_bwd_df = read_many_dfs(
         filenames=[
-            '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
-            '06.06.16.48-pyg-gat-ogbn-arxiv-203173.csv',
-            '08.06.12.40-gat-ogbn-arxiv-203320.csv',
-            '09.06.12.55-gat-ogbn-arxiv-203470.csv',
+            '15.06.12.59-gcn_single_layer-ogbn-arxiv-203691.csv',
+            '15.06.13.39-pyg-gcn_single_layer-ogbn-arxiv-203692.csv',
         ],
-        backward=False
+        backward=True
     )
     plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
-                  plot_title="GAT, OGB Arxiv", sizes=[8, 16, 32, 64, 128, 256])
+                  plot_title="GCN Single Layer, OGB Arxiv", sizes=[8, 16, 32, 64, 128, 256])
 
     cora_df, cora_bwd_df = read_many_dfs(
-        filenames=['18.05.14.43-pyg-gat-cora-198393.csv',
-                   '18.05.14.59-pyg-gat-cora-198400.csv',
-                   '06.06.16.41-pyg-gat-cora-203173.csv',
-                   '08.06.12.33-gat-cora-203320.csv',
-                   '09.06.12.50-gat-cora-203470.csv'
-                   ],
-        backward=False
+        filenames=[
+            '15.06.11.23-gcn_single_layer-cora-203685.csv',
+            '15.06.13.34-pyg-gcn_single_layer-cora-203692.csv',
+        ],
+        backward=True
     )
     plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
-                  plot_title="GAT, Cora", sizes=[8, 16, 32, 64, 128, 256])
+                  plot_title="GCN Single Layer, Cora", sizes=[8, 16, 32, 64, 128, 256])
+
+    # 06.06 Plot GAT fwd with multiple spmm kernels and permutations.
+    #
+    # arxiv_df, arxiv_bwd_df = read_many_dfs(
+    #     filenames=[
+    #         '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
+    #         '06.06.16.48-pyg-gat-ogbn-arxiv-203173.csv',
+    #         '08.06.12.40-gat-ogbn-arxiv-203320.csv',
+    #         '09.06.12.55-gat-ogbn-arxiv-203470.csv',
+    #     ],
+    #     backward=False
+    # )
+    # plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
+    #               plot_title="GAT, OGB Arxiv", sizes=[8, 16, 32, 64, 128, 256])
+    #
+    # cora_df, cora_bwd_df = read_many_dfs(
+    #     filenames=['18.05.14.43-pyg-gat-cora-198393.csv',
+    #                '18.05.14.59-pyg-gat-cora-198400.csv',
+    #                '06.06.16.41-pyg-gat-cora-203173.csv',
+    #                '08.06.12.33-gat-cora-203320.csv',
+    #                '09.06.12.50-gat-cora-203470.csv'
+    #                ],
+    #     backward=False
+    # )
+    # plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
+    #               plot_title="GAT, Cora", sizes=[8, 16, 32, 64, 128, 256])
+    #
 
     # # 06.06 Plot GCN after block size adaptation.
     # This is actually incorrect! some kernels are not run!!!!
