@@ -16,7 +16,6 @@ conda activate torch2
 module load cuda/11.8.0
 export LIBRARY_PATH=/users/jbazinsk/miniconda3/envs/torch2/lib/:$LIBRARY_PATH
 
-rm -rf ./.dacecache
 
 do_test=
 
@@ -31,7 +30,6 @@ for dataset in $datasets; do
   outfile=./$(date +%d.%m.%H.%M)-pyg-$model-$dataset-$SLURM_JOB_ID.csv
   for hidden in $hidden_sizes; do
     echo "Hidden " $hidden
-    rm -rf .dacecache
     for m in $modes; do
       $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --backward --torch $m
     done
