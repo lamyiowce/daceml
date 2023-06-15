@@ -42,9 +42,9 @@ def compute_all(layer_name, hidden_sizes, datasets, layers, filename,
                      layer.flops() / layer.min_memory())]
 
     df = pd.DataFrame(output,
-                      columns=['model', 'impl', 'dataset', 'hidden_size',
-                               'flops', 'gigaflops', 'min_memory_bytes',
-                               'min_memory_gb', 'op_intensity'])
+                      columns=['Model', 'Impl', 'Dataset', 'Size',
+                               'Flops', 'Gigaflops', 'Min memory bytes',
+                               'Min memory gb', 'Op intensity'])
     df.to_csv(filename, index=False)
 
 
@@ -58,12 +58,12 @@ def main():
     backward_gcn_layers = [BackwardGCNConvCSR, BackwardGCNConvCSRAdapt]
 
     compute_all('gcn_single_layer', hidden_sizes, datasets, gcn_layers,
-                'gcn_numbers.csv', val_dtype=dace.float32,
+                'gcn-numbers.csv', val_dtype=dace.float32,
                 idx_dtype=dace.int32,
                 do_bias=True)
 
-    compute_all('gcn_backward_single_layer', hidden_sizes, datasets,
-                backward_gcn_layers, 'gcn_numbers_bwd.csv',
+    compute_all('gcn_single_layer', hidden_sizes, datasets,
+                backward_gcn_layers, 'gcn-numbers-bwd.csv',
                 val_dtype=dace.float32,
                 idx_dtype=dace.int32,
                 do_bias=True,
