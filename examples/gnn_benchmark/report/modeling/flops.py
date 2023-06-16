@@ -3,8 +3,9 @@ import dataclasses
 import dace
 import pandas as pd
 
-from examples.gnn_benchmark.report.measurable_layers import GCNConvCSR, \
-    GCNConvCSRAdapt, BackwardGCNConvCSR, BackwardGCNConvCSRAdapt
+from examples.gnn_benchmark.report.modeling.measurable_layers import GCNConvCSR, \
+    GCNConvCSRAdapt, BackwardGCNConvCSR, BackwardGCNConvCSRAdapt, GCNConvCOO, GCNConvCOOAdapt, \
+    BackwardGCNConvCOO, BackwardGCNConvCOOAdapt
 
 
 @dataclasses.dataclass
@@ -33,6 +34,7 @@ def compute_all(layer_name, hidden_sizes, datasets, layers, filename,
                                        F_out=hidden_size,
                                        num_entries=dataset.num_edges,
                                        **layer_kwargs)
+                print(f"{dataset.name}, {hidden_size}: {layer}")
                 output += [
                     (layer_name, layer.impl_name, dataset.name, hidden_size,
                      layer.flops(),
@@ -54,8 +56,8 @@ def main():
 
     hidden_sizes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048]
     datasets = [CoraStats, ArxivStats]
-    gcn_layers = [GCNConvCSR, GCNConvCSRAdapt]
-    backward_gcn_layers = [BackwardGCNConvCSR, BackwardGCNConvCSRAdapt]
+    gcn_layers = [GCNConvCSR, GCNConvCSRAdapt, GCNConvCOO, GCNConvCOOAdapt]
+    backward_gcn_layers = [BackwardGCNConvCSR, BackwardGCNConvCSRAdapt, BackwardGCNConvCOO, BackwardGCNConvCOOAdapt]
 
     compute_all('gcn_single_layer', hidden_sizes, datasets, gcn_layers,
                 'gcn-numbers.csv', val_dtype=dace.float32,

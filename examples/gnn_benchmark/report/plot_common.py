@@ -27,7 +27,7 @@ DEFAULT_LABEL_MAP.update(
      'torch' in key})
 
 PLOT_FOLDER = Path(__file__).parent / 'plots'
-
+MODELING_FOLDER = Path(__file__).parent / 'modeling'
 
 def read_many_dfs(filenames, name_to_replace=None, backward: bool = True,
                   names=None, name_fns=None):
