@@ -5,7 +5,8 @@ import pandas as pd
 
 from examples.gnn_benchmark.report.modeling.measurable_layers import GCNConvCSR, \
     GCNConvCSRAdapt, BackwardGCNConvCSR, BackwardGCNConvCSRAdapt, GCNConvCOO, GCNConvCOOAdapt, \
-    BackwardGCNConvCOO, BackwardGCNConvCOOAdapt
+    BackwardGCNConvCOO, BackwardGCNConvCOOAdapt, GCNConvCSC, GCNConvCSCAdapt, \
+    BackwardGCNConvCSCAdapt, BackwardGCNConvCSC
 
 
 @dataclasses.dataclass
@@ -56,8 +57,10 @@ def main():
 
     hidden_sizes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048]
     datasets = [CoraStats, ArxivStats]
-    gcn_layers = [GCNConvCSR, GCNConvCSRAdapt, GCNConvCOO, GCNConvCOOAdapt]
-    backward_gcn_layers = [BackwardGCNConvCSR, BackwardGCNConvCSRAdapt, BackwardGCNConvCOO, BackwardGCNConvCOOAdapt]
+    gcn_layers = [GCNConvCSR, GCNConvCSRAdapt, GCNConvCOO, GCNConvCOOAdapt, GCNConvCSC,
+                  GCNConvCSCAdapt]
+    backward_gcn_layers = [BackwardGCNConvCSR, BackwardGCNConvCSRAdapt, BackwardGCNConvCOO,
+                           BackwardGCNConvCOOAdapt, BackwardGCNConvCSC, BackwardGCNConvCSCAdapt]
 
     compute_all('gcn_single_layer', hidden_sizes, datasets, gcn_layers,
                 'gcn-numbers.csv', val_dtype=dace.float32,

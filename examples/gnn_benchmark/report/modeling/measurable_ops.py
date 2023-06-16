@@ -79,6 +79,33 @@ class Csrmm(MeasurableOp):
         return val_bytes + idx_bytes
 
 
+class Cscmm(MeasurableOp):
+    # A @ B
+    # A: N x M, CSC format, nnz non-zero entries
+    # B: M x F
+    def __init__(self, N: int, M: int, F: int, nnz: int,
+                 val_dtype: dace.dtypes.typeclass,
+                 idx_dtype: dace.dtypes.typeclass):
+        self.N = N
+        self.M = M
+        self.F = F
+        self.nnz = nnz
+        self.val_bytes = val_dtype.bytes
+        self.idx_bytes = idx_dtype.bytes
+
+    def flops(self):
+        return 2 * self.nnz * self.F
+
+    def min_memory(self):
+        # Load: entry values, input matrix, output matrix (write requires read
+        # and write).
+        val_count = self.nnz + self.M * self.F + WRITE_FACTOR * self.N * self.F
+        val_bytes = val_count * self.val_bytes
+        # Load: column indices, rowptrs.
+        idx_bytes = (self.nnz + self.M + 1) * self.idx_bytes
+        return val_bytes + idx_bytes
+
+
 class Coomm(MeasurableOp):
     # A @ B
     # A: N x M, COO format, nnz non-zero entries
