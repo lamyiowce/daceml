@@ -13,6 +13,7 @@ DEFAULT_LABEL_MAP = {
     'dace_coo': 'Dace COO',
     'dace_coo_adapt': 'Dace COO (adapt MM order)',
     'dace_csc': 'Dace CSC',
+    'dace_csc_adapt': 'Dace CSC (adapt MM order)',
     'dace_csr_coo_adapt': 'Dace CSR/COO adapt, CSR 50%',
     'dace_csr_coo': 'Dace CSR/COO, CSR 50%',
 }

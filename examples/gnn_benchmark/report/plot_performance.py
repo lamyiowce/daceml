@@ -5,7 +5,7 @@ from examples.gnn_benchmark.report.plot import get_colors
 from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
     PLOT_FOLDER, DEFAULT_LABEL_MAP, MODELING_FOLDER
 
-fwd_filenames = ['gcn-numbers.csv']
+fwd_filenames = ['gcn-numbers.csv', 'gat-8_heads-numbers.csv']
 bwd_filenames = ['gcn-numbers-bwd.csv']
 
 
@@ -35,10 +35,13 @@ def get_numbers(df: pd.DataFrame, dataset: str, backward: bool = False):
 
 
 def make_performance_plot(full_df, name, dataset: str, backward: bool,
-                          labels=None, title=None, drop_names=None):
+                          labels=None, title=None, drop_names=None, drop_sizes=None):
     assert 'single' in name
     drop_names = drop_names or []
     full_df = full_df[~full_df['Name'].isin(drop_names)]
+    full_df.reset_index(inplace=True)
+    drop_sizes = drop_sizes or []
+    full_df = full_df[~full_df['Size'].isin(drop_sizes)]
     full_df.reset_index(inplace=True)
 
     df = get_numbers(full_df, dataset, backward=backward)
@@ -84,31 +87,62 @@ def make_performance_plot(full_df, name, dataset: str, backward: bool,
 
 
 def plot_performance_gcn():
+    drop_sizes = [8, 32, 128, 512]
     drop_names = ['torch_edge_list']
 
     cora_filenames = [
         '15.06.11.23-gcn_single_layer-cora-203685.csv',
         '15.06.13.34-pyg-gcn_single_layer-cora-203692.csv',
+        '16.06.12.39-pyg-gcn_single_layer-cora-203725.csv',
     ]
     cora_df, cora_bwd_df = read_many_dfs(cora_filenames, backward=True)
     make_performance_plot(cora_df, 'gcn-single-cora', dataset='cora',
-                          backward=False, drop_names=drop_names, title='Performance: GCN FWD, Cora')
+                          backward=False, drop_names=drop_names, drop_sizes=drop_sizes,
+                          title='Performance: GCN FWD, Cora')
     make_performance_plot(cora_bwd_df, 'gcn-single-cora', dataset='cora',
-                          backward=True, drop_names=drop_names, title='Performance: GCN BWD, Cora')
+                          backward=True, drop_names=drop_names, drop_sizes=drop_sizes,
+                          title='Performance: GCN BWD, Cora')
 
     arxiv_filenames = [
         '15.06.12.59-gcn_single_layer-ogbn-arxiv-203691.csv',
         '15.06.13.39-pyg-gcn_single_layer-ogbn-arxiv-203692.csv',
+        '16.06.11.00-gcn_single_layer-ogbn-arxiv-203723.csv',
+        '16.06.12.41-pyg-gcn_single_layer-ogbn-arxiv-203725.csv',
     ]
     arxiv_df, arxiv_bwd_df = read_many_dfs(arxiv_filenames, backward=True)
     make_performance_plot(arxiv_df, 'gcn-single-arxiv', dataset='arxiv',
-                          backward=False, drop_names=drop_names, title='Performance: GCN FWD, OGB Arxiv')
+                          backward=False, drop_names=drop_names,
+                          drop_sizes=drop_sizes,
+                          title='Performance: GCN FWD, OGB Arxiv')
     make_performance_plot(arxiv_bwd_df, 'gcn-single-arxiv', dataset='arxiv',
-                          backward=True, drop_names=drop_names, title='Performance: GCN BWD, OGB Arxiv')
+                          backward=True, drop_names=drop_names,
+                          drop_sizes=drop_sizes,
+                          title='Performance: GCN BWD, OGB Arxiv')
+
+
+def plot_performance_gat():
+    cora_filenames = [
+        '16.06.12.32-gat_single_layer-cora-203724.csv',
+        '16.06.12.58-pyg-gat_single_layer-cora-203727.csv',
+    ]
+    cora_df, cora_bwd_df = read_many_dfs(cora_filenames, backward=False)
+    make_performance_plot(cora_df, 'gat-single-cora', dataset='cora',
+                          backward=False, drop_names=None, drop_sizes=drop_sizes,
+                          title='Performance: GAT FWD, Cora')
+
+    arxiv_filenames = [
+            '16.06.12.42-gat_single_layer-ogbn-arxiv-203724.csv',
+            '16.06.13.06-pyg-gat_single_layer-ogbn-arxiv-203727.csv',
+    ]
+    arxiv_df, arxiv_bwd_df = read_many_dfs(arxiv_filenames, backward=False)
+    make_performance_plot(arxiv_df, 'gat-single-arxiv', dataset='arxiv',
+                          backward=False, drop_names=None,
+                          title='Performance: GAT FWD, OGB Arxiv')
 
 
 def main():
-    plot_performance_gcn()
+    # plot_performance_gcn()
+    plot_performance_gat()
 
 
 if __name__ == '__main__':

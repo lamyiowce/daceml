@@ -8,10 +8,13 @@ from examples.gnn_benchmark.report.plot_performance import get_numbers
 
 
 def make_roofline_plot(full_df, name, dataset: str, backward: bool,
-                       labels=None, title=None):
+                       labels=None, title=None, drop_names=None):
     """Make a roofline plot for V100-PCIE-16GB."""
     assert 'single' in name
     df = get_numbers(full_df, dataset, backward=backward)
+    drop_names = drop_names or []
+    df = df[~df['Name'].isin(drop_names)]
+    df.reset_index(inplace=True)
     y_df = df.pivot(index='Size', columns='Name', values='Performance')
     x_df = df.pivot(index='Size', columns='Name', values='Op intensity')
 
@@ -22,7 +25,15 @@ def make_roofline_plot(full_df, name, dataset: str, backward: bool,
 
     # Set axis limits.
     # plt.xlim(x_df.min().min() * 0.9, x_df.max().max()* 1.1)
-    # plt.ylim(1e-1, 1e5)
+    if dataset == 'cora' and 'gcn' in name:
+        plt.xlim(0.3, 2e2)
+        plt.ylim(1e-1, 20)
+    elif dataset == 'arxiv' and 'gcn' in name:
+        plt.xlim(0.3, 2e2)
+        plt.ylim(0.3, 20)
+    else:
+        plt.xlim(min(x_df.min().min() * 0.9, 0.3), max(x_df.max().max() * 1.1, 80))
+        plt.ylim(min(y_df.min().min() * 0.9, 0.5), max(y_df.max().max() * 1.1, 20))
 
     # Set axis labels.
     plt.xlabel('Operational Intensity [FLOP/Byte]')
@@ -59,8 +70,12 @@ def make_roofline_plot(full_df, name, dataset: str, backward: bool,
              fontsize=12, transform_rotates_text=True)
 
     L2_mem_bound = 4198 / 1024
-    plt.plot([0, peak_v100], [0, L2_mem_bound * peak_v100], color='gray',
+    plt.plot([0, peak_v100], [0, L2_mem_bound * peak_v100], color='darkgray',
              linestyle='--', linewidth=1)
+    plt.text(1, L2_mem_bound * 1.1, f'L2 bandwidth: {L2_mem_bound * 1024} GB/s',
+             rotation=77.5,
+             rotation_mode='anchor',
+             fontsize=12, transform_rotates_text=True)
 
     for col in x_df.columns:
         # Plot the different problem sizes with size labels at each point.
@@ -78,26 +93,51 @@ def make_roofline_plot(full_df, name, dataset: str, backward: bool,
     plt.show()
 
 
-def main():
-    cora_filenames = [
-        '15.06.11.23-gcn_single_layer-cora-203685.csv',
-        '15.06.13.34-pyg-gcn_single_layer-cora-203692.csv',
-    ]
-    cora_df, cora_bwd_df = read_many_dfs(cora_filenames, backward=True)
-    make_roofline_plot(cora_df, name='gcn-single-cora', dataset='cora',
-                       backward=False, title='GCN, Cora, FWD')
-    make_roofline_plot(cora_bwd_df, name='gcn-single-cora', dataset='cora',
-                       backward=True, title='GCN, Cora, BWD')
+def read_and_plot(filenames, dataset, model, backward, drop_names=None):
+    df, bwd_df = read_many_dfs(filenames, backward=backward)
+    make_roofline_plot(df, name=f'{model}_{dataset}', dataset=dataset,
+                       backward=False, title=f'{model.upper()}, {dataset.capitalize()}, Forward',
+                       drop_names=drop_names)
+    if backward:
+        make_roofline_plot(bwd_df, name=f'{model}_{dataset}', dataset=dataset,
+                           backward=True,
+                           title=f'{model.upper()}, {dataset.capitalize()}, Backward',
+                           drop_names=drop_names)
 
-    arxiv_filenames = [
-        '15.06.12.59-gcn_single_layer-ogbn-arxiv-203691.csv',
-        '15.06.13.39-pyg-gcn_single_layer-ogbn-arxiv-203692.csv',
+
+def main():
+    drop_names = ['dace_csr', 'dace_coo', 'torch_csr', 'dace_csc', 'torch_edge_list']
+
+    # cora_gcn_filenames = [
+    #     '15.06.11.23-gcn_single_layer-cora-203685.csv',
+    #     '15.06.13.34-pyg-gcn_single_layer-cora-203692.csv',
+    #     '16.06.12.39-pyg-gcn_single_layer-cora-203725.csv',
+    # ]
+    # read_and_plot(cora_gcn_filenames, dataset='cora', model='gcn_single_layer',
+    #               drop_names=drop_names, backward=True)
+    #
+    # arxiv_filenames = [
+    #     '15.06.12.59-gcn_single_layer-ogbn-arxiv-203691.csv',
+    #     '15.06.13.39-pyg-gcn_single_layer-ogbn-arxiv-203692.csv',
+    #     '16.06.11.00-gcn_single_layer-ogbn-arxiv-203723.csv',
+    #     '16.06.12.41-pyg-gcn_single_layer-ogbn-arxiv-203725.csv',
+    # ]
+    # read_and_plot(arxiv_filenames, dataset='arxiv', model='gcn_single_layer',
+    #               drop_names=drop_names, backward=True)
+
+    drop_names = ['torch_csr', 'torch_edge_list']
+    cora_gat_filenames = [
+        '16.06.12.32-gat_single_layer-cora-203724.csv',
+        '16.06.12.58-pyg-gat_single_layer-cora-203727.csv',
     ]
-    arxiv_df, arxiv_bwd_df = read_many_dfs(arxiv_filenames, backward=True)
-    make_roofline_plot(arxiv_df, name='gcn-single-arxiv', dataset='arxiv',
-                       backward=False, title='GCN, OGB Arxiv, FWD')
-    make_roofline_plot(arxiv_bwd_df, name='gcn-single-arxiv', dataset='arxiv',
-                       backward=True, title='GCN, OGB Arxiv, BWD')
+    read_and_plot(cora_gat_filenames, dataset='cora', model='gat_single_layer',
+                  backward=False, drop_names=drop_names)
+    arxiv_gat_filenames = [
+        '16.06.12.42-gat_single_layer-ogbn-arxiv-203724.csv',
+        '16.06.13.06-pyg-gat_single_layer-ogbn-arxiv-203727.csv',
+    ]
+    read_and_plot(arxiv_gat_filenames, dataset='arxiv', model='gat_single_layer',
+                  backward=False, drop_names=drop_names)
 
 
 if __name__ == '__main__':
