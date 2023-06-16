@@ -79,15 +79,25 @@ def make_roofline_plot(full_df, name, dataset: str, backward: bool,
 
 
 def main():
-    cora_filenames = ['15.06.11.23-gcn_single_layer-cora-203685.csv']
+    cora_filenames = [
+        '15.06.11.23-gcn_single_layer-cora-203685.csv',
+        '15.06.13.34-pyg-gcn_single_layer-cora-203692.csv',
+    ]
     cora_df, cora_bwd_df = read_many_dfs(cora_filenames, backward=True)
     make_roofline_plot(cora_df, name='gcn-single-cora', dataset='cora',
-                       backward=False, title='GCN Cora FWD')
+                       backward=False, title='GCN, Cora, FWD')
+    make_roofline_plot(cora_bwd_df, name='gcn-single-cora', dataset='cora',
+                       backward=True, title='GCN, Cora, BWD')
 
-    arxiv_filenames = ['15.06.12.59-gcn_single_layer-ogbn-arxiv-203691.csv']
+    arxiv_filenames = [
+        '15.06.12.59-gcn_single_layer-ogbn-arxiv-203691.csv',
+        '15.06.13.39-pyg-gcn_single_layer-ogbn-arxiv-203692.csv',
+    ]
     arxiv_df, arxiv_bwd_df = read_many_dfs(arxiv_filenames, backward=True)
     make_roofline_plot(arxiv_df, name='gcn-single-arxiv', dataset='arxiv',
-                       backward=False, title='GCN OGB Arxiv FWD')
+                       backward=False, title='GCN, OGB Arxiv, FWD')
+    make_roofline_plot(arxiv_bwd_df, name='gcn-single-arxiv', dataset='arxiv',
+                       backward=True, title='GCN, OGB Arxiv, BWD')
 
 
 if __name__ == '__main__':
