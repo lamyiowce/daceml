@@ -382,27 +382,3 @@ class BackwardGCNConvCSCAdapt(CompositeOp):
         self.subops = weight_grad_subops + input_grad_subops + bias_grad_subops
 
 
-# class GATConvCSR(CompositeOp):
-#     def __init__(self, num_nodes: int, heads: int, F_in: int, F_out: int,
-#                  num_entries: int, val_dtype: dace.dtypes.typeclass,
-#                  idx_dtype: dace.dtypes.typeclass, do_bias: bool):
-#         self.num_nodes = num_nodes
-#         self.heads = heads
-#         self.F_in = F_in
-#         self.F_out = F_out
-#         self.num_entries = num_entries
-#         self.val_dtype = val_dtype
-#         self.idx_dtype = idx_dtype
-#         self.do_bias = do_bias
-#
-#         self.subops = [
-#             # Compute H'
-#             Matmul(N=num_nodes, M=F_in, F=F_out, val_dtype=val_dtype),
-#             # Compute alpha_src, alpha_dst.
-#             Matmul(N=num_nodes, M=F_out, F=1, val_dtype=val_dtype),
-#             Matmul(N=num_nodes, M=F_out, F=1, val_dtype=val_dtype),
-#
-#             # Compute output.
-#             Csrmm(N=num_nodes, M=num_nodes, F=F_out, nnz=num_entries,
-#                     val_dtype=val_dtype, idx_dtype=idx_dtype),
-#         ]

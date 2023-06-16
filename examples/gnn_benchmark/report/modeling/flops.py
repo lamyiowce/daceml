@@ -3,6 +3,7 @@ import dataclasses
 import dace
 import pandas as pd
 
+from examples.gnn_benchmark.report.modeling.measurable_gat import GATConvCSR, GATConvCOO
 from examples.gnn_benchmark.report.modeling.measurable_layers import GCNConvCSR, \
     GCNConvCSRAdapt, BackwardGCNConvCSR, BackwardGCNConvCSRAdapt, GCNConvCOO, GCNConvCOOAdapt, \
     BackwardGCNConvCOO, BackwardGCNConvCOOAdapt, GCNConvCSC, GCNConvCSCAdapt, \
@@ -72,8 +73,20 @@ def main():
                 val_dtype=dace.float32,
                 idx_dtype=dace.int32,
                 do_bias=True,
-                compute_input_grad=True
-                )
+                compute_input_grad=True)
+
+    gat_layers = [GATConvCSR, GATConvCOO]
+    compute_all('gat_single_layer', hidden_sizes, datasets, gat_layers,
+                'gat-8_heads-numbers.csv', val_dtype=dace.float32,
+                idx_dtype=dace.int32,
+                heads=8,
+                do_bias=True)
+
+    compute_all('gat_single_layer', hidden_sizes, datasets, gat_layers,
+                'gat-1_heads-numbers.csv', val_dtype=dace.float32,
+                idx_dtype=dace.int32,
+                heads=1,
+                do_bias=True)
 
 
 if __name__ == '__main__':
