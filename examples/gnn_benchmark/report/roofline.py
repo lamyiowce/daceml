@@ -108,22 +108,22 @@ def read_and_plot(filenames, dataset, model, backward, drop_names=None):
 def main():
     drop_names = ['dace_csr', 'dace_coo', 'torch_csr', 'dace_csc', 'torch_edge_list']
 
-    # cora_gcn_filenames = [
-    #     '15.06.11.23-gcn_single_layer-cora-203685.csv',
-    #     '15.06.13.34-pyg-gcn_single_layer-cora-203692.csv',
-    #     '16.06.12.39-pyg-gcn_single_layer-cora-203725.csv',
-    # ]
-    # read_and_plot(cora_gcn_filenames, dataset='cora', model='gcn_single_layer',
-    #               drop_names=drop_names, backward=True)
-    #
-    # arxiv_filenames = [
-    #     '15.06.12.59-gcn_single_layer-ogbn-arxiv-203691.csv',
-    #     '15.06.13.39-pyg-gcn_single_layer-ogbn-arxiv-203692.csv',
-    #     '16.06.11.00-gcn_single_layer-ogbn-arxiv-203723.csv',
-    #     '16.06.12.41-pyg-gcn_single_layer-ogbn-arxiv-203725.csv',
-    # ]
-    # read_and_plot(arxiv_filenames, dataset='arxiv', model='gcn_single_layer',
-    #               drop_names=drop_names, backward=True)
+    cora_gcn_filenames = [
+        '15.06.11.23-gcn_single_layer-cora-203685.csv',
+        '15.06.13.34-pyg-gcn_single_layer-cora-203692.csv',
+        '16.06.12.39-pyg-gcn_single_layer-cora-203725.csv',
+    ]
+    read_and_plot(cora_gcn_filenames, dataset='cora', model='gcn_single_layer',
+                  drop_names=drop_names, backward=True)
+
+    arxiv_filenames = [
+        '15.06.12.59-gcn_single_layer-ogbn-arxiv-203691.csv',
+        '15.06.13.39-pyg-gcn_single_layer-ogbn-arxiv-203692.csv',
+        '16.06.11.00-gcn_single_layer-ogbn-arxiv-203723.csv',
+        '16.06.12.41-pyg-gcn_single_layer-ogbn-arxiv-203725.csv',
+    ]
+    read_and_plot(arxiv_filenames, dataset='arxiv', model='gcn_single_layer',
+                  drop_names=drop_names, backward=True)
 
     drop_names = ['torch_csr', 'torch_edge_list']
     cora_gat_filenames = [
