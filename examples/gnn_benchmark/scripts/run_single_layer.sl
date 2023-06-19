@@ -20,13 +20,13 @@ do_test=
 
 export DACE_default_build_folder=./.dacecache-$SLURM_JOB_ID
 export DACE_compiler_cuda_max_concurrent_streams=-1
-model=gcn_single_layer
-formats="csr coo csr_adapt coo_adapt csc_adapt"
 
+model=gat_single_layer
+formats="csr coo"
 datasets="cora ogbn-arxiv"
-backward=--backward
+backward=
 #hidden_sizes="8 32 128 512 2048"
-hidden_sizes="8 16 32 64 128 256 512 1024"
+hidden_sizes="8 16 32 64 128 256"
 
 echo "Running model " $model
 for dataset in $datasets; do
@@ -35,7 +35,6 @@ for dataset in $datasets; do
   for hidden in $hidden_sizes; do
     echo "Hidden " $hidden
     rm -rf $DACE_default_build_folder
-    #    $do_test python benchmark.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl none $backward
     for format in $formats; do
       echo "Format " $format
       $do_test python main.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl $format --torch none $backward
