@@ -127,7 +127,7 @@ def plot_performance_gat():
     ]
     cora_df, cora_bwd_df = read_many_dfs(cora_filenames, backward=False)
     make_performance_plot(cora_df, 'gat-single-cora', dataset='cora',
-                          backward=False, drop_names=None, drop_sizes=drop_sizes,
+                          backward=False, drop_names=None, drop_sizes=None,
                           title='Performance: GAT FWD, Cora')
 
     arxiv_filenames = [
@@ -141,7 +141,7 @@ def plot_performance_gat():
 
 
 def main():
-    # plot_performance_gcn()
+    plot_performance_gcn()
     plot_performance_gat()
 
 
