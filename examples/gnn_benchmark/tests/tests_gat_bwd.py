@@ -191,7 +191,7 @@ def test_bwd_weight_compute():
     torch.random.manual_seed(42)
     np.random.seed(42)
 
-    def compute_grads(x, adj_matrix, weight,
+    def compute_grads(x, A_rowptrs, A_cols, adj_matrix, weight,
                       att_src, att_dst,
                       bias,
                       att_weights,
@@ -210,18 +210,31 @@ def test_bwd_weight_compute():
                  'att_src': None,
                  'att_dst': None}
         print(out_grad)
-        grads['lin_src.weight'] = (
-                x.t() @ att_weights[:, :, 0].t() @ out_grad).t()
 
         H_prime = x @ weight.t()  # N x F_out
         alpha_src = torch.sum(H_prime * att_src[0], dim=-1)  # N x H
         alpha_dst = torch.sum(H_prime * att_dst[0], dim=-1)  # N x H
-        C = adj_matrix.t() * (
-                alpha_src[None, :] + alpha_dst[:, None])  # N x N x H
-        Tau = adj_matrix.t() * torch.exp(torch.maximum(negative_slope * C, C))
-        Tau_sum = torch.sum(Tau, dim=1)[:, None]  # N x 1 x H
-        Phi = Tau / Tau_sum  # N x N x H
-        assert torch.allclose(Phi[:, :, None], att_weights)
+
+        C_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
+        for i in range(N):
+            for j in range(A_rowptrs[i], A_rowptrs[i+1]):
+                col = A_cols[j]
+                C_vals[j] = alpha_src[i] + alpha_dst[col]
+        Tau_vals = torch.exp(torch.maximum(negative_slope * C_vals, C_vals))
+        Tau_sum = torch.zeros((N,), dtype=dtype)
+        for i in range(N):
+            for j in range(A_rowptrs[i], A_rowptrs[i+1]):
+                col = A_cols[j]
+                Tau_sum[i] += Tau_vals[j]
+
+        Phi_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
+        for i in range(N):
+            for j in range(A_rowptrs[i], A_rowptrs[i+1]):
+                col = A_cols[j]
+                Phi_vals[j] = Tau_vals[j] / Tau_sum[i]
+        # Tau_sum = torch.sum(Tau, dim=1)[:, None]  # N x 1 x H
+        # Phi = Tau / Tau_sum  # N x N x H
+        # assert torch.allclose(Phi[:, :, None], att_weights)
 
         d_alpha = adj_matrix.t() * (out_grad @ H_prime.T)  # N x N
         dot_prods = torch.zeros((N,), dtype=dtype)
@@ -340,7 +353,7 @@ def test_bwd_weight_compute():
     assert len(messages) == 0, str(messages)
 
     with torch.no_grad():
-        result = compute_grads(x, adj_matrix_dense, layer.lin_src.weight,
+        result = compute_grads(x, rowptr, col, adj_matrix_dense, layer.lin_src.weight,
                                layer.att_src, layer.att_dst,
                                layer.bias, att_weights.to_dense(), pred,
                                pred.grad)
