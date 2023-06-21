@@ -36,6 +36,7 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
         "csr": gat_implementations.GATConvCSR,
         "coo": gat_implementations.GATConvCOO,
         "csr_stable": gat_implementations.GATConvCSRStable,
+        "csc": gat_implementations.GATConvCSC,
     }
 }
 name_to_impl_class['gcn_single_layer'] = name_to_impl_class['gcn']
@@ -101,7 +102,7 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
     if device.type == 'cuda':
         set_reduce_implementation = functools.partial(
             sdfg_util.set_reduce_implementation, implementation_name='GPUAuto')
-        add_hook(dace_model, "set_reeduce_implementation", set_reduce_implementation, backward)
+        add_hook(dace_model, "set_reduce_implementation", set_reduce_implementation, backward)
 
     if persistent_mem:
         print("---> Adding persistent memory hook.")

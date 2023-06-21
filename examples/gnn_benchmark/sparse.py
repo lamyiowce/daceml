@@ -120,15 +120,22 @@ class CscGraph(SparseGraph):
                  idx_dtype: Optional[torch.dtype] = None
                  ):
         idx_dtype = idx_dtype or rows.dtype
-        sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols)
+        N = node_features.shape[0]
+        sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols, sparse_sizes=(N, N))
         colptrs, rows, edge_vals = sparse.csc()
-        self.edge_vals = edge_vals.contiguous()
+        if edge_vals is not None:
+            self.edge_vals = edge_vals.contiguous()
+        else:
+            self.edge_vals = None
         self.colptrs = colptrs.to(idx_dtype).contiguous()
         self.rows = rows.to(idx_dtype).contiguous()
         super().__init__(node_features)
 
     def data_list(self):
-        return self.colptrs, self.rows, self.edge_vals
+        if self.edge_vals:
+            return self.colptrs, self.rows, self.edge_vals
+        else:
+            return self.colptrs, self.rows
 
 
 class HybridCsrCooGraph(SparseGraph):
