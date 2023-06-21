@@ -212,7 +212,7 @@ def auto_optimize(sdfg: dace.SDFG, cuda, simplify=False, fold_constants=True):
     """
     # avoid import loop
     from daceml import transformation
-
+    sdfg.validate()
     log.debug("Applying automatic optimizations")
     if fold_constants:
         log.debug("Applying constant folding")
@@ -227,6 +227,8 @@ def auto_optimize(sdfg: dace.SDFG, cuda, simplify=False, fold_constants=True):
         sdfg,
         dace.DeviceType.GPU if cuda else dace.DeviceType.CPU,
         blocklist=["MKL"])
+
+    sdfg.validate()
     if simplify:
         log.debug("Applying simplification transforms")
         # there is a nondeterministic bug in redundant array that appears if
