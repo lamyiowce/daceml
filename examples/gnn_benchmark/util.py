@@ -89,7 +89,8 @@ def create_dace_model(model: torch.nn.Module,
 
 def add_hook(dace_model: DaceModule, name: str, fn: Callable, backward: bool):
     if not backward:
-        dace_model.append_post_onnx_hook(name + "_post_onnx", lambda model: fn(model.sdfg))
+        dace_model.append_post_onnx_hook(name + "_post_onnx",
+                                         lambda model: fn(model.sdfg))
     else:
         dace_model.append_post_autodiff_hook(name + "_post_autodiff",
                                              sdfg_util.apply_to_both(fn))
@@ -102,11 +103,9 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
     if device.type == 'cuda':
         set_reduce_implementation = functools.partial(
             sdfg_util.set_reduce_implementation, implementation_name='GPUAuto')
-        add_hook(dace_model, "set_reduce_implementation", set_reduce_implementation, backward)
+        add_hook(dace_model, "set_reduce_implementation",
+                 set_reduce_implementation, backward)
 
-    if persistent_mem:
-        print("---> Adding persistent memory hook.")
-        specialize_mem_onnx(dace_model)
     if threadblock_dynamic:
         print("---> Adding threadblock dynamic maps hook.")
         exclude_loops = []
@@ -143,36 +142,54 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
 
     # if device.type == 'cuda':
 
-        # add_hook(dace_model, "make_outer_map_seq", change_out_map_schedule_fn, backward)
+    # add_hook(dace_model, "make_outer_map_seq", change_out_map_schedule_fn, backward)
 
-        # set_coomm_implementation = functools.partial(
-        #     sdfg_util.set_library_node_implementation, implementation_name='cuSPARSE',
-        #     node_name='COOMM',
-        #     schedule=dace.dtypes.ScheduleType.GPU_Device)
-        #
-        # add_hook(dace_model, "set_coomm_implementation", set_coomm_implementation, backward)
-        #
-        # set_csrmm_implementation = functools.partial(
-        #     sdfg_util.set_library_node_implementation, implementation_name='cuSPARSE',
-        #     node_name='CSRMM',
-        #     schedule=dace.dtypes.ScheduleType.GPU_Device)
-        #
-        # add_hook(dace_model, "set_csrmm_implementation", set_csrmm_implementation, backward)
+    # set_coomm_implementation = functools.partial(
+    #     sdfg_util.set_library_node_implementation, implementation_name='cuSPARSE',
+    #     node_name='COOMM',
+    #     schedule=dace.dtypes.ScheduleType.GPU_Device)
+    #
+    # add_hook(dace_model, "set_coomm_implementation", set_coomm_implementation, backward)
+    #
+    # set_csrmm_implementation = functools.partial(
+    #     sdfg_util.set_library_node_implementation, implementation_name='cuSPARSE',
+    #     node_name='CSRMM',
+    #     schedule=dace.dtypes.ScheduleType.GPU_Device)
+    #
+    # add_hook(dace_model, "set_csrmm_implementation", set_csrmm_implementation, backward)
 
     if do_opt:
         print("---> Adding auto-opt hook.")
-        add_hook(dace_model, "dace_auto_optimize", apply_dace_auto_optimize, backward)
+        add_hook(dace_model, "dace_auto_optimize", apply_dace_auto_optimize,
+                 backward)
+
+    if persistent_mem:
+        print("---> Adding persistent memory hook.")
+        specialize_mem_onnx(dace_model)
+
     fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(
         backward_sdfg, '__tmp3')
     dace_model.append_post_autodiff_hook("Set __tmp3 to register", fn)
 
-    fn = lambda forward_sdfg, backward_sdfg: sdfg_util.set_memory_to_register(
-        backward_sdfg, '__tmp1', expected_shape=(1, 1))
-    dace_model.append_post_autodiff_hook("Set __tmp1 to register", fn)
+    fn = functools.partial(sdfg_util.set_memory_to_register,
+                           array_name='__tmp1',
+                           expected_shape=(1, 1))
+    add_hook(dace_model, "Set __tmp1 to register", fn, backward)
+    # dace_model.append_post_onnx_hook("Set __tmp1 to register", fn)
+    # dace_model.append_post_autodiff_hook("Set __tmp1 to register", fn)
+
+    # def set_node_to_persistent(sdfg: dace.SDFG, array_name: str = "__tmp7"):
+    #     for node, subsdfg in sdfg.all_nodes_recursive():
+    #         if isinstance(node, dace.nodes.AccessNode) and node.data == array_name:
+    #             arr = subsdfg.arrays[node.data]
+    #             print(f"Setting Lifetime for {node} to persistent.")
+    #             arr.storage = dace.dtypes.AllocationLifetime.Persistent
+    # add_hook(dace_model, "set_tmp7_to_persistent", set_node_to_persistent, backward)
 
     # add_hook(dace_model, "simplify", simplify_hook, backward=backward)
 
-    add_hook(dace_model, "flatten_blocks_for_1d_maps", sdfg_util.flatten_blocks_for_1d_maps,
+    add_hook(dace_model, "flatten_blocks_for_1d_maps",
+             sdfg_util.flatten_blocks_for_1d_maps,
              backward=backward)
 
     print("/////////////////////")
