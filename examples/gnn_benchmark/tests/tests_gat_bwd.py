@@ -55,10 +55,8 @@ def setup_data(N, F_in, F_out, heads, seed=42):
     graph.data = np.ones_like(graph.data)
     adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(dtype))
     print("ADJ matrix", adj_matrix)
-    rowptr, col, _ = adj_matrix.csr()
-    rowptr_t, col_t, _ = adj_matrix.t().csr()
     random_mask = torch.arange(N * F_out).resize(N, F_out).to(dtype) / 10
-    return adj_matrix, col_t, layer, random_mask, rowptr_t, x
+    return adj_matrix, layer, random_mask, x
 
 
 def gat_forward(N: int, A: sparse.csr_matrix, H: np.ndarray,
@@ -232,7 +230,7 @@ def test_mygat():
     F_out = 4
     heads = 1
 
-    adj_matrix, col_t, layer, random_mask, rowptr_t, x = setup_data(N, F_in, F_out, heads)
+    adj_matrix, layer, random_mask, x = setup_data(N, F_in, F_out, heads)
     adj_matrix_dense = adj_matrix.to_dense()
 
     att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
@@ -266,7 +264,7 @@ def test_paper():
     F_out = 4
     heads = 1
 
-    adj_matrix, col_t, layer, random_mask, rowptr_t, x = setup_data(N, F_in, F_out, heads)
+    adj_matrix, layer, random_mask, x = setup_data(N, F_in, F_out, heads)
     adj_matrix_dense = adj_matrix.to_dense()
 
     att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
@@ -445,8 +443,9 @@ def test_bwd_weight_compute_csc():
     F_out = 4
     heads = 1
 
-    adj_matrix, col_t, layer, random_mask, rowptr_t, x = setup_data(N, F_in, F_out, heads)
+    adj_matrix, layer, random_mask, x = setup_data(N, F_in, F_out, heads)
     adj_matrix_dense = adj_matrix.to_dense()
+    rowptr_t, col_t, _ = adj_matrix.t().csr()
 
     att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
 
