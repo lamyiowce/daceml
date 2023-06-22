@@ -224,7 +224,6 @@ def test_bwd_weight_compute():
         Tau_sum = torch.zeros((N,), dtype=dtype)
         for i in range(N):
             for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-                col = A_cols[j]
                 Tau_sum[i] += Tau_vals[j]
 
         Phi_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
@@ -241,18 +240,17 @@ def test_bwd_weight_compute():
         # assert torch.allclose(Phi[:, :, None], att_weights)
 
         d_alpha = adj_matrix.t() * (out_grad @ H_prime.T)  # N x N
-
         d_alpha_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
         for i in range(N):
             for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
                 col = A_cols[j]
                 for k in range(F_out):
                     d_alpha_vals[j] = torch.dot(out_grad[i], H_prime[col])
-        #
-        # for i in range(N):
-        #     for j in range(A_rowptrs[i], A_rowptrs[i+1]):
-        #         col = A_cols[j]
-        #         assert d_alpha_t_vals[j] == d_alpha[col, i]
+
+        for i in range(N):
+            for j in range(A_rowptrs[i], A_rowptrs[i+1]):
+                col = A_cols[j]
+                assert torch.allclose(d_alpha_vals[j], d_alpha[i, col])
 
         # dE = (d_alpha - dot_prods[:, None]) * att_weights[..., 0]  # N x N
 
