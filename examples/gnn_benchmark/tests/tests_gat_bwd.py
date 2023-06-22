@@ -15,6 +15,25 @@ torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
 
 
+def check_grads(expected_params, result):
+    messages = []
+    for name, param in expected_params.items():
+        if result[name] is not None:
+            if isinstance(result[name], np.ndarray):
+                grad = result[name]
+            elif hasattr(result[name], 'grad') and result[name].grad is not None:
+                grad = result[name].grad.detach()
+            else:
+                grad = result[name].detach()
+            correct, message = check_equal(param.grad.numpy(),
+                                           grad,
+                                           name=name + ' grad', do_assert=False)
+            if not correct:
+                messages.append(message)
+                print(message)
+    assert len(messages) == 0, str(messages)
+
+
 def gat_forward(N: int, A: sparse.csr_matrix, H: np.ndarray,
                 W, a_l, a_r):
     """ Forward pass of GAT layer on CPU, only for debugging purposes.
@@ -22,7 +41,6 @@ def gat_forward(N: int, A: sparse.csr_matrix, H: np.ndarray,
         param A: adjacency matrix
         param input: input H matrix
     """
-    A_dim = N
     # M = H @ W, l = M @ a_l, r = M @ a_r
     # M = np.zeros((A_dim, self.out_channel), dtype=H.dtype)
     M = H @ W
@@ -181,6 +199,102 @@ class MyGat(torch.nn.Module):
         return Z
 
 
+def test_mygat():
+    N = 3
+    F_in = 2
+    F_out = 4
+    heads = 1
+
+    adj_matrix, col_t, layer, random_mask, rowptr_t, x = setup_data(N, F_in, F_out, heads)
+    adj_matrix_dense = adj_matrix.to_dense()
+
+    att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
+
+    mygat = MyGat(weight=layer.lin_src.weight, att_src=layer.att_src,
+                  att_dst=layer.att_dst)
+    mygat_x = copy.deepcopy(x)
+    mygat_x.grad = None
+    mygat_out = mygat.forward(mygat_x, adj_matrix_dense)
+    assert torch.allclose(mygat_out, pred)
+    assert check_equal(mygat.att_weights.detach().numpy()[..., None],
+                       att_weights.to_dense().detach().numpy())
+    loss = torch.sum(mygat_out * random_mask)
+    mygat.H_prime.retain_grad()
+    mygat.att_weights.retain_grad()
+    loss.backward()
+
+    params = dict(layer.named_parameters())
+    params['x'] = x
+
+    mygat_params = dict(mygat.named_parameters())
+    mygat_params['x'] = mygat_x
+    mygat_params['lin_src.weight'] = mygat_params['weight']
+
+    check_grads(expected_params=params, result=mygat_params)
+
+
+def test_paper():
+    N = 3
+    F_in = 2
+    F_out = 4
+    heads = 1
+
+    adj_matrix, col_t, layer, random_mask, rowptr_t, x = setup_data(N, F_in, F_out, heads)
+    adj_matrix_dense = adj_matrix.to_dense()
+
+    att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
+
+    # Use a "proxy" implementation to be able to check the inner gradients as well.
+    mygat = MyGat(weight=layer.lin_src.weight, att_src=layer.att_src,
+                  att_dst=layer.att_dst)
+    mygat_x = copy.deepcopy(x)
+    mygat_x.grad = None
+    mygat_out = mygat.forward(mygat_x, adj_matrix_dense)
+    assert torch.allclose(mygat_out, pred)
+    assert check_equal(mygat.att_weights.detach().numpy()[..., None],
+                       att_weights.to_dense().detach().numpy())
+    loss = torch.sum(mygat_out * random_mask)
+    mygat.H_prime.retain_grad()
+    mygat.att_weights.retain_grad()
+    loss.backward()
+
+    with torch.no_grad():
+        paper_fwd_result, ctx = gat_forward(x.shape[0],
+                                            sparse.csr_matrix(
+                                                adj_matrix_dense.T),
+                                            H=x.numpy(),
+                                            W=layer.lin_src.weight.numpy().T,
+                                            a_r=layer.att_src[0, 0].numpy(),
+                                            a_l=layer.att_dst[0, 0].numpy())
+        assert torch.allclose(torch.tensor(paper_fwd_result), pred)
+        paper_grads = gat_backward(N=N, ctx=ctx,
+                                   A=sparse.csr_matrix(adj_matrix_dense.T),
+                                   grad_out=pred.grad.numpy(),
+                                   a_r=layer.att_src[0, 0].numpy(),
+                                   a_l=layer.att_dst[0, 0].numpy(),
+                                   W=layer.lin_src.weight.numpy().T)
+
+    params = dict(layer.named_parameters())
+    params['x'] = x
+    params['H_prime'] = mygat.H_prime
+    params['att_weights'] = mygat.att_weights
+
+    messages = []
+    for name, param in params.items():
+        # print(name, param.grad)
+        if paper_grads[name] is not None:
+            correct, message = check_equal(param.grad.numpy(),
+                                           paper_grads[name],
+                                           name=name + ' grad', do_assert=False)
+            if not correct:
+                messages.append(message)
+                print(message)
+
+    assert len(messages) == 0, str(messages)
+
+    check_grads(expected_params=params, result=paper_grads)
+
+
 def compute_grads_csc(x, A_rowptrs, A_cols, adj_matrix, weight,
                       att_src, att_dst,
                       bias,
@@ -298,113 +412,7 @@ def compute_grads_csc(x, A_rowptrs, A_cols, adj_matrix, weight,
     return grads
 
 
-def test_mygat():
-    N = 3
-    F_in = 2
-    F_out = 4
-    heads = 1
-
-    adj_matrix, col_t, layer, random_mask, rowptr_t, x = setup_data(N, F_in, F_out, heads)
-    adj_matrix_dense = adj_matrix.to_dense()
-
-    att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
-
-    mygat = MyGat(weight=layer.lin_src.weight, att_src=layer.att_src,
-                  att_dst=layer.att_dst)
-    mygat_x = copy.deepcopy(x)
-    mygat_x.grad = None
-    mygat_out = mygat.forward(mygat_x, adj_matrix_dense)
-    assert torch.allclose(mygat_out, pred)
-    assert check_equal(mygat.att_weights.detach().numpy()[..., None],
-                       att_weights.to_dense().detach().numpy())
-    loss = torch.sum(mygat_out * random_mask)
-    mygat.H_prime.retain_grad()
-    mygat.att_weights.retain_grad()
-    loss.backward()
-
-    params = dict(layer.named_parameters())
-    params['x'] = x
-
-    mygat_params = dict(mygat.named_parameters())
-    mygat_params['x'] = mygat_x
-    mygat_params['lin_src.weight'] = mygat_params['weight']
-
-    messages = []
-    for name, param in params.items():
-        # print(name, param.grad)
-        if mygat_params[name] is not None:
-            correct, message = check_equal(param.grad.numpy(),
-                                           mygat_params[name].grad.numpy(),
-                                           name=name + ' grad', do_assert=False)
-            if not correct:
-                messages.append(message)
-                print(message)
-
-    assert len(messages) == 0, str(messages)
-
-
-def test_paper():
-    N = 3
-    F_in = 2
-    F_out = 4
-    heads = 1
-
-    adj_matrix, col_t, layer, random_mask, rowptr_t, x = setup_data(N, F_in, F_out, heads)
-    adj_matrix_dense = adj_matrix.to_dense()
-
-    att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
-
-    # Use a "proxy" implementation to be able to check the inner gradients as well.
-    mygat = MyGat(weight=layer.lin_src.weight, att_src=layer.att_src,
-                  att_dst=layer.att_dst)
-    mygat_x = copy.deepcopy(x)
-    mygat_x.grad = None
-    mygat_out = mygat.forward(mygat_x, adj_matrix_dense)
-    assert torch.allclose(mygat_out, pred)
-    assert check_equal(mygat.att_weights.detach().numpy()[..., None],
-                       att_weights.to_dense().detach().numpy())
-    loss = torch.sum(mygat_out * random_mask)
-    mygat.H_prime.retain_grad()
-    mygat.att_weights.retain_grad()
-    loss.backward()
-
-    with torch.no_grad():
-        paper_fwd_result, ctx = gat_forward(x.shape[0],
-                                            sparse.csr_matrix(
-                                                adj_matrix_dense.T),
-                                            H=x.numpy(),
-                                            W=layer.lin_src.weight.numpy().T,
-                                            a_r=layer.att_src[0, 0].numpy(),
-                                            a_l=layer.att_dst[0, 0].numpy())
-        assert torch.allclose(torch.tensor(paper_fwd_result), pred)
-        paper_grads = gat_backward(N=N, ctx=ctx,
-                                   A=sparse.csr_matrix(adj_matrix_dense.T),
-                                   grad_out=pred.grad.numpy(),
-                                   a_r=layer.att_src[0, 0].numpy(),
-                                   a_l=layer.att_dst[0, 0].numpy(),
-                                   W=layer.lin_src.weight.numpy().T)
-
-
-    params = dict(layer.named_parameters())
-    params['x'] = x
-    params['H_prime'] = mygat.H_prime
-    params['att_weights'] = mygat.att_weights
-
-    messages = []
-    for name, param in params.items():
-        # print(name, param.grad)
-        if paper_grads[name] is not None:
-            correct, message = check_equal(param.grad.numpy(),
-                                           paper_grads[name],
-                                           name=name + ' grad', do_assert=False)
-            if not correct:
-                messages.append(message)
-                print(message)
-
-    assert len(messages) == 0, str(messages)
-
-
-def test_bwd_weight_compute():
+def test_bwd_weight_compute_csc():
     N = 3
     F_in = 2
     F_out = 4
@@ -440,17 +448,7 @@ def test_bwd_weight_compute():
                                    layer.bias, att_weights.to_dense(), pred,
                                    pred.grad)
 
-    messages = []
-    for name, param in params.items():
-        if result[name] is not None:
-            correct, message = check_equal(param.grad.numpy(),
-                                           result[name].detach().numpy(),
-                                           name=name + ' grad', do_assert=False)
-            if not correct:
-                messages.append(message)
-                print(message)
-
-    assert len(messages) == 0, str(messages)
+    check_grads(params, result)
 
 
 def pred_torch(adj_matrix, layer, random_mask, x):
