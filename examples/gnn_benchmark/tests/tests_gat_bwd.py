@@ -180,144 +180,132 @@ class MyGat(torch.nn.Module):
         Z = (adj_matrix.t() * self.att_weights) @ self.H_prime  # N x H
         return Z
 
-
-def test_bwd_weight_compute():
-    N = 3
-    F_in = 2
-    F_out = 4
-    # heads = 2
-    dtype = torch.float32
-    negative_slope = 0.2
-    torch.random.manual_seed(42)
-    np.random.seed(42)
-
-    def compute_grads(x, A_rowptrs, A_cols, adj_matrix, weight,
+def compute_grads_csc(x, A_rowptrs, A_cols, adj_matrix, weight,
                       att_src, att_dst,
                       bias,
                       att_weights,
                       output,
                       out_grad):
-        # x: N x F_in
-        # adj_matrix: N x N
-        # weight: F_out x F_in
-        # att_src: 1 x H x F_out
-        # att_dst: 1 x H x F_out
-        # bias: F_out
-        # output: N x F_out
-        # out_grad: N x F_out
+    # x: N x F_in
+    # adj_matrix: N x N
+    # weight: F_out x F_in
+    # att_src: 1 x H x F_out
+    # att_dst: 1 x H x F_out
+    # bias: F_out
+    # output: N x F_out
+    # out_grad: N x F_out
+    N = x.shape[0]
+    F_out = weight.shape[0]
+    dtype = x.dtype
 
-        grads = {'x': None, 'lin_src.weight': None, 'bias': None,
-                 'att_src': None,
-                 'att_dst': None}
-        print(out_grad)
+    grads = {'x': None, 'lin_src.weight': None, 'bias': None,
+             'att_src': None,
+             'att_dst': None}
 
-        H_prime = x @ weight.t()  # N x F_out
-        alpha_src = torch.sum(H_prime * att_src[0], dim=-1)  # N x H
-        alpha_dst = torch.sum(H_prime * att_dst[0], dim=-1)  # N x H
+    H_prime = x @ weight.t()  # N x F_out
+    alpha_src = torch.sum(H_prime * att_src[0], dim=-1)  # N x H
+    alpha_dst = torch.sum(H_prime * att_dst[0], dim=-1)  # N x H
 
-        C_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
-        for i in range(N):
-            for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+    C_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
+    for i in range(N):
+        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+            col = A_cols[j]
+            C_vals[j] = alpha_src[col] + alpha_dst[i]
+    Tau_vals = torch.exp(torch.maximum(0.2 * C_vals, C_vals))
+    Tau_sum = torch.zeros((N,), dtype=dtype)
+    for i in range(N):
+        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+            Tau_sum[i] += Tau_vals[j]
+
+    Phi_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
+    for i in range(N):
+        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+            Phi_vals[j] = Tau_vals[j] / Tau_sum[i]
+    # Tau_sum = torch.sum(Tau, dim=1)[:, None]  # N x 1 x H
+    # Phi = Tau / Tau_sum  # N x N x H
+
+    for i in range(N):
+        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+            col = A_cols[j]
+            assert torch.allclose(Phi_vals[j], att_weights[i, col, 0])
+    # assert torch.allclose(Phi[:, :, None], att_weights)
+
+    d_alpha = adj_matrix.t() * (out_grad @ H_prime.T)  # N x N
+    d_alpha_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
+    for i in range(N):
+        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+            col = A_cols[j]
+            for k in range(F_out):
+                d_alpha_vals[j] = torch.dot(out_grad[i], H_prime[col])
+
+    for i in range(N):
+        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+            col = A_cols[j]
+            assert torch.allclose(d_alpha_vals[j], d_alpha[i, col])
+
+    # dE = (d_alpha - dot_prods[:, None]) * att_weights[..., 0]  # N x N
+
+    dot_prods = torch.zeros((N,), dtype=dtype)
+    for i in range(N):
+        dot_prods[i] = torch.dot(Phi_vals[A_rowptrs[i]:A_rowptrs[i + 1]],
+                                 d_alpha_vals[
+                                 A_rowptrs[i]:A_rowptrs[i + 1]])
+        # for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+        #     dot_prods[i] += d_alpha_vals[j] * Phi_vals[j]
+
+    dE_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
+    for i in range(N):
+        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+            dE_vals[j] = (d_alpha_vals[j] - dot_prods[i]) * Phi_vals[j]
+
+    def d_leaky_relu(x):
+        return torch.where(x > 0, torch.ones_like(x),
+                           torch.ones_like(x) * 0.2)
+
+    dC_vals = dE_vals * d_leaky_relu(C_vals)
+
+    dl = torch.zeros((N,), dtype=dtype)
+    dr = torch.zeros((N,), dtype=dtype)
+    for i in range(N):
+        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+            col = A_cols[j]
+            dl[i] += dC_vals[j]
+            dr[col] += dC_vals[j]
+
+    dH_prime = torch.outer(dl, att_dst[0, 0]) + torch.outer(dr,
+                                                            att_src[0, 0])
+    # dH_prime += Phi.t @ out_grad
+    for i in range(N):
+        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
+            for k in range(F_out):
                 col = A_cols[j]
-                C_vals[j] = alpha_src[col] + alpha_dst[i]
-        Tau_vals = torch.exp(torch.maximum(negative_slope * C_vals, C_vals))
-        Tau_sum = torch.zeros((N,), dtype=dtype)
-        for i in range(N):
-            for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-                Tau_sum[i] += Tau_vals[j]
+                dH_prime[col, k] += Phi_vals[j] * out_grad[i, k]
 
-        Phi_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
-        for i in range(N):
-            for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-                Phi_vals[j] = Tau_vals[j] / Tau_sum[i]
-        # Tau_sum = torch.sum(Tau, dim=1)[:, None]  # N x 1 x H
-        # Phi = Tau / Tau_sum  # N x N x H
+    dWeights = x.T @ dH_prime  # F_in x F_out
+    d_x = dH_prime @ weight  # N x F_in
 
-        for i in range(N):
-            for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-                col = A_cols[j]
-                assert torch.allclose(Phi_vals[j], att_weights[i, col, 0])
-        # assert torch.allclose(Phi[:, :, None], att_weights)
+    grads['att_src'] = H_prime.T @ dr
+    grads['att_dst'] = H_prime.T @ dl
+    grads['lin_src.weight'] = dWeights.T
+    grads['x'] = d_x
+    grads['H_prime'] = dH_prime
+    grads['att_weights'] = torch.tensor(
+        sparse.csr_matrix((d_alpha_vals, A_cols, A_rowptrs),
+                          shape=(N, N)).todense())
 
-        d_alpha = adj_matrix.t() * (out_grad @ H_prime.T)  # N x N
-        d_alpha_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
-        for i in range(N):
-            for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-                col = A_cols[j]
-                for k in range(F_out):
-                    d_alpha_vals[j] = torch.dot(out_grad[i], H_prime[col])
+    grads['bias'] = torch.sum(out_grad, dim=0)
+    return grads
 
-        for i in range(N):
-            for j in range(A_rowptrs[i], A_rowptrs[i+1]):
-                col = A_cols[j]
-                assert torch.allclose(d_alpha_vals[j], d_alpha[i, col])
 
-        # dE = (d_alpha - dot_prods[:, None]) * att_weights[..., 0]  # N x N
+def test_bwd_weight_compute():
+    N = 3
+    F_in = 2
+    F_out = 4
+    heads = 1
 
-        dot_prods = torch.zeros((N,), dtype=dtype)
-        for i in range(N):
-            dot_prods[i] = torch.dot(Phi_vals[A_rowptrs[i]:A_rowptrs[i + 1]],
-                                     d_alpha_vals[
-                                     A_rowptrs[i]:A_rowptrs[i + 1]])
-            # for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-            #     dot_prods[i] += d_alpha_vals[j] * Phi_vals[j]
-
-        dE_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
-        for i in range(N):
-            for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-                dE_vals[j] = (d_alpha_vals[j] - dot_prods[i]) * Phi_vals[j]
-
-        def d_leaky_relu(x):
-            return torch.where(x > 0, torch.ones_like(x),
-                               torch.ones_like(x) * negative_slope)
-
-        dC_vals = dE_vals * d_leaky_relu(C_vals)
-
-        dl = torch.zeros((N,), dtype=dtype)
-        dr = torch.zeros((N,), dtype=dtype)
-        for i in range(N):
-            for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-                col = A_cols[j]
-                dl[i] += dC_vals[j]
-                dr[col] += dC_vals[j]
-
-        dH_prime = torch.outer(dl, att_dst[0, 0]) + torch.outer(dr,
-                                                                att_src[0, 0])
-        # dH_prime += Phi.t @ out_grad
-        for i in range(N):
-            for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-                for k in range(F_out):
-                    col = A_cols[j]
-                    dH_prime[col, k] += Phi_vals[j] * out_grad[i, k]
-
-        dWeights = x.T @ dH_prime  # F_in x F_out
-        d_x = dH_prime @ weight  # N x F_in
-
-        grads['att_src'] = H_prime.T @ dr
-        grads['att_dst'] = H_prime.T @ dl
-        grads['lin_src.weight'] = dWeights.T
-        grads['x'] = d_x
-        grads['H_prime'] = dH_prime
-        grads['att_weights'] = torch.tensor(
-            sparse.csr_matrix((d_alpha_vals, A_cols, A_rowptrs),
-                              shape=(N, N)).todense())
-
-        grads['bias'] = torch.sum(out_grad, dim=0)
-        return grads
-
-    layer = GATConv(F_in, F_out, heads=1, add_self_loops=False,
-                    negative_slope=negative_slope, bias=False)
-
-    x = torch.randn(N, F_in, requires_grad=True)
-    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
-    graph.data = np.ones_like(graph.data)
-    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(dtype))
-    print("ADJ matrix", adj_matrix)
-    rowptr, col, _ = adj_matrix.csr()
-    rowptr_t, col_t, _ = adj_matrix.t().csr()
+    adj_matrix, col_t, layer, random_mask, rowptr_t, x = setup_data(N, F_in, F_out, heads)
     adj_matrix_dense = adj_matrix.to_dense()
-
-    random_mask = torch.arange(N * F_out).resize(N, F_out).to(dtype) / 10
+    adj_matrix_scipy = sparse.csr_matrix(adj_matrix_dense)
 
     # PyG requires that the adj matrix is transposed when using SparseTensor.
     pred, att_weights = layer(x, adj_matrix.t(), return_attention_weights=True)
@@ -394,11 +382,11 @@ def test_bwd_weight_compute():
     assert len(messages) == 0, str(messages)
 
     with torch.no_grad():
-        result = compute_grads(x, rowptr_t, col_t, adj_matrix_dense,
-                               layer.lin_src.weight,
-                               layer.att_src, layer.att_dst,
-                               layer.bias, att_weights.to_dense(), pred,
-                               pred.grad)
+        result = compute_grads_csc(x, rowptr_t, col_t, adj_matrix_dense,
+                                   layer.lin_src.weight,
+                                   layer.att_src, layer.att_dst,
+                                   layer.bias, att_weights.to_dense(), pred,
+                                   pred.grad)
 
     messages = []
     for name, param in params.items():
@@ -412,3 +400,21 @@ def test_bwd_weight_compute():
                 print(message)
 
     assert len(messages) == 0, str(messages)
+
+
+def setup_data(N, F_in, F_out, heads, seed=42):
+    dtype = torch.float32
+    negative_slope = 0.2
+    torch.random.manual_seed(seed)
+    np.random.seed(seed)
+    layer = GATConv(F_in, F_out, heads=heads, add_self_loops=False,
+                    negative_slope=negative_slope, bias=False)
+    x = torch.randn(N, F_in, requires_grad=True)
+    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
+    graph.data = np.ones_like(graph.data)
+    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(dtype))
+    print("ADJ matrix", adj_matrix)
+    rowptr, col, _ = adj_matrix.csr()
+    rowptr_t, col_t, _ = adj_matrix.t().csr()
+    random_mask = torch.arange(N * F_out).resize(N, F_out).to(dtype) / 10
+    return adj_matrix, col_t, layer, random_mask, rowptr_t, x
