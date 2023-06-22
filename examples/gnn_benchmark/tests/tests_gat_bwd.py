@@ -476,7 +476,7 @@ def test_bwd_weight_compute_csc():
     check_grads(params, result)
 
 
-def compute_grads_csr(x, A_rowptrs, A_cols, adj_matrix, weight,
+def compute_grads_coo(x, A_rows, A_cols, adj_matrix, weight,
                       att_src, att_dst,
                       bias,
                       att_weights,
@@ -491,6 +491,7 @@ def compute_grads_csr(x, A_rowptrs, A_cols, adj_matrix, weight,
     # output: N x F_out
     # out_grad: N x F_out
     N = x.shape[0]
+    nnz = A_rows.shape[0]
     F_out = weight.shape[0]
     dtype = x.dtype
 
@@ -503,56 +504,53 @@ def compute_grads_csr(x, A_rowptrs, A_cols, adj_matrix, weight,
     alpha_dst = torch.sum(H_prime * att_dst[0], dim=-1)  # N x H
 
     C_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
-    for i in range(N):
-        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-            col = A_cols[j]
-            C_vals[j] = alpha_src[col] + alpha_dst[i]
+    for i in range(nnz):
+        C_vals[i] = alpha_src[A_rows[i]] + alpha_dst[A_cols[i]]
+
     Tau_vals = torch.exp(torch.maximum(0.2 * C_vals, C_vals))
+
     Tau_sum = torch.zeros((N,), dtype=dtype)
-    for i in range(N):
-        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-            Tau_sum[i] += Tau_vals[j]
+    for i in range(nnz):
+        Tau_sum[A_cols[i]] += Tau_vals[i]
 
     Phi_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
-    for i in range(N):
-        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-            Phi_vals[j] = Tau_vals[j] / Tau_sum[i]
-    # Tau_sum = torch.sum(Tau, dim=1)[:, None]  # N x 1 x H
-    # Phi = Tau / Tau_sum  # N x N x H
+    for i in range(nnz):
+        Phi_vals[i] = Tau_vals[i] / Tau_sum[A_cols[i]]
 
-    for i in range(N):
-        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-            col = A_cols[j]
-            assert torch.allclose(Phi_vals[j], att_weights[i, col, 0])
-    # assert torch.allclose(Phi[:, :, None], att_weights)
+    for i in range(nnz):
+        assert torch.allclose(Phi_vals[i], att_weights[A_cols[i], A_rows[i], 0])
 
     d_alpha = adj_matrix.t() * (out_grad @ H_prime.T)  # N x N
     d_alpha_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
-    for i in range(N):
-        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-            col = A_cols[j]
-            for k in range(F_out):
-                d_alpha_vals[j] = torch.dot(out_grad[i], H_prime[col])
+    for i in range(nnz):
+        col = A_cols[i]
+        row = A_rows[i]
+        d_alpha_vals[i] = torch.dot(out_grad[col], H_prime[row])
 
-    for i in range(N):
-        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-            col = A_cols[j]
-            assert torch.allclose(d_alpha_vals[j], d_alpha[i, col])
+    for i in range(nnz):
+        col = A_cols[i]
+        row = A_rows[i]
+        assert torch.allclose(d_alpha_vals[i], d_alpha[col, row])
 
-    # dE = (d_alpha - dot_prods[:, None]) * att_weights[..., 0]  # N x N
+    dot_prods_dense = torch.zeros((N,), dtype=dtype)
+    for i in range(N):
+        dot_prods_dense[i] = d_alpha[i, :] @ att_weights[i, :, 0].T  # N x N
+    dE = (d_alpha - dot_prods_dense[:, None]) * att_weights[..., 0]  # N x N
 
     dot_prods = torch.zeros((N,), dtype=dtype)
+    for i in range(nnz):
+        col = A_cols[i]
+        dot_prods[col] += Phi_vals[i] * d_alpha_vals[i]
+
     for i in range(N):
-        dot_prods[i] = torch.dot(Phi_vals[A_rowptrs[i]:A_rowptrs[i + 1]],
-                                 d_alpha_vals[
-                                 A_rowptrs[i]:A_rowptrs[i + 1]])
-        # for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-        #     dot_prods[i] += d_alpha_vals[j] * Phi_vals[j]
+        assert torch.allclose(dot_prods[i], dot_prods_dense[i])
 
     dE_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
-    for i in range(N):
-        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-            dE_vals[j] = (d_alpha_vals[j] - dot_prods[i]) * Phi_vals[j]
+    for i in range(nnz):
+        dE_vals[i] = (d_alpha_vals[i] - dot_prods[A_cols[i]]) * Phi_vals[i]
+
+    for i in range(nnz):
+        assert torch.allclose(dE_vals[i], dE[A_cols[i], A_rows[i]])
 
     def d_leaky_relu(x):
         return torch.where(x > 0, torch.ones_like(x),
@@ -562,20 +560,20 @@ def compute_grads_csr(x, A_rowptrs, A_cols, adj_matrix, weight,
 
     dl = torch.zeros((N,), dtype=dtype)
     dr = torch.zeros((N,), dtype=dtype)
-    for i in range(N):
-        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-            col = A_cols[j]
-            dl[i] += dC_vals[j]
-            dr[col] += dC_vals[j]
+    for i in range(nnz):
+        col = A_cols[i]
+        row = A_rows[i]
+        dl[col] += dC_vals[i]
+        dr[row] += dC_vals[i]
 
     dH_prime = torch.outer(dl, att_dst[0, 0]) + torch.outer(dr,
                                                             att_src[0, 0])
-    # dH_prime += Phi.t @ out_grad
-    for i in range(N):
-        for j in range(A_rowptrs[i], A_rowptrs[i + 1]):
-            for k in range(F_out):
-                col = A_cols[j]
-                dH_prime[col, k] += Phi_vals[j] * out_grad[i, k]
+
+    for i in range(nnz):
+        col = A_cols[i]
+        row = A_rows[i]
+        for k in range(F_out):
+            dH_prime[row, k] += Phi_vals[i] * out_grad[col, k]
 
     dWeights = x.T @ dH_prime  # F_in x F_out
     d_x = dH_prime @ weight  # N x F_in
@@ -586,21 +584,21 @@ def compute_grads_csr(x, A_rowptrs, A_cols, adj_matrix, weight,
     grads['x'] = d_x
     grads['H_prime'] = dH_prime
     grads['att_weights'] = torch.tensor(
-        sparse.csr_matrix((d_alpha_vals, A_cols, A_rowptrs),
+        sparse.coo_matrix((d_alpha_vals, (A_cols, A_rows)),
                           shape=(N, N)).todense())
 
     grads['bias'] = torch.sum(out_grad, dim=0)
     return grads
 
 
-def test_bwd_weight_compute_csr():
+def test_bwd_weight_compute_coo():
     N = 3
     F_in = 2
     F_out = 4
     heads = 1
 
     adj_matrix, layer, random_mask, x = setup_data(N, F_in, F_out, heads)
-    rowptr, col, _ = adj_matrix.csr()
+    row, col, _ = adj_matrix.coo()
     adj_matrix_dense = adj_matrix.to_dense()
 
     att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
@@ -624,7 +622,7 @@ def test_bwd_weight_compute_csr():
     params['att_weights'] = mygat.att_weights
 
     with torch.no_grad():
-        result = compute_grads_csc(x, rowptr, col, adj_matrix_dense,
+        result = compute_grads_coo(x, row, col, adj_matrix_dense,
                                    layer.lin_src.weight,
                                    layer.att_src, layer.att_dst,
                                    layer.bias, att_weights.to_dense(), pred,
