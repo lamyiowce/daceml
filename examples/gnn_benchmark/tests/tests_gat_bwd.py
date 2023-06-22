@@ -34,6 +34,33 @@ def check_grads(expected_params, result):
     assert len(messages) == 0, str(messages)
 
 
+def pred_torch(adj_matrix, layer, random_mask, x):
+    # PyG requires that the adj matrix is transposed when using SparseTensor.
+    pred, att_weights = layer(x, adj_matrix.t(), return_attention_weights=True)
+    loss = torch.sum(pred * random_mask)
+    pred.retain_grad()
+    loss.backward()
+    return att_weights, pred
+
+
+def setup_data(N, F_in, F_out, heads, seed=42):
+    dtype = torch.float32
+    negative_slope = 0.2
+    torch.random.manual_seed(seed)
+    np.random.seed(seed)
+    layer = GATConv(F_in, F_out, heads=heads, add_self_loops=False,
+                    negative_slope=negative_slope, bias=False)
+    x = torch.randn(N, F_in, requires_grad=True)
+    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
+    graph.data = np.ones_like(graph.data)
+    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(dtype))
+    print("ADJ matrix", adj_matrix)
+    rowptr, col, _ = adj_matrix.csr()
+    rowptr_t, col_t, _ = adj_matrix.t().csr()
+    random_mask = torch.arange(N * F_out).resize(N, F_out).to(dtype) / 10
+    return adj_matrix, col_t, layer, random_mask, rowptr_t, x
+
+
 def gat_forward(N: int, A: sparse.csr_matrix, H: np.ndarray,
                 W, a_l, a_r):
     """ Forward pass of GAT layer on CPU, only for debugging purposes.
@@ -449,30 +476,3 @@ def test_bwd_weight_compute_csc():
                                    pred.grad)
 
     check_grads(params, result)
-
-
-def pred_torch(adj_matrix, layer, random_mask, x):
-    # PyG requires that the adj matrix is transposed when using SparseTensor.
-    pred, att_weights = layer(x, adj_matrix.t(), return_attention_weights=True)
-    loss = torch.sum(pred * random_mask)
-    pred.retain_grad()
-    loss.backward()
-    return att_weights, pred
-
-
-def setup_data(N, F_in, F_out, heads, seed=42):
-    dtype = torch.float32
-    negative_slope = 0.2
-    torch.random.manual_seed(seed)
-    np.random.seed(seed)
-    layer = GATConv(F_in, F_out, heads=heads, add_self_loops=False,
-                    negative_slope=negative_slope, bias=False)
-    x = torch.randn(N, F_in, requires_grad=True)
-    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
-    graph.data = np.ones_like(graph.data)
-    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(dtype))
-    print("ADJ matrix", adj_matrix)
-    rowptr, col, _ = adj_matrix.csr()
-    rowptr_t, col_t, _ = adj_matrix.t().csr()
-    random_mask = torch.arange(N * F_out).resize(N, F_out).to(dtype) / 10
-    return adj_matrix, col_t, layer, random_mask, rowptr_t, x
