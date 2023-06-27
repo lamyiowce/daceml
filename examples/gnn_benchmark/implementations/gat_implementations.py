@@ -5,6 +5,7 @@ import dace
 import numpy as np
 from dace import nodes, SDFG, SDFGState
 
+import examples.gnn_benchmark.implementations.gat_backward
 from daceml.onnx.nodes import onnx_op
 from daceml.onnx.op_implementations.utils import op_implementation
 from daceml.onnx.op_implementations.utils import program_for_node
@@ -15,6 +16,9 @@ from examples.gnn_benchmark.implementations import common
 from examples.gnn_benchmark.implementations.common import SparseLayerBase, \
     SpecialInputType
 from examples.gnn_benchmark.sparse_mm.coomm import coomm
+
+# Mark this import as used. It's needed to register the backward pass.
+assert examples.gnn_benchmark.implementations.gat_backward
 
 
 class GATConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
@@ -184,9 +188,9 @@ class GATConvCSR(GATConvBase):
                             e[v] = alpha_src[l] + alpha_dst[colv]
 
                     for j in dace.map[0:num_entries]:
-                            colj = columns[j]
-                            e[j] = np.exp(np.maximum(negative_slope * e[j], e[j]))
-                            softmax_sum[colj] += e[j]
+                        colj = columns[j]
+                        e[j] = np.exp(np.maximum(negative_slope * e[j], e[j]))
+                        softmax_sum[colj] += e[j]
 
                     # Softmax normalization.
                     for j in dace.map[0:num_entries]:
@@ -523,7 +527,7 @@ class GATConvCOO(GATConvBase):
                     softmax_sum[col] += e[i]
 
                 # Softmax normalization.
-                for j in dace.map[0:num_entries]:
+                for j in dace.map[0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
                     colj = columns[j]
                     e[j] = e[j] / softmax_sum[colj]
 
@@ -631,9 +635,9 @@ class GATConvCSC(GATConvBase):
                     # Transform input features.
                     # features: N x F'
                     features = dace.define_local((N, num_out_features),
-                                                    dtype=dtype)
+                                                 dtype=dtype)
                     features[:] = np.einsum('ij,kj->ik', node_features,
-                                         lin_srcDOTweight)
+                                            lin_srcDOTweight)
                     alpha_src = features @ att_src[0, 0]
                     alpha_dst = features @ att_dst[0, 0]
 
@@ -650,7 +654,7 @@ class GATConvCSC(GATConvBase):
                             softmax_sum[l] += e[v]
 
                     # # Softmax normalization.
-                    for l in dace.map[0:N]@dace.dtypes.ScheduleType.Sequential:
+                    for l in dace.map[0:N] @ dace.dtypes.ScheduleType.Sequential:
                         for v in dace.map[colptrs[l]:colptrs[l + 1]]:
                             e[v] = e[v] / softmax_sum[l]
 
@@ -701,7 +705,7 @@ class GATConvCSC(GATConvBase):
                     # Schedule is needed because otherwise we get wrong results on CPU ;(
                     # The schedule is ignored when applying GPU transformations,
                     # so it's fine.
-                    for h, l in dace.map[0:heads, 0:N]@dace.dtypes.ScheduleType.Sequential:
+                    for h, l in dace.map[0:heads, 0:N] @ dace.dtypes.ScheduleType.Sequential:
                         for v in dace.map[colptrs[l]:colptrs[l + 1]]:
                             e[h, v] = e[h, v] / softmax_sum[h, l]
 
@@ -725,6 +729,7 @@ class GATConvCSC(GATConvBase):
                         output[i, j * num_out_features + k] = (
                                 output_perm[j, i, k]
                                 + bias[j * num_out_features + k])
+
             return gat_op
         else:
             raise NotImplementedError

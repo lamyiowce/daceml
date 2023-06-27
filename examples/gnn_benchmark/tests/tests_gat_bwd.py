@@ -18,6 +18,10 @@ torch.backends.cudnn.allow_tf32 = False
 def check_grads(expected_params, result):
     messages = []
     for name, param in expected_params.items():
+        if not isinstance(param, np.ndarray):
+            expected_grad = param.grad.detach().numpy()
+        else:
+            expected_grad = param
         if result[name] is not None:
             if isinstance(result[name], np.ndarray):
                 grad = result[name]
@@ -25,7 +29,7 @@ def check_grads(expected_params, result):
                 grad = result[name].grad.detach()
             else:
                 grad = result[name].detach()
-            correct, message = check_equal(param.grad.numpy(),
+            correct, message = check_equal(expected_grad,
                                            grad,
                                            name=name + ' grad', do_assert=False)
             if not correct:
@@ -49,7 +53,7 @@ def setup_data(N, F_in, F_out, heads, seed=42):
     torch.random.manual_seed(seed)
     np.random.seed(seed)
     layer = GATConv(F_in, F_out, heads=heads, add_self_loops=False,
-                    negative_slope=negative_slope, bias=False)
+                    negative_slope=negative_slope, bias=True)
     x = torch.randn(N, F_in, requires_grad=True)
     graph = scipy.sparse.random(N, N, density=0.5, format='csr')
     graph.data = np.ones_like(graph.data)
@@ -205,11 +209,13 @@ def gat_backward(N: int, ctx: Dict[str, np.array], A: sparse.csr_matrix,
 
 
 class MyGat(torch.nn.Module):
-    def __init__(self, weight, att_src, att_dst):
+    def __init__(self, weight, att_src, att_dst, bias=None):
         super().__init__()
         self.weight = copy.deepcopy(weight)
         self.att_src = copy.deepcopy(att_src)
         self.att_dst = copy.deepcopy(att_dst)
+        if bias is not None:
+            self.bias = copy.deepcopy(bias)
 
     def forward(self, x, adj_matrix):
         self.H_prime = x @ self.weight.t()  # N x F_out
@@ -220,7 +226,7 @@ class MyGat(torch.nn.Module):
         Tau_sum = torch.sum(Tau, dim=1)[:, None]  # N x 1 x H
         self.att_weights = Tau / Tau_sum  # N x N x H
         Z = (adj_matrix.t() * self.att_weights) @ self.H_prime  # N x H
-        return Z
+        return Z + self.bias
 
 
 def test_mygat():
@@ -235,7 +241,7 @@ def test_mygat():
     att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
 
     mygat = MyGat(weight=layer.lin_src.weight, att_src=layer.att_src,
-                  att_dst=layer.att_dst)
+                  att_dst=layer.att_dst, bias=layer.bias)
     mygat_x = copy.deepcopy(x)
     mygat_x.grad = None
     mygat_out = mygat.forward(mygat_x, adj_matrix_dense)
@@ -604,7 +610,7 @@ def test_bwd_weight_compute_coo():
     att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
 
     mygat = MyGat(weight=layer.lin_src.weight, att_src=layer.att_src,
-                  att_dst=layer.att_dst)
+                  att_dst=layer.att_dst, bias=layer.bias)
     mygat_x = copy.deepcopy(x)
     mygat_x.grad = None
     mygat_out = mygat.forward(mygat_x, adj_matrix_dense)
