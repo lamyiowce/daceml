@@ -132,7 +132,7 @@ class CscGraph(SparseGraph):
         super().__init__(node_features)
 
     def data_list(self):
-        if self.edge_vals:
+        if self.edge_vals is not None:
             return self.colptrs, self.rows, self.edge_vals
         else:
             return self.colptrs, self.rows
