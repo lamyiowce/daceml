@@ -7,6 +7,8 @@ def check_equal(expected_pred, pred, name=None, do_assert=True, silent=False):
         print('\n' + name if name else '')
         print('Calculated: \n', pred)
         print('Expected: \n', expected_pred)
+        if is_correct:
+            print("OK")
     if not is_correct:
         max_err_abs = np.abs(pred - expected_pred).max()
         print("Abs error: ", max_err_abs)
