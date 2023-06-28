@@ -192,6 +192,14 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
              sdfg_util.flatten_blocks_for_1d_maps,
              backward=backward)
 
+    if device.type == 'cuda':
+        fn = functools.partial(sdfg_util.set_memory_to_register,
+                               array_name=r'examples_gnn_benchmark_implementations_gat_backward_backward_fn_\d+_\d+___tmp\d\d',
+                               expected_shape=(1,))
+        add_hook(dace_model,
+                 "Move 'examples_gnn_benchmark_implementations_gat_backward_backward_fn_128_4___tmp32' to register",
+                 fn, backward)
+
     print("/////////////////////")
     print(">>> Model hooks:")
     print("> Post onnx:")

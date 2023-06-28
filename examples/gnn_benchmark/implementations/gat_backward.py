@@ -90,21 +90,24 @@ class GATConvBackwardCOO(BackwardImplementation):
                     e[j] = e[j] / softmax_sum[colj]
 
                 ### COMPUTE THE GRADIENTS ###
+                # Uses H_prime (features), e (edge_vals), C_vals (C_vals).
                 d_alpha_vals = np.zeros((num_entries,), dtype=val_dtype)
-                for i in range(num_entries):
+                for i in dace.map[0:num_entries]:
                     col = columns[i]
                     row = rows[i]
-                    d_alpha_vals[i] = np.dot(output_grad[col], features[row])
+                    for k in dace.map[0:F_out]:
+                        d_alpha_vals[i] += output_grad[col, k] * features[row, k]
 
                 dot_prods = np.zeros((N,), dtype=val_dtype)
-                for i in range(num_entries):
+                for i in dace.map[0:num_entries]:
                     col = columns[i]
                     dot_prods[col] += e[i] * d_alpha_vals[i]
 
                 dE_vals = np.zeros((num_entries,), dtype=val_dtype)
-                for i in range(num_entries):
+                for i in dace.map[0:num_entries]:
                     col = columns[i]
-                    dE_vals[i] = (d_alpha_vals[i] - dot_prods[col]) * e[i]
+                    mult = (d_alpha_vals[i] - dot_prods[col]) * e[i]
+                    dE_vals[i] = mult
 
                 dC_vals = dE_vals * (C_vals > 0) + dE_vals * (C_vals <= 0) * negative_slope
 
@@ -192,10 +195,11 @@ class GATConvBackwardCOO(BackwardImplementation):
 
                 ### COMPUTE THE GRADIENTS ###
                 d_alpha_vals = np.zeros((num_entries,), dtype=val_dtype)
-                for i in range(num_entries):
+                for i in dace.map[0:num_entries]:
                     col = columns[i]
                     row = rows[i]
-                    d_alpha_vals[i] = np.dot(output_grad[col], features[row])
+                    for k in dace.map[0:F_out]:
+                        d_alpha_vals[i] += output_grad[col, k], features[row, k]
 
                 dot_prods = np.zeros((N,), dtype=val_dtype)
                 for i in range(num_entries):
@@ -227,10 +231,12 @@ class GATConvBackwardCOO(BackwardImplementation):
                       transA=False)
 
                 for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
-                    dH_prime[i, k] += dl[i] * att_dst[0, 0, k]
+                    mult = dl[i] * att_dst[0, 0, k]
+                    dH_prime[i, k] += mult
 
                 for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
-                    dH_prime[i, k] += dr[i] * att_src[0, 0, k]
+                    mult = dr[i] * att_src[0, 0, k]
+                    dH_prime[i, k] += mult
 
                 weight_grad = np.zeros((F_out, F_in), dtype=val_dtype)
                 weight_grad[:] = dH_prime.T @ node_features
