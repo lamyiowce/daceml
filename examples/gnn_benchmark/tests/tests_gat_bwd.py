@@ -15,20 +15,26 @@ torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
 
 
+def get_grad_as_numpy(array):
+    if hasattr(array, 'grad'):
+        if array.grad is not None:
+            grad = array.grad.detach().cpu()
+        else:
+            grad = array.detach().cpu()
+    elif isinstance(array, np.ndarray):
+        grad = array
+    else:
+        grad = array.get()
+
+    return grad
+
+
 def check_grads(expected_params, result):
     messages = []
     for name, param in expected_params.items():
-        if not isinstance(param, np.ndarray):
-            expected_grad = param.grad.detach().numpy()
-        else:
-            expected_grad = param
+        expected_grad = get_grad_as_numpy(param)
         if result[name] is not None:
-            if isinstance(result[name], np.ndarray):
-                grad = result[name]
-            elif hasattr(result[name], 'grad') and result[name].grad is not None:
-                grad = result[name].grad.detach()
-            else:
-                grad = result[name].detach()
+            grad = get_grad_as_numpy(result[name])
             correct, message = check_equal(expected_grad,
                                            grad,
                                            name=name + ' grad', do_assert=False)

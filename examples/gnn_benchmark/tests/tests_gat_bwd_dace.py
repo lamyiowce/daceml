@@ -37,11 +37,13 @@ def setup_data(N, F_in, F_out, heads=1, seed=42):
 class MyGat(torch.nn.Module):
     def __init__(self, weight, att_src, att_dst, bias=None):
         super().__init__()
-        self.weight = copy.deepcopy(weight)
-        self.att_src = copy.deepcopy(att_src)
-        self.att_dst = copy.deepcopy(att_dst)
+        self.weight = weight.detach().clone()
+        print(weight.device)
+        print(self.weight.device)
+        self.att_src = att_src.detach().clone()
+        self.att_dst = att_dst.detach().clone()
         if bias is not None:
-            self.bias = copy.deepcopy(bias)
+            self.bias = bias.detach().clone()
 
     def forward(self, x, adj_matrix):
         self.H_prime = x @ self.weight.t()  # N x F_out
@@ -66,8 +68,11 @@ def test_bwd_coo_dace():
     negative_slope = 0.2
     torch.random.manual_seed(42)
     xp.random.seed(42)
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
 
     x, graph, random_mask, layer = setup_data(N, F_in, F_out, heads)
+    layer = layer.to(device)
     num_entries = graph.nnz
     graph.data = xp.ones_like(graph.data)
     rows, cols = graph.tocoo().row, graph.tocoo().col
@@ -128,18 +133,18 @@ def test_bwd_coo_dace():
 
         ### COMPUTE THE GRADIENTS ###
         d_alpha_vals = np.zeros((num_entries,), dtype=val_dtype)
-        for i in range(num_entries):
+        for i in dace.map[0:num_entries]:
             col = columns[i]
             row = rows[i]
             d_alpha_vals[i] = np.dot(output_grad[col], features[row])
 
         dot_prods = np.zeros((N,), dtype=val_dtype)
-        for i in range(num_entries):
+        for i in dace.map[0:num_entries]:
             col = columns[i]
             dot_prods[col] += e[i] * d_alpha_vals[i]
 
         dE_vals = np.zeros((num_entries,), dtype=val_dtype)
-        for i in range(num_entries):
+        for i in dace.map[0:num_entries]:
             col = columns[i]
             dE_vals[i] = (d_alpha_vals[i] - dot_prods[col]) * e[i]
 
@@ -191,10 +196,10 @@ def test_bwd_coo_dace():
 
     mygat = MyGat(weight=layer.lin_src.weight, att_src=layer.att_src,
                   att_dst=layer.att_dst, bias=layer.bias)
-    mygat_x = torch.tensor(x, requires_grad=True)
-    mygat_out = mygat.forward(mygat_x, torch.tensor(graph.todense()))
+    mygat_x = torch.tensor(x, requires_grad=True, device=device)
+    mygat_out = mygat.forward(mygat_x, torch.tensor(graph.todense(), device=device))
 
-    loss = torch.sum(mygat_out * torch.tensor(random_mask))
+    loss = torch.sum(mygat_out * torch.tensor(random_mask, device=device))
     mygat_out.retain_grad()
     mygat.H_prime.retain_grad()
     mygat.att_weights.retain_grad()
@@ -205,23 +210,23 @@ def test_bwd_coo_dace():
     params['H_prime'] = mygat.H_prime
     params['att_weights'] = mygat.att_weights
 
-    weight_grad = xp.zeros_like(layer.lin_src.weight.detach().numpy(), dtype=val_dtype)
-    bias_grad = xp.zeros_like(layer.bias.detach().numpy(), dtype=val_dtype)
-    att_src_grad = xp.zeros_like(layer.att_src.detach().numpy(), dtype=val_dtype)
-    att_dst_grad = xp.zeros_like(layer.att_dst.detach().numpy(), dtype=val_dtype)
-    x_grad = xp.zeros_like(x, dtype=val_dtype)
-    H_prime_grad = xp.zeros_like(mygat.H_prime.detach().numpy(), dtype=val_dtype)
-    att_weights_grad = xp.zeros((num_entries,), dtype=val_dtype)
+    weight_grad = np.zeros((F_out, F_in), dtype=val_dtype)
+    bias_grad = np.zeros((F_out,), dtype=val_dtype)
+    att_src_grad = np.zeros((1, 1, F_out), dtype=val_dtype)
+    att_dst_grad = np.zeros((1, 1, F_out), dtype=val_dtype)
+    x_grad = np.zeros((N, F_in), dtype=val_dtype)
+    H_prime_grad = np.zeros((N, F_out), dtype=val_dtype)
+    att_weights_grad = np.zeros((num_entries,), dtype=val_dtype)
 
-    att_weights_out_vanilla = xp.zeros((num_entries,), dtype=val_dtype)
-    H_prime_out_vanilla = xp.zeros((N, F_out), dtype=val_dtype)
+    att_weights_out_vanilla = np.zeros((num_entries,), dtype=val_dtype)
+    H_prime_out_vanilla = np.zeros((N, F_out), dtype=val_dtype)
 
     with torch.no_grad():
-        backward_fn.f(node_features=x, rows=rows, columns=cols,
-                      lin_srcDOTweight=layer.lin_src.weight.detach().numpy(),
-                      att_src=layer.att_src.detach().numpy(),
-                      att_dst=layer.att_dst.detach().numpy(),
-                      output_grad=mygat_out.grad.detach().numpy(),
+        backward_fn.f(node_features=x.get(), rows=rows.get(), columns=cols.get(),
+                      lin_srcDOTweight=layer.lin_src.weight.detach().cpu().numpy(),
+                      att_src=layer.att_src.detach().cpu().numpy(),
+                      att_dst=layer.att_dst.detach().cpu().numpy(),
+                      output_grad=mygat_out.grad.detach().cpu().numpy(),
                       att_weights_out=att_weights_out_vanilla,
                       H_prime_out=H_prime_out_vanilla,
                       node_features_grad=x_grad,
@@ -235,31 +240,40 @@ def test_bwd_coo_dace():
     vanilla_result = {}
     vanilla_result['x'] = xp.copy(x_grad)
     vanilla_result['H_prime'] = xp.copy(H_prime_grad)
+    print(att_weights_grad.shape, rows.shape, cols.shape)
     vanilla_result['att_weights'] = xp.copy(
-        xps.coo_matrix((att_weights_grad, (cols, rows)), shape=(N, N)).todense())
+        xps.coo_matrix((xp.array(att_weights_grad), (cols, rows)), shape=(N, N)).todense())
     vanilla_result['weight'] = xp.copy(weight_grad)
     vanilla_result['bias'] = xp.copy(bias_grad)
     vanilla_result['att_src'] = xp.copy(att_src_grad)
     vanilla_result['att_dst'] = xp.copy(att_dst_grad)
 
-    check_equal(expected_pred=mygat.H_prime.detach().numpy(), pred=H_prime_out_vanilla,
+    check_equal(expected_pred=xp.array(mygat.H_prime.detach()), pred=H_prime_out_vanilla,
                 name='H_prime')
-    check_equal(expected_pred=mygat.att_weights.detach().numpy(),
-                pred=xps.coo_matrix((att_weights_out_vanilla, (cols, rows)),
+    check_equal(expected_pred=xp.array(mygat.att_weights.detach()),
+                pred=xps.coo_matrix((xp.array(att_weights_out_vanilla), (cols, rows)),
                                     shape=(N, N)).todense(),
                 name='att_weights')
 
     check_grads(expected_params=params, result=vanilla_result)
     print("VANILLA FN OK!")
 
+    weight_grad = xp.zeros((F_out, F_in), dtype=val_dtype)
+    bias_grad = xp.zeros((F_out,), dtype=val_dtype)
+    att_src_grad = xp.zeros((1, 1, F_out), dtype=val_dtype)
+    att_dst_grad = xp.zeros((1, 1, F_out), dtype=val_dtype)
+    x_grad = xp.zeros_like(x, dtype=val_dtype)
+    H_prime_grad = xp.zeros((N, F_out), dtype=val_dtype)
+    att_weights_grad = xp.zeros((num_entries,), dtype=val_dtype)
+
     att_weights_out = xp.zeros((num_entries,), dtype=val_dtype)
     H_prime_out = xp.zeros((N, F_out), dtype=val_dtype)
     with torch.no_grad():
         sdfg = backward_fn.to_sdfg(node_features=x, rows=rows, columns=cols,
-                                   lin_srcDOTweight=xp.copy(layer.lin_src.weight.detach().numpy()),
-                                   att_src=xp.copy(layer.att_src.detach().numpy()),
-                                   att_dst=xp.copy(layer.att_dst.detach().numpy()),
-                                   output_grad=xp.copy(mygat_out.grad.detach().numpy()),
+                                   lin_srcDOTweight=xp.array(layer.lin_src.weight.cpu()),
+                                   att_src=xp.array(layer.att_src.cpu()),
+                                   att_dst=xp.array(layer.att_dst.cpu()),
+                                   output_grad=xp.array(mygat_out.grad.cpu()),
                                    att_weights_out=att_weights_out,
                                    H_prime_out=H_prime_out,
                                    node_features_grad=x_grad,
@@ -274,10 +288,10 @@ def test_bwd_coo_dace():
 
         sdfg.openmp_sections = False
         sdfg(node_features=x, rows=rows, columns=cols,
-             lin_srcDOTweight=xp.copy(layer.lin_src.weight.detach().numpy()),
-             att_src=xp.copy(layer.att_src.detach().numpy()),
-             att_dst=xp.copy(layer.att_dst.detach().numpy()),
-             output_grad=xp.copy(mygat_out.grad.detach().numpy()),
+             lin_srcDOTweight=xp.array(layer.lin_src.weight.cpu()),
+             att_src=xp.array(layer.att_src.cpu()),
+             att_dst=xp.array(layer.att_dst.cpu()),
+             output_grad=xp.array(mygat_out.grad.cpu()),
              att_weights_out=att_weights_out,
              H_prime_out=H_prime_out,
              node_features_grad=x_grad,
@@ -303,3 +317,8 @@ def test_bwd_coo_dace():
                 name='att_weights oput')
 
     check_grads(expected_params=vanilla_result, result=result)
+
+
+if __name__ == '__main__':
+    test_bwd_coo_dace()
+    print('OK!')
