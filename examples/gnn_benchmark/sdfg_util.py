@@ -100,7 +100,7 @@ def set_implementation(module: daceml.torch.module.DaceModule,
 def set_memory_to_register(sdfg: dace.SDFG, array_name: str,
                            expected_shape: Tuple[int, ...] = None):
     for node, _ in sdfg.all_nodes_recursive():
-        if isinstance(node, dace.nodes.AccessNode) and node.data == array_name:
+        if isinstance(node, dace.nodes.AccessNode) and re.fullmatch(array_name, node.data):
             arr = sdfg.arrays[node.data]
             if expected_shape is None or arr.shape == expected_shape:
                 print(f"Setting storage for {node} to register.")
@@ -116,10 +116,11 @@ def apply_to_both(fn: Callable[[dace.SDFG], None]):
 
 
 def set_library_node_implementation(sdfg: dace.SDFG,
-                                   implementation_name: str,
-                                   node_name: str = None,
-                                   node_class: type = None,
-                                   schedule: dace.dtypes.ScheduleType = None):
+                                    implementation_name: str,
+                                    node_name: str = None,
+                                    node_class: type = None,
+                                    schedule: dace.dtypes.ScheduleType = None,
+                                    verbose=False):
     def matches(node: nd.LibraryNode):
         if node_name is not None and node.label != node_name:
             return False
@@ -141,7 +142,7 @@ def set_library_node_implementation(sdfg: dace.SDFG,
                     node.implementation = implementation_name
                     node.schedule = schedule or node.schedule
                     counter += 1
-            else:
+            elif verbose:
                 print(f"📚  Skipping node {node}.")
 
     print(
@@ -149,7 +150,8 @@ def set_library_node_implementation(sdfg: dace.SDFG,
 
 
 def set_reduce_implementation(sdfg: dace.SDFG, implementation_name: str = 'GPUAuto'):
-    set_library_node_implementation(sdfg, implementation_name, node_class=dace.libraries.standard.nodes.Reduce)
+    set_library_node_implementation(sdfg, implementation_name,
+                                    node_class=dace.libraries.standard.nodes.Reduce)
 
 
 def get_tb_maps_recursive(subgraph):
@@ -173,7 +175,7 @@ def get_tb_maps_recursive(subgraph):
     return res
 
 
-def flatten_blocks_for_1d_maps(sdfg: dace.SDFG):
+def flatten_blocks_for_1d_maps(sdfg: dace.SDFG, verbose=False):
     default_block_size = [int(b) for b in
                           Config.get('compiler', 'cuda', 'default_block_size').split(',')]
     total_size = functools.reduce(lambda a, b: a * b, default_block_size)
@@ -185,23 +187,25 @@ def flatten_blocks_for_1d_maps(sdfg: dace.SDFG):
             if len(node.map.params) == 1 and node.map.gpu_block_size is None:
                 subgraph = dfg_scope.scope_subgraph(node)
                 sub_maps = get_tb_maps_recursive(subgraph)
-                if len(sub_maps) > 1:
-                    # Don't set the block size if there are submaps. (sub_maps contains also the current map)
-                    print("🧱  Keeping block size, map has submaps: ", node.map,
-                          node.map.gpu_block_size, node.map.params, sub_maps)
-                else:
+                if len(sub_maps) == 1:
                     print(
                         f"🧱  Changing block size: {node.map}: {node.map.gpu_block_size} -> {[total_size, 1, 1]}")
                     node.map.gpu_block_size = [total_size, 1, 1]
-            else:
+                elif verbose:
+                    # Don't set the block size if there are submaps. (sub_maps contains also the current map)
+                    print("🧱  Keeping block size, map has submaps: ", node.map,
+                          node.map.gpu_block_size, node.map.params, sub_maps)
+            elif verbose:
                 print("🧱  Keeping block size: ", node.map, node.map.gpu_block_size)
 
 
 def change_map_schedule(sdfg: dace.SDFG,
                         new_schedule: dace.dtypes.ScheduleType,
                         label_regex: str,
-                        expected_params: List[str] = None):
-    print(f"⏲ ⏲ ⏲ Changing maps fitting {label_regex} schedules (params {expected_params}) to {new_schedule}")
+                        expected_params: List[str] = None,
+                        verbose=False):
+    print(
+        f"⏲ ⏲ ⏲ Changing maps fitting {label_regex} schedules (params {expected_params}) to {new_schedule}")
     for node, _ in sdfg.all_nodes_recursive():
         if isinstance(node, dace.sdfg.nodes.MapEntry) \
                 and node.schedule == dace.dtypes.ScheduleType.GPU_Device \
@@ -211,8 +215,8 @@ def change_map_schedule(sdfg: dace.SDFG,
                     print(
                         f"⏲  Changing schedule: {node.map}: {node.schedule} --> {new_schedule}")
                     node.schedule = new_schedule
-                else:
+                elif verbose:
                     print(
                         f"⏲  Keeping schedule: {node.map}: {node.schedule} (expected params: {expected_params})")
-            else:
+            elif verbose:
                 print("⏲  Keeping schedule: ", node.map, node.schedule)
