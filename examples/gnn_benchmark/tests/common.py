@@ -14,7 +14,7 @@ def check_equal(expected_pred, pred, name=None, do_assert=True, silent=False, at
         if is_correct:
             print("OK")
     if not is_correct:
-        max_err_abs = np.abs(pred - expected_pred).max()
+        max_err_abs = np.abs(expected_pred - pred).max()
         print("Abs error: ", max_err_abs)
         max_err_rel = max_err_abs / np.abs(expected_pred).max()
         print("Rel error: ",
@@ -72,7 +72,10 @@ def get_grad_as_numpy(array):
         else:
             grad = np.array(array.detach().cpu())
     elif isinstance(array, np.ndarray):
-        grad = array
+        if hasattr(array, 'asnumpy'):
+            grad = array.asnumpy()
+        else:
+            grad = array
     else:
         grad = array.get()
 
