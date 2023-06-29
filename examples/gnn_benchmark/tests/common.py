@@ -5,8 +5,8 @@ from torch_geometric.nn import GATConv
 from torch_sparse import SparseTensor
 
 
-def check_equal(expected_pred, pred, name=None, do_assert=True, silent=False):
-    is_correct = np.allclose(pred, expected_pred, atol=1e-6)
+def check_equal(expected_pred, pred, name=None, do_assert=True, silent=False, atol=1e-6, rtol=1e-6):
+    is_correct = np.allclose(pred, expected_pred, atol=atol, rtol=rtol)
     if not silent or not is_correct:
         print('\n' + name if name else '')
         print('Calculated: \n', pred)
@@ -25,7 +25,7 @@ def check_equal(expected_pred, pred, name=None, do_assert=True, silent=False):
     return True, ""
 
 
-def check_grads(expected_params, result):
+def check_grads(expected_params, result, atol=1e-6, rtol=1e-6):
     messages = []
     for name, param in expected_params.items():
         expected_grad = get_grad_as_numpy(param)
@@ -33,7 +33,8 @@ def check_grads(expected_params, result):
             grad = get_grad_as_numpy(result[name])
             correct, message = check_equal(expected_grad,
                                            grad,
-                                           name=name + ' grad', do_assert=False)
+                                           name=name + ' grad', do_assert=False,
+                                           atol=atol, rtol=rtol)
             if not correct:
                 messages.append(message)
                 print(message)
@@ -67,9 +68,9 @@ def setup_data(N, F_in, F_out, heads, seed=42):
 def get_grad_as_numpy(array):
     if hasattr(array, 'grad'):
         if array.grad is not None:
-            grad = array.grad.detach().cpu()
+            grad = np.array(array.grad.detach().cpu())
         else:
-            grad = array.detach().cpu()
+            grad = np.array(array.detach().cpu())
     elif isinstance(array, np.ndarray):
         grad = array
     else:
