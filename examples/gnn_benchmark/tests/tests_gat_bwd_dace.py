@@ -221,7 +221,7 @@ def test_bwd_coo_dace():
     H_prime_out_vanilla = np.zeros((N, F_out), dtype=val_dtype)
 
     with torch.no_grad():
-        backward_fn.f(node_features=x.get(), rows=rows.get(), columns=cols.get(),
+        backward_fn.f(node_features=xp.array(x), rows=xp.array(rows), columns=xp.array(cols),
                       lin_srcDOTweight=layer.lin_src.weight.detach().cpu().numpy(),
                       att_src=layer.att_src.detach().cpu().numpy(),
                       att_dst=layer.att_dst.detach().cpu().numpy(),
