@@ -103,7 +103,7 @@ def set_memory_to_register(sdfg: dace.SDFG, array_name: str,
         if isinstance(node, dace.nodes.AccessNode) and re.fullmatch(array_name, node.data):
             arr = sdfg.arrays[node.data]
             if expected_shape is None or arr.shape == expected_shape:
-                print(f"Setting storage for {node} to register.")
+                print(f"  Setting storage for {node} to register.")
                 arr.storage = dace.dtypes.StorageType.Register
 
 
