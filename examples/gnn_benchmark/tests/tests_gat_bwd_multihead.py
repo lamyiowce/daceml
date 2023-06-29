@@ -1,5 +1,6 @@
 import copy
 
+import pytest
 import torch
 from scipy import sparse
 
@@ -23,7 +24,7 @@ def compute_grads_coo(x, A_rows, A_cols, adj_matrix, weight,
     # out_grad: N x F_out
     N = x.shape[0]
     nnz = A_rows.shape[0]
-    F_out = weight.shape[0]
+    _, heads, F_out = att_dst.shape
     dtype = x.dtype
 
     grads = {'x': None, 'lin_src.weight': None, 'bias': None,
@@ -31,44 +32,48 @@ def compute_grads_coo(x, A_rows, A_cols, adj_matrix, weight,
              'att_dst': None}
 
     H_prime = x @ weight.t()  # N x F_out
-    alpha_src = torch.sum(H_prime * att_src[0], dim=-1)  # N x H
-    alpha_dst = torch.sum(H_prime * att_dst[0], dim=-1)  # N x H
+    H_prime = torch.reshape(H_prime, (N, heads, F_out))
+    alpha_src = torch.sum(H_prime * att_src, dim=-1)  # N x H
+    alpha_dst = torch.sum(H_prime * att_dst, dim=-1)  # N x H
 
-    C_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
+    C_vals = torch.zeros((A_cols.shape[0], heads), dtype=dtype)
     for i in range(nnz):
         C_vals[i] = alpha_src[A_rows[i]] + alpha_dst[A_cols[i]]
 
     Tau_vals = torch.exp(torch.maximum(0.2 * C_vals, C_vals))
 
-    Tau_sum = torch.zeros((N,), dtype=dtype)
+    Tau_sum = torch.zeros((N, heads), dtype=dtype)
     for i in range(nnz):
         Tau_sum[A_cols[i]] += Tau_vals[i]
 
-    Phi_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
+    Phi_vals = torch.zeros((A_cols.shape[0], heads), dtype=dtype)
     for i in range(nnz):
         Phi_vals[i] = Tau_vals[i] / Tau_sum[A_cols[i]]
 
     for i in range(nnz):
-        assert torch.allclose(Phi_vals[i], att_weights[A_cols[i], A_rows[i], 0])
+        assert torch.allclose(Phi_vals[i], att_weights[A_cols[i], A_rows[i]])
 
-    d_alpha = adj_matrix.t() * (out_grad @ H_prime.T)  # N x N
-    d_alpha_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
+    out_grad = torch.reshape(out_grad, (N, heads, F_out))
+
+    # d_alpha = adj_matrix.t() * (out_grad @ H_prime.T)  # N x N
+    d_alpha = adj_matrix.t()[..., None] * torch.einsum('nhf,mhf->nmh', out_grad, H_prime)
+    d_alpha_vals = torch.zeros((nnz, heads), dtype=dtype)
     for i in range(nnz):
         col = A_cols[i]
         row = A_rows[i]
-        d_alpha_vals[i] = torch.dot(out_grad[col], H_prime[row])
+        d_alpha_vals[i] = torch.einsum('hf,hf->h', out_grad[col], H_prime[row])
 
     for i in range(nnz):
         col = A_cols[i]
         row = A_rows[i]
         assert torch.allclose(d_alpha_vals[i], d_alpha[col, row])
 
-    dot_prods_dense = torch.zeros((N,), dtype=dtype)
+    dot_prods_dense = torch.zeros((N, heads), dtype=dtype)
     for i in range(N):
-        dot_prods_dense[i] = d_alpha[i, :] @ att_weights[i, :, 0].T  # N x N
-    dE = (d_alpha - dot_prods_dense[:, None]) * att_weights[..., 0]  # N x N
+        dot_prods_dense[i] = torch.einsum('nh,nh->h', d_alpha[i], att_weights[i])  # N x N
+    dE = (d_alpha - dot_prods_dense[:, None, :]) * att_weights  # N x N x H
 
-    dot_prods = torch.zeros((N,), dtype=dtype)
+    dot_prods = torch.zeros((N, heads), dtype=dtype)
     for i in range(nnz):
         col = A_cols[i]
         dot_prods[col] += Phi_vals[i] * d_alpha_vals[i]
@@ -76,7 +81,7 @@ def compute_grads_coo(x, A_rows, A_cols, adj_matrix, weight,
     for i in range(N):
         assert torch.allclose(dot_prods[i], dot_prods_dense[i])
 
-    dE_vals = torch.zeros(A_cols.shape[0], dtype=dtype)
+    dE_vals = torch.zeros((nnz, heads), dtype=dtype)
     for i in range(nnz):
         dE_vals[i] = (d_alpha_vals[i] - dot_prods[A_cols[i]]) * Phi_vals[i]
 
@@ -89,44 +94,45 @@ def compute_grads_coo(x, A_rows, A_cols, adj_matrix, weight,
 
     dC_vals = dE_vals * d_leaky_relu(C_vals)
 
-    dl = torch.zeros((N,), dtype=dtype)
-    dr = torch.zeros((N,), dtype=dtype)
+    dl = torch.zeros((N, heads), dtype=dtype)
+    dr = torch.zeros((N, heads), dtype=dtype)
     for i in range(nnz):
         col = A_cols[i]
         row = A_rows[i]
         dl[col] += dC_vals[i]
         dr[row] += dC_vals[i]
 
-    dH_prime = torch.outer(dl, att_dst[0, 0]) + torch.outer(dr,
-                                                            att_src[0, 0])
+    dH_prime = torch.einsum('nh,hf->nhf', dl, att_dst[0]) + torch.einsum('nh,hf->nhf', dr,
+                                                                         att_src[0])
 
     for i in range(nnz):
         col = A_cols[i]
         row = A_rows[i]
         for k in range(F_out):
-            dH_prime[row, k] += Phi_vals[i] * out_grad[col, k]
+            dH_prime[row, :, k] += Phi_vals[i] * out_grad[col, :, k]
 
-    dWeights = x.T @ dH_prime  # F_in x F_out
-    d_x = dH_prime @ weight  # N x F_in
+    dWeights = x.T @ torch.reshape(dH_prime, (N, heads * F_out))  # F_in x F_out
+    d_x = torch.reshape(dH_prime, (N, heads * F_out)) @ weight  # N x F_in
 
-    grads['att_src'] = H_prime.T @ dr
-    grads['att_dst'] = H_prime.T @ dl
+    grads['att_src'] = torch.einsum('nhf,nh->hf', H_prime, dr)
+    grads['att_dst'] = torch.einsum('nhf,nh->hf', H_prime, dl)
     grads['lin_src.weight'] = dWeights.T
     grads['x'] = d_x
-    grads['H_prime'] = dH_prime
-    grads['att_weights'] = torch.tensor(
-        sparse.coo_matrix((d_alpha_vals, (A_cols, A_rows)),
-                          shape=(N, N)).todense())
+    # grads['H_prime'] = torch.reshape(dH_prime, (N, heads * F_out))
+    grads['H_prime'] = None
+    # grads['att_weights'] = torch.tensor(
+    #     sparse.coo_matrix((d_alpha_vals, (A_cols, A_rows)),
+    #                       shape=(N, N)).todense())
+    grads['att_weights'] = None
 
-    grads['bias'] = torch.sum(out_grad, dim=0)
+    grads['bias'] = torch.reshape(torch.sum(out_grad, dim=0), (heads * F_out,))
     return grads
 
-
-def test_bwd_weight_compute_coo():
+@pytest.mark.parametrize('heads', [1, 2])
+def test_bwd_weight_compute_coo(heads):
     N = 3
     F_in = 2
     F_out = 4
-    heads = 1
 
     adj_matrix, layer, random_mask, x = setup_data(N, F_in, F_out, heads)
     row, col, _ = adj_matrix.coo()
@@ -140,7 +146,7 @@ def test_bwd_weight_compute_coo():
     mygat_x.grad = None
     mygat_out = mygat.forward(mygat_x, adj_matrix_dense)
     assert torch.allclose(mygat_out, pred)
-    assert check_equal(mygat.att_weights.detach().numpy()[..., None],
+    assert check_equal(mygat.att_weights.detach().numpy(),
                        att_weights.to_dense().detach().numpy(), silent=True)
     loss = torch.sum(mygat_out * random_mask)
     mygat.H_prime.retain_grad()
