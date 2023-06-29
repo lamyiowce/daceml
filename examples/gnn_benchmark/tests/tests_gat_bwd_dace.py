@@ -9,6 +9,8 @@ from torch_geometric.nn import GATConv
 from examples.gnn_benchmark.sparse_mm.coomm import coomm
 from examples.gnn_benchmark.tests.common import check_equal, check_grads
 
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
 NEGATIVE_SLOPE = 0.2
 
 if torch.cuda.is_available():
@@ -220,8 +222,11 @@ def test_bwd_coo_dace():
     att_weights_out_vanilla = np.zeros((num_entries,), dtype=val_dtype)
     H_prime_out_vanilla = np.zeros((N, F_out), dtype=val_dtype)
 
+    x_cpu = x.get() if device == 'cuda' else x
+    rows_cpu = rows.get() if device == 'cuda' else rows
+    cols_cpu = cols.get() if device == 'cuda' else cols
     with torch.no_grad():
-        backward_fn.f(node_features=xp.array(x), rows=xp.array(rows), columns=xp.array(cols),
+        backward_fn.f(node_features=x_cpu, rows=rows_cpu, columns=cols_cpu,
                       lin_srcDOTweight=layer.lin_src.weight.detach().cpu().numpy(),
                       att_src=layer.att_src.detach().cpu().numpy(),
                       att_dst=layer.att_dst.detach().cpu().numpy(),
@@ -247,7 +252,7 @@ def test_bwd_coo_dace():
     vanilla_result['att_src'] = xp.copy(att_src_grad)
     vanilla_result['att_dst'] = xp.copy(att_dst_grad)
 
-    check_equal(expected_pred=xp.array(mygat.H_prime.detach()), pred=H_prime_out_vanilla,
+    check_equal(expected_pred=np.array(mygat.H_prime.detach().cpu()), pred=H_prime_out_vanilla,
                 name='H_prime')
     check_equal(expected_pred=xp.array(mygat.att_weights.detach()),
                 pred=xps.coo_matrix((xp.array(att_weights_out_vanilla), (cols, rows)),
