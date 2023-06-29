@@ -7,8 +7,7 @@ import torch
 from torch_geometric.nn import GATConv
 
 from examples.gnn_benchmark.sparse_mm.coomm import coomm
-from examples.gnn_benchmark.tests.common import check_equal
-from examples.gnn_benchmark.tests.tests_gat_bwd import check_grads
+from examples.gnn_benchmark.tests.common import check_equal, check_grads
 
 NEGATIVE_SLOPE = 0.2
 

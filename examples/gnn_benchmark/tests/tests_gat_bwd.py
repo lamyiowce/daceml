@@ -2,70 +2,14 @@ import copy
 from typing import Dict
 
 import numpy as np
-import scipy
 import torch
 from scipy import sparse
-from torch.nn.parameter import Parameter
-from torch_geometric.nn import GATConv
-from torch_sparse import SparseTensor
 
-from examples.gnn_benchmark.tests.common import check_equal
+from examples.gnn_benchmark.tests.common import check_equal, check_grads, pred_torch, setup_data
+from examples.gnn_benchmark.tests.tests_mygat import MyGat
 
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
-
-
-def get_grad_as_numpy(array):
-    if hasattr(array, 'grad'):
-        if array.grad is not None:
-            grad = array.grad.detach().cpu()
-        else:
-            grad = array.detach().cpu()
-    elif isinstance(array, np.ndarray):
-        grad = array
-    else:
-        grad = array.get()
-
-    return grad
-
-
-def check_grads(expected_params, result):
-    messages = []
-    for name, param in expected_params.items():
-        expected_grad = get_grad_as_numpy(param)
-        if result[name] is not None:
-            grad = get_grad_as_numpy(result[name])
-            correct, message = check_equal(expected_grad,
-                                           grad,
-                                           name=name + ' grad', do_assert=False)
-            if not correct:
-                messages.append(message)
-                print(message)
-    assert len(messages) == 0, str(messages)
-
-
-def pred_torch(adj_matrix, layer, random_mask, x):
-    # PyG requires that the adj matrix is transposed when using SparseTensor.
-    pred, att_weights = layer(x, adj_matrix.t(), return_attention_weights=True)
-    loss = torch.sum(pred * random_mask)
-    pred.retain_grad()
-    loss.backward()
-    return att_weights, pred
-
-
-def setup_data(N, F_in, F_out, heads, seed=42):
-    dtype = torch.float32
-    negative_slope = 0.2
-    torch.random.manual_seed(seed)
-    np.random.seed(seed)
-    layer = GATConv(F_in, F_out, heads=heads, add_self_loops=False,
-                    negative_slope=negative_slope, bias=True)
-    x = torch.randn(N, F_in, requires_grad=True)
-    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
-    graph.data = np.ones_like(graph.data)
-    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(dtype))
-    random_mask = torch.arange(N * F_out).resize(N, F_out).to(dtype) / 10
-    return adj_matrix, layer, random_mask, x
 
 
 def gat_forward(N: int, A: sparse.csr_matrix, H: np.ndarray,
@@ -212,61 +156,6 @@ def gat_backward(N: int, ctx: Dict[str, np.array], A: sparse.csr_matrix,
     }
 
     return grads
-
-
-class MyGat(torch.nn.Module):
-    def __init__(self, weight, att_src, att_dst, bias=None):
-        super().__init__()
-        self.weight = copy.deepcopy(weight)
-        self.att_src = copy.deepcopy(att_src)
-        self.att_dst = copy.deepcopy(att_dst)
-        if bias is not None:
-            self.bias = copy.deepcopy(bias)
-
-    def forward(self, x, adj_matrix):
-        self.H_prime = x @ self.weight.t()  # N x F_out
-        alpha_src = torch.sum(self.H_prime * self.att_src[0], dim=-1)  # N x H
-        alpha_dst = torch.sum(self.H_prime * self.att_dst[0], dim=-1)  # N x H
-        C = (alpha_src[None, :] + alpha_dst[:, None])  # N x N x H
-        Tau = adj_matrix.t() * torch.exp(torch.maximum(0.2 * C, C))
-        Tau_sum = torch.sum(Tau, dim=1)[:, None]  # N x 1 x H
-        self.att_weights = Tau / Tau_sum  # N x N x H
-        Z = (adj_matrix.t() * self.att_weights) @ self.H_prime  # N x H
-        return Z + self.bias
-
-
-def test_mygat():
-    N = 3
-    F_in = 2
-    F_out = 4
-    heads = 1
-
-    adj_matrix, layer, random_mask, x = setup_data(N, F_in, F_out, heads)
-    adj_matrix_dense = adj_matrix.to_dense()
-
-    att_weights, pred = pred_torch(adj_matrix, layer, random_mask, x)
-
-    mygat = MyGat(weight=layer.lin_src.weight, att_src=layer.att_src,
-                  att_dst=layer.att_dst, bias=layer.bias)
-    mygat_x = copy.deepcopy(x)
-    mygat_x.grad = None
-    mygat_out = mygat.forward(mygat_x, adj_matrix_dense)
-    assert torch.allclose(mygat_out, pred)
-    assert check_equal(mygat.att_weights.detach().numpy()[..., None],
-                       att_weights.to_dense().detach().numpy())
-    loss = torch.sum(mygat_out * random_mask)
-    mygat.H_prime.retain_grad()
-    mygat.att_weights.retain_grad()
-    loss.backward()
-
-    params = dict(layer.named_parameters())
-    params['x'] = x
-
-    mygat_params = dict(mygat.named_parameters())
-    mygat_params['x'] = mygat_x
-    mygat_params['lin_src.weight'] = mygat_params['weight']
-
-    check_grads(expected_params=params, result=mygat_params)
 
 
 def test_paper():
