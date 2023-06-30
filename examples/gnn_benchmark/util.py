@@ -178,9 +178,14 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
 
     # For GAT backward COO.
     fn = functools.partial(sdfg_util.set_memory_to_register,
-                           array_name='__tmp0',
+                           array_name='__tmp\d+',
                            expected_shape=(1,))
     add_hook(dace_model, "Set __tmp0 to register", fn, backward)
+    fn = functools.partial(sdfg_util.set_memory_to_register,
+                           array_name='.+_mult',
+                           expected_shape=(1,))
+    add_hook(dace_model, "Set mults to register", fn, backward)
+
     # dace_model.append_post_onnx_hook("Set __tmp1 to register", fn)
     # dace_model.append_post_autodiff_hook("Set __tmp1 to register", fn)
 
