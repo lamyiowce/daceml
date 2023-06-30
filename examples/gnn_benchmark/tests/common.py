@@ -59,10 +59,10 @@ def setup_data(N, F_in, F_out, heads, seed=42):
                     negative_slope=negative_slope, bias=True)
     x = torch.randn(N, F_in, requires_grad=True)
     graph = scipy.sparse.random(N, N, density=0.5, format='csr')
-    graph.data = np.ones_like(graph.data)
-    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(dtype))
+    graph.data = np.ones_like(graph.data, dtype=np.float32)
+    adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(dtype=dtype))
     random_mask = torch.arange(N * F_out * heads).resize(N, heads * F_out).to(dtype) / 10
-    return adj_matrix, layer, random_mask, x
+    return adj_matrix, layer, random_mask, x, graph
 
 
 def get_grad_as_numpy(array):

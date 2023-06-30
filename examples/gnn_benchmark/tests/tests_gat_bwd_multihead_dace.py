@@ -8,9 +8,8 @@ from torch_geometric.nn import GATConv
 
 from examples.gnn_benchmark.sparse_mm.coomm import coomm
 from examples.gnn_benchmark.tests.common import check_equal, check_grads, setup_data
+from examples.gnn_benchmark.tests.tests_mygat import MyGat
 
-torch.backends.cuda.matmul.allow_tf32 = False
-torch.backends.cudnn.allow_tf32 = False
 NEGATIVE_SLOPE = 0.2
 
 if torch.cuda.is_available():
@@ -21,37 +20,11 @@ else:
     import scipy.sparse as xps
 
 
-
-class MyGat(torch.nn.Module):
-    def __init__(self, weight, att_src, att_dst, bias=None):
-        super().__init__()
-        self.weight = weight.detach().clone()
-        print(weight.device)
-        print(self.weight.device)
-        self.att_src = att_src.detach().clone()
-        self.att_dst = att_dst.detach().clone()
-        if bias is not None:
-            self.bias = bias.detach().clone()
-
-    def forward(self, x, adj_matrix):
-        self.H_prime = x @ self.weight.t()  # N x F_out
-        self.H_prime.retain_grad()
-        alpha_src = torch.sum(self.H_prime * self.att_src[0], dim=-1)  # N x H
-        alpha_dst = torch.sum(self.H_prime * self.att_dst[0], dim=-1)  # N x H
-        C = (alpha_src[None, :] + alpha_dst[:, None])  # N x N x H
-        Tau = adj_matrix.t() * torch.exp(torch.maximum(0.2 * C, C))
-        Tau_sum = torch.sum(Tau, dim=1)[:, None]  # N x 1 x H
-        self.att_weights = Tau / Tau_sum  # N x N x H
-        self.att_weights.retain_grad()
-        Z = (adj_matrix.t() * self.att_weights) @ self.H_prime  # N x H
-        return Z + self.bias
-
-
 def test_bwd_coo_dace():
     N = 3
     F_in = 2
     F_out = 4
-    heads = 1
+    heads = 2
     val_dtype = xp.float32
     negative_slope = 0.2
     torch.random.manual_seed(42)
@@ -87,37 +60,53 @@ def test_bwd_coo_dace():
         """
 
         ### RECOMPUTE FORWARD VALUES ###
+        # # Transform input features.
         # Transform input features.
-        features = np.einsum('ij,kj->ik', node_features,
-                             lin_srcDOTweight)
-        alpha_src = features @ att_src[0, 0]
-        alpha_dst = features @ att_dst[0, 0]
+        features_tmp = np.einsum('ij,kj->ik', node_features,
+                                 lin_srcDOTweight)
+        # features: N x H x F'
+        features = np.reshape(features_tmp,
+                              (N, heads, num_out_features))
+
+        # This ends up ridiculously slow because the outer loop is
+        # executed on gpu and everything inside is executed
+        # sequentially. The loop is moved to Sequential and the
+        # inside matmul to GPU in my_auto_optimize.py.
+
+        features_perm = np.empty((heads, N, num_out_features), dtype=dtype)
+        for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
+            features_perm[j, i, k] = features[i, j, k]
+
+        alpha_src = dace.define_local((heads, N,), dtype=dtype)
+        alpha_dst = dace.define_local((heads, N,), dtype=dtype)
+        for h in dace.map[0:heads] @ dace.dtypes.ScheduleType.Sequential:
+            alpha_src[h] = features_perm[h] @ att_src[0, h]
+            alpha_dst[h] = features_perm[h] @ att_dst[0, h]
 
         # Calculate attention weights.
-        C_vals = np.empty((num_entries,), dtype=val_dtype)
-        e = np.empty((num_entries,), dtype=val_dtype)
-        softmax_sum = np.zeros((N,), dtype=val_dtype)
+        e = np.empty((heads, num_entries), dtype=dtype)
+        softmax_sum = np.zeros((N, heads), dtype=dtype)
 
-        for i in dace.map[0:num_entries]:
+        for h, i in dace.map[0:heads, 0:num_entries]:
             row = rows[i]
             col = columns[i]
-            e_tmp = alpha_src[row] + alpha_dst[col]
-            C_vals[i] = e_tmp
+            e_tmp = alpha_src[h, row] + alpha_dst[h, col]
             # # LeakyReLU
             e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
             e_tmp = np.exp(e_tmp)
-            e[i] = e_tmp
+            e[h, i] = e_tmp
 
-            # # TODO: This is a workaround. With no schedule type, the results are incorrect
-            #  on CPU with autoopt.
+            # TODO: This is a workaround. With no schedule type, the results are incorrect with autoopt on CPU.
             # for i in dace.map[0:num_entries]@dace.dtypes.ScheduleType.Sequential:
             # col = columns[i]
-            softmax_sum[col] += e[i]
+            softmax_sum[col, h] += e[h, i]
 
         # Softmax normalization.
-        for j in dace.map[0:num_entries]:
+        for h, j in dace.map[0:heads, 0:num_entries]:
             colj = columns[j]
-            e[j] = e[j] / softmax_sum[colj]
+            e[h, j] = e[h, j] / softmax_sum[colj, h]
+
+
 
         ### COMPUTE THE GRADIENTS ###
         d_alpha_vals = np.zeros((num_entries,), dtype=val_dtype)
