@@ -3,7 +3,12 @@ import scipy
 import torch
 from torch_geometric.nn import GATConv
 from torch_sparse import SparseTensor
-
+if torch.cuda.is_available():
+    import cupy as xp
+    import cupyx.scipy.sparse as xps
+else:
+    import numpy as xp
+    import scipy.sparse as xps
 
 def check_equal(expected_pred, pred, name=None, do_assert=True, silent=False, atol=1e-6, rtol=1e-6):
     is_correct = np.allclose(pred, expected_pred, atol=atol, rtol=rtol)
@@ -55,11 +60,13 @@ def setup_data(N, F_in, F_out, heads, seed=42):
     negative_slope = 0.2
     torch.random.manual_seed(seed)
     np.random.seed(seed)
+    xp.random.seed(seed)
+
     layer = GATConv(F_in, F_out, heads=heads, add_self_loops=False,
                     negative_slope=negative_slope, bias=True)
-    x = torch.randn(N, F_in, requires_grad=True)
-    graph = scipy.sparse.random(N, N, density=0.5, format='csr')
-    graph.data = np.ones_like(graph.data, dtype=np.float32)
+    x = xp.random.rand(N, F_in).astype(xp.float32)
+    graph = xps.random(N, N, density=0.5, format='csr')
+    graph.data = xp.ones_like(graph.data, dtype=xp.float32)
     adj_matrix = SparseTensor.from_dense(torch.tensor(graph.A).to(dtype=dtype))
     random_mask = torch.arange(N * F_out * heads).resize(N, heads * F_out).to(dtype) / 10
     return adj_matrix, layer, random_mask, x, graph

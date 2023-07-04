@@ -167,7 +167,8 @@ def test_bwd_coo_dace():
         att_weights_grad[:] = d_alpha_vals  # K
         H_prime_grad[:] = dH_prime  # N x F_out
 
-        lin_srcDOTweight_grad[:] = np.transpose(node_features.T @ np.reshape(dH_prime, (N, heads * F_out)))  # head * F_out x F_in
+        lin_srcDOTweight_grad[:] = np.transpose(
+            node_features.T @ np.reshape(dH_prime, (N, heads * F_out)))  # head * F_out x F_in
         node_features_grad[:] = np.reshape(dH_prime,
                                            (N, heads * F_out)) @ lin_srcDOTweight  # N x F_in
 
@@ -236,8 +237,11 @@ def test_bwd_coo_dace():
     vanilla_result['x'] = xp.copy(x_grad)
     vanilla_result['H_prime'] = xp.copy(H_prime_grad)
     print(att_weights_grad.shape, rows.shape, cols.shape)
-    vanilla_result['att_weights'] = None  # xp.copy(
-    # xps.coo_matrix((xp.array(att_weights_grad), (cols, rows)), shape=(N, N)).todense())
+    vanilla_result['att_weights'] = None
+    for h in range(heads):
+        vanilla_result[f'att_weights_{h}'] = xp.copy(
+            xps.coo_matrix((xp.array(att_weights_grad[:, h]), (cols, rows)),
+                           shape=(N, N)).todense())
     vanilla_result['weight'] = xp.copy(weight_grad)
     vanilla_result['bias'] = xp.copy(bias_grad)
     vanilla_result['att_src'] = xp.copy(att_src_grad)
@@ -302,7 +306,11 @@ def test_bwd_coo_dace():
     result = {}
     result['x'] = x_grad
     result['H_prime'] = H_prime_grad
-    result['att_weights'] = None #xps.coo_matrix((att_weights_grad, (cols, rows)), shape=(N, N)).todense()
+    for h in range(heads):
+        result[f'att_weights_{h}'] = xp.copy(
+            xps.coo_matrix((xp.array(att_weights_grad[:, h]), (cols, rows)),
+                           shape=(N, N)).todense())
+    result['att_weights'] = None
     result['weight'] = weight_grad
     result['bias'] = bias_grad
     result['att_src'] = att_src_grad
