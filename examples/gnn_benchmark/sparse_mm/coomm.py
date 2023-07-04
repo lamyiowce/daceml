@@ -463,11 +463,18 @@ def coomm(
     num_entries = A_vals.shape[0]
     K = B.shape[1]
 
-    for i, k in dace.map[0:num_entries, 0:K] @ dace.dtypes.ScheduleType.Sequential:
-        col = A_cols[i]
-        mult = A_vals[i] * B[col, k]
-        row = A_rows[i]
-        C[row, k] += mult
+    if transA:
+        for i, k in dace.map[0:num_entries, 0:K] @ dace.dtypes.ScheduleType.Sequential:
+            row = A_cols[i]
+            mult = A_vals[i] * B[row, k]
+            col = A_rows[i]
+            C[col, k] += mult
+    else:
+        for i, k in dace.map[0:num_entries, 0:K] @ dace.dtypes.ScheduleType.Sequential:
+            col = A_cols[i]
+            mult = A_vals[i] * B[col, k]
+            row = A_rows[i]
+            C[row, k] += mult
 
 
 @oprepo.replaces('examples.gnn_benchmark.sparse_mm.coomm.coomm')
