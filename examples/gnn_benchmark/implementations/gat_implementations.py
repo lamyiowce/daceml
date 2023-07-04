@@ -514,6 +514,7 @@ class GATConvCOO(GATConvBase):
                 for i in dace.map[0:num_entries]:
                     row = rows[i]
                     col = columns[i]
+                    # TODO: alpha_src gets read num_entries times, not N!
                     e_tmp = alpha_src[row] + alpha_dst[col]
                     # # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)

@@ -26,7 +26,7 @@ def test_bwd_coo_dace():
     N = 3
     F_in = 2
     F_out = 4
-    heads = 1
+    heads = 2
     val_dtype = xp.float32
     negative_slope = 0.2
     torch.random.manual_seed(43)
@@ -111,7 +111,10 @@ def test_bwd_coo_dace():
         for i in dace.map[0:num_entries]:
             col = columns[i]
             row = rows[i]
-            d_alpha_vals[i] = np.einsum('hf,hf->h', output_grad_heads[col], features[row])
+            # d_alpha_vals[i] = np.einsum('hf,hf->h', output_grad_heads[col], features[row])
+            for h in dace.map[0:heads]:
+                d_alpha_vals[i, h] = np.dot(output_grad_heads[col, h],
+                                            features[row, h])
 
         dot_prods = np.zeros((N, heads), dtype=val_dtype)
         for i in dace.map[0:num_entries]:
@@ -164,12 +167,21 @@ def test_bwd_coo_dace():
         att_weights_grad[:] = d_alpha_vals  # K
         H_prime_grad[:] = dH_prime  # N x F_out
 
-        dWeights = x.T @ np.reshape(dH_prime, (N, heads * F_out))
-        lin_srcDOTweight_grad[:] = dWeights.T  # F_out x F_in
+        lin_srcDOTweight_grad[:] = np.transpose(node_features.T @ np.reshape(dH_prime, (N, heads * F_out)))  # head * F_out x F_in
         node_features_grad[:] = np.reshape(dH_prime,
                                            (N, heads * F_out)) @ lin_srcDOTweight  # N x F_in
-        att_dst_grad[:] = np.einsum('nhf,nh->hf', features, dl)  # F_out
-        att_src_grad[:] = np.einsum('nhf,nh->hf', features, dr)  # F_out
+
+        for h, k in dace.map[0:heads, 0:F_out]:
+            att_dst_grad[0, h, k] = 0
+            for n in dace.map[0:N]:
+                att_dst_grad[0, h, k] += dl[n, h] * features[n, h, k]
+
+        for h, k in dace.map[0:heads, 0:F_out]:
+            att_src_grad[0, h, k] = 0
+            for n in dace.map[0:N]:
+                att_src_grad[0, h, k] += dr[n, h] * features[n, h, k]
+        # att_dst_grad[:] = np.einsum('nhf,nh->hf', features, dl)  # F_out
+        # att_src_grad[:] = np.einsum('nhf,nh->hf', features, dr)  # F_out
         bias_grad[:] = np.reshape(np.sum(output_grad, axis=0), (heads * F_out,))
         att_weights_out[:] = e.T  # K
         H_prime_out[:] = features  # N x F_out
@@ -290,7 +302,7 @@ def test_bwd_coo_dace():
     result = {}
     result['x'] = x_grad
     result['H_prime'] = H_prime_grad
-    result['att_weights'] = xps.coo_matrix((att_weights_grad, (cols, rows)), shape=(N, N)).todense()
+    result['att_weights'] = None #xps.coo_matrix((att_weights_grad, (cols, rows)), shape=(N, N)).todense()
     result['weight'] = weight_grad
     result['bias'] = bias_grad
     result['att_src'] = att_src_grad

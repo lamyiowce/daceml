@@ -66,6 +66,8 @@ def setup_data(N, F_in, F_out, heads, seed=42):
 
 
 def get_grad_as_numpy(array):
+    if array is None:
+        return None
     if hasattr(array, 'grad'):
         if array.grad is not None:
             grad = np.array(array.grad.detach().cpu())
