@@ -12,8 +12,6 @@ from dace.transformation.auto.auto_optimize import set_fast_implementations, gre
 from dace.transformation.dataflow import MapCollapse, TrivialMapElimination
 from dace.transformation.interstate import LoopToMap, RefineNestedAccess
 
-from examples.gnn_benchmark import sdfg_util
-
 GraphViewType = Union[SDFG, SDFGState, gr.SubgraphView]
 
 
@@ -88,6 +86,10 @@ def my_auto_optimize(sdfg: SDFG,
                             new_schedule=dtypes.ScheduleType.Sequential,
                             label_regex=r'call_\d+_map',
                             expected_params=['h'])
+        change_map_schedule(sdfg,
+                            new_schedule=dtypes.ScheduleType.Sequential,
+                            label_regex=r'examples_gnn_benchmark_implementations_gat_backward_backward_fn_\d+',
+                            expected_params=['h'])
 
     #### END EDIT
 
@@ -134,11 +136,11 @@ def my_auto_optimize(sdfg: SDFG,
         set_library_node_implementation(sdfg, implementation_name='cuBLAS',
                                         node_name='_MatMult_gemv',
                                         schedule=dtypes.ScheduleType.GPU_Device)
-        sdfg_util.set_library_node_implementation(sdfg, implementation_name='cuSPARSE',
+        set_library_node_implementation(sdfg, implementation_name='cuSPARSE',
             node_name='coomm',
             schedule=dtypes.ScheduleType.GPU_Device)
 
-        sdfg_util.set_library_node_implementation(sdfg, implementation_name='cuSPARSE',
+        set_library_node_implementation(sdfg, implementation_name='cuSPARSE',
             node_name='csrmm',
             schedule=dtypes.ScheduleType.GPU_Device)
     # ########## END EDIT
