@@ -140,6 +140,9 @@ def my_auto_optimize(sdfg: SDFG,
         set_library_node_implementation(sdfg, implementation_name='cuBLAS',
                                         node_name='_MatMult_gemv',
                                         schedule=dtypes.ScheduleType.GPU_Device)
+        set_library_node_implementation(sdfg, implementation_name='cuBLAS',
+                                        node_name='_MatMult_gemvt',
+                                        schedule=dtypes.ScheduleType.GPU_Device)
         set_library_node_implementation(sdfg, implementation_name='cuSPARSE',
             node_name='coomm',
             schedule=dtypes.ScheduleType.GPU_Device)
