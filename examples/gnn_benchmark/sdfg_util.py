@@ -116,6 +116,25 @@ def set_memory_to_register(sdfg: dace.SDFG, array_name: str,
         set_storage(sub_sdfg)
 
 
+def ensure_datatype(sdfg: dace.SDFG, dtype: dace.dtypes.typeclass, array_name: str = None,
+                    expected_shape: Tuple[int, ...] = None):
+    def set_datatype(sdfg):
+        for state in sdfg.nodes():
+            for dnode in state.data_nodes():
+                if 'reserved_' in dnode.data:
+                    continue
+                arr = sdfg.arrays[dnode.data]
+                if (arr.transient and not isinstance(arr, dace.data.View)
+                        and arr.dtype == dace.float64):
+                    if expected_shape is None or arr.shape == expected_shape:
+                        if array_name is None or re.fullmatch(array_name, dnode.data):
+                            print(f"  Setting dtype for {dnode} to {dtype} from {arr.dtype}.")
+                            arr.dtype = dtype
+
+    for sub_sdfg in sdfg.all_sdfgs_recursive():
+        set_datatype(sub_sdfg)
+
+
 def apply_to_both(fn: Callable[[dace.SDFG], None]):
     def wrapper(forward_sdfg, backward_sdfg):
         fn(forward_sdfg)
@@ -180,7 +199,8 @@ def get_tb_maps_recursive(subgraph):
                 dace.dtypes.ScheduleType.GPU_ThreadBlock_Dynamic,
         ):
             res.append(
-                (node.map, {dace.symbol(k): dace.symbol(k) for k in node.map.range.free_symbols}))
+                (node.map,
+                 {dace.symbol(k): dace.symbol(k) for k in node.map.range.free_symbols}))
     return res
 
 

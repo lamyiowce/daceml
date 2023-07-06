@@ -136,7 +136,8 @@ class GATConvBackwardCOO(BackwardImplementation):
                 #     mult = e[i] * output_grad[col, k]
                 #     row = rows[i]
                 #     dH_prime[row, k] += mult
-                coomm(A_rows=rows, A_cols=columns, A_vals=e, B=output_grad, C=out_reshaped_dH_prime, beta=1.0,
+                coomm(A_rows=rows, A_cols=columns, A_vals=e, B=output_grad, C=out_reshaped_dH_prime,
+                      beta=1.0,
                       transA=False)
 
                 for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
@@ -207,7 +208,8 @@ class GATConvBackwardCOO(BackwardImplementation):
                     # d_alpha_vals[i] = np.einsum('hf,hf->h', output_grad_heads[col], features[row])
                     # d_alpha_vals[i, h] = np.dot(output_grad_heads[col, h],
                     #                             features[row, h])
-                    tmp = 0.0
+                    tmp = dace.define_local_scalar(val_dtype)
+                    tmp[:] = 0
                     for k in dace.map[0:F_out]:
                         # with dace.tasklet:
                         #     out_grad << output_grad_heads[col, h, k]
@@ -230,30 +232,43 @@ class GATConvBackwardCOO(BackwardImplementation):
                     col = columns[i]
                     dE_vals[i] = (d_alpha_vals[i] - dot_prods[col]) * e[:, i]
 
-                dC_vals = np.empty((num_entries, heads), dtype=val_dtype)
-                for h, i in dace.map[0:heads, 0:num_entries]:
-                    dC_vals[i, h] = dE_vals[i, h] * (C_vals[i, h] > 0) + dE_vals[i, h] * (
-                            C_vals[i, h] <= 0) * negative_slope
-                # Bad thread mapping:
-                # dC_vals = dE_vals * (C_vals > 0) + dE_vals * (C_vals <= 0) * negative_slope
+                # dC_vals = np.empty((num_entries, heads), dtype=val_dtype)
+                # for h, i in dace.map[0:heads, 0:num_entries]:
+                #     dC_vals[i, h] = dE_vals[i, h] * (C_vals[i, h] > 0) + dE_vals[i, h] * (
+                #             C_vals[i, h] <= 0) * negative_slope
+                # # Bad thread mapping:
+                # # dC_vals = dE_vals * (C_vals > 0) + dE_vals * (C_vals <= 0) * negative_slope
+                #
+                # dl = np.zeros((N, heads), dtype=val_dtype)
+                # dr = np.zeros((N, heads), dtype=val_dtype)
+                #
+                # # Generates an incorrect SDFG!!!!
+                # # for i in dace.map[0:num_entries]:
+                # #     col = columns[i]
+                # #     row = rows[i]
+                # #     dl[col] += dC_vals[i]
+                # #     dr[row] += dC_vals[i]
+                #
+                # for i in dace.map[0:num_entries]:
+                #     col = columns[i]
+                #     dl[col] += dC_vals[i]
+                #
+                # for i in dace.map[0:num_entries]:
+                #     row = rows[i]
+                #     dr[row] += dC_vals[i]
 
                 dl = np.zeros((N, heads), dtype=val_dtype)
                 dr = np.zeros((N, heads), dtype=val_dtype)
-
-                # Generates an incorrect SDFG!!!!
-                # for i in dace.map[0:num_entries]:
-                #     col = columns[i]
-                #     row = rows[i]
-                #     dl[col] += dC_vals[i]
-                #     dr[row] += dC_vals[i]
-
-                for i in dace.map[0:num_entries]:
+                neg_slope = dace.define_local_scalar(val_dtype)
+                neg_slope[:] = negative_slope
+                for h, i in dace.map[0:heads, 0:num_entries]:
+                    dC_val = dace.define_local_scalar(val_dtype)
+                    dC_val[:] = dE_vals[i, h] * (C_vals[i, h] > 0) + dE_vals[i, h] * (
+                            C_vals[i, h] <= 0) * neg_slope
                     col = columns[i]
-                    dl[col] += dC_vals[i]
-
-                for i in dace.map[0:num_entries]:
                     row = rows[i]
-                    dr[row] += dC_vals[i]
+                    dr[row, h] += dC_val
+                    dl[col, h] += dC_val
 
                 dH_prime_perm = np.zeros((heads, N, F_out), dtype=val_dtype)
 
@@ -270,29 +285,34 @@ class GATConvBackwardCOO(BackwardImplementation):
                 dH_prime = np.empty((N, heads, F_out), dtype=val_dtype)
                 for h, i, k in dace.map[0:heads, 0:N,
                                0:F_out] @ dace.dtypes.ScheduleType.Sequential:
-                    dH_prime[i, h, k] = dH_prime_perm[h, i, k]
-
-                for h, i, k in dace.map[0:heads, 0:N,
-                               0:F_out] @ dace.dtypes.ScheduleType.Sequential:
-                    dH_prime[i, h, k] += dl[i, h] * att_dst[0, h, k]
-
-                for h, i, k in dace.map[0:heads, 0:N,
-                               0:F_out] @ dace.dtypes.ScheduleType.Sequential:
-                    dH_prime[i, h, k] += dr[i, h] * att_src[0, h, k]
+                    dH_prime[i, h, k] = dH_prime_perm[h, i, k] + dl[i, h] * att_dst[0, h, k] + dr[
+                        i, h] * att_src[0, h, k]
 
                 out_reshaped_dH_prime[:] = np.reshape(dH_prime, (N, heads * F_out))
                 lin_srcDOTweight_grad[:] = np.einsum('nm,nf->fm', node_features,
                                                      out_reshaped_dH_prime)
 
-                for h, k in dace.map[0:heads, 0:F_out]:
-                    att_dst_grad[0, h, k] = 0
-                    for n in dace.map[0:N]:
-                        att_dst_grad[0, h, k] += dl[n, h] * features[n, h, k]
+                att_src_grad[:] = 0
+                att_dst_grad[:] = 0
 
-                for h, k in dace.map[0:heads, 0:F_out]:
-                    att_src_grad[0, h, k] = 0
-                    for n in dace.map[0:N]:
-                        att_src_grad[0, h, k] += dr[n, h] * features[n, h, k]
+                for h, k, n in dace.map[0:heads, 0:F_out, 0:N]:
+                    att_dst_grad[0, h, k] += dl[n, h] * features[n, h, k]
+                    att_src_grad[0, h, k] += dr[n, h] * features[n, h, k]
+
+                # for h in dace.map[0:heads]:
+                #     att_src_grad[0, h] = features_perm[h] @ dl[:, h]
+                #     att_dst_grad[0, h] = features_perm[h] @ dr[:, h]
+                # att_dst_grad[:] = np.einsum('nhf,nh->hf', features, dl)  # F_out
+
+                # for h, k in dace.map[0:heads, 0:F_out]:
+                #     att_dst_grad[0, h, k] = 0
+                #     for n in dace.map[0:N]:
+                #         att_dst_grad[0, h, k] += dl[n, h] * features[n, h, k]
+                #
+                # for h, k in dace.map[0:heads, 0:F_out]:
+                #     att_src_grad[0, h, k] = 0
+                #     for n in dace.map[0:N]:
+                #         att_src_grad[0, h, k] += dr[n, h] * features[n, h, k]
                 bias_grad[:] = np.reshape(np.sum(output_grad, axis=0), (heads * F_out,))
 
         if compute_grad_for_node_features:
