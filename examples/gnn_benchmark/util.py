@@ -210,6 +210,12 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
         add_hook(dace_model,
                  "Move 'examples_gnn_benchmark_implementations_gat_backward_backward_fn_128_4___tmp32' to register",
                  fn, backward)
+        fn = functools.partial(sdfg_util.set_memory_to_register,
+                               array_name=r'examples_gnn_benchmark_implementations_gat_backward_basic_gat_backward_\d+_\d+___tmp\d\d',
+                               expected_shape=(1,))
+        add_hook(dace_model,
+                 "Move 'examples_gnn_benchmark_implementations_gat_backward_basic_gat_backward_142_8___tmp18' to register",
+                 fn, backward)
 
     print("/////////////////////")
     print(">>> Model hooks:")
