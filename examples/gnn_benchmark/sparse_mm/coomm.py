@@ -322,7 +322,7 @@ class COOMM(dace.sdfg.nodes.LibraryNode):
     # Global properties
     implementations = {"cuSPARSE": ExpandCOOMMCuSPARSE} if os.environ.get(
         'CUDA_VISIBLE_DEVICES', '') != '' else {
-        "pure": ExpandCOOMMCpp}
+        "pure": ExpandCOOMMCpp, "cuSPARSE": ExpandCOOMMCuSPARSE}
     default_implementation = None
 
     # Object fields
