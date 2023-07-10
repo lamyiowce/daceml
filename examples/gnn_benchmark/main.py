@@ -109,6 +109,7 @@ def main():
     print("Implementation: ", args.impl)
     print("DaCe indices dtype: ", args.idx_dtype)
     print("DaCe values dtype: ", args.val_dtype)
+    print("CUDA available: ", torch.cuda.is_available())
 
     # Define models.
     additional_kwargs = {} if 'gcn' in args.model else {'num_heads': args.heads}
