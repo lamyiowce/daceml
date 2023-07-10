@@ -150,6 +150,10 @@ def my_auto_optimize(sdfg: SDFG,
         set_library_node_implementation(sdfg, implementation_name='cuSPARSE',
             node_name='csrmm',
             schedule=dtypes.ScheduleType.GPU_Device)
+
+        set_library_node_implementation(sdfg, implementation_name='cuTENSOR',
+            node_name='_Permute_',
+            schedule=dtypes.ScheduleType.GPU_Device)
     # ########## END EDIT
 
     # NOTE: We need to `infer_types` in case a LibraryNode expands to other LibraryNodes (e.g., np.linalg.solve)
