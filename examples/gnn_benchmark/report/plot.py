@@ -219,7 +219,7 @@ def plot_gat_bwd():
         filenames=[
             '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
             '06.06.16.48-pyg-gat-ogbn-arxiv-203173.csv',
-            "06.07.10.47-gat-ogbn-arxiv-206311.csv",
+            "06.07.15.21-gat-ogbn-arxiv-206508.csv",
 
         ],
         backward=True
@@ -230,7 +230,7 @@ def plot_gat_bwd():
         filenames=['18.05.14.43-pyg-gat-cora-198393.csv',
                    '18.05.14.59-pyg-gat-cora-198400.csv',
                    '06.06.16.41-pyg-gat-cora-203173.csv',
-                   "06.07.10.31-gat-cora-206311.csv",
+                   "06.07.15.09-gat-cora-206508.csv",
                    ],
         backward=True
     )
