@@ -167,9 +167,7 @@ class GATConvBackwardCOO(BackwardImplementation):
                 # sequentially. The loop is moved to Sequential and the
                 # inside matmul to GPU in my_auto_optimize.py.
 
-                features_perm = np.empty((heads, N, F_out), dtype=val_dtype)
-                for j, i, k in dace.map[0:heads, 0:N, 0:F_out]:
-                    features_perm[j, i, k] = features[i, j, k]
+                features_perm = np.transpose(features, (1, 0, 2))
 
                 alpha_src = dace.define_local((heads, N,), dtype=val_dtype)
                 alpha_dst = dace.define_local((heads, N,), dtype=val_dtype)
@@ -273,11 +271,7 @@ class GATConvBackwardCOO(BackwardImplementation):
 
                 dH_prime_perm = np.zeros((heads, N, F_out), dtype=val_dtype)
 
-                output_grad_perm = np.empty((heads, N, F_out), dtype=val_dtype)
-                for h, k, i in dace.map[0:heads, 0:F_out, 0:N]:
-                    output_grad_perm[h, i, k] = output_grad_heads[i, h, k]
-                # Bad thread block sizes:
-                # np.transpose(output_grad_heads, (1, 0, 2))
+                output_grad_perm = np.transpose(output_grad_heads, (1, 0, 2))
                 for h in range(heads):
                     coomm(A_rows=rows, A_cols=columns, A_vals=e[h], B=output_grad_perm[h],
                           C=dH_prime_perm[h],
@@ -290,8 +284,10 @@ class GATConvBackwardCOO(BackwardImplementation):
                         h, i] * att_src[0, h, k]
 
                 out_reshaped_dH_prime[:] = np.reshape(dH_prime, (N, heads * F_out))
-                lin_srcDOTweight_grad[:] = np.einsum('nm,nf->fm', node_features,
-                                                     out_reshaped_dH_prime)
+                # This has to be np.einsum('nf,nm->fm', out_reshaped_dH_prime, node_features),
+                # not np.einsum('nm,nf->fm', node_features, out_reshaped_dH_prime), because
+                # the latter is bugged for f = m.
+                lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime, node_features)
 
                 att_src_grad[:] = 0
                 att_dst_grad[:] = 0

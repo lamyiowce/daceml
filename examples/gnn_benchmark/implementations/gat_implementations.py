@@ -549,9 +549,7 @@ class GATConvCOO(GATConvBase):
                 # sequentially. The loop is moved to Sequential and the
                 # inside matmul to GPU in my_auto_optimize.py.
 
-                features_perm = np.empty((heads, N, num_out_features), dtype=dtype)
-                for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
-                    features_perm[j, i, k] = features[i, j, k]
+                features_perm = np.transpose(features, (1, 0, 2))
 
                 alpha_src = dace.define_local((heads, N,), dtype=dtype)
                 alpha_dst = dace.define_local((heads, N,), dtype=dtype)
@@ -680,9 +678,7 @@ class GATConvCSC(GATConvBase):
                     # sequentially. The loop is moved to Sequential and the
                     # inside matmul to GPU in my_auto_optimize.py.
 
-                    features_perm = np.empty((heads, N, num_out_features), dtype=dtype)
-                    for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
-                        features_perm[j, i, k] = features[i, j, k]
+                    features_perm = np.transpose(features, (1, 0, 2))
 
                     alpha_src = dace.define_local((heads, N,), dtype=dtype)
                     alpha_dst = dace.define_local((heads, N,), dtype=dtype)
