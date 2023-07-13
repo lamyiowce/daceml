@@ -33,6 +33,7 @@ class GATConvBackwardCOO(BackwardImplementation):
         num_entries = row_shape[0]
 
         negative_slope = forward_node.module.negative_slope
+        one_min_neg_slope = 1 - negative_slope
         heads = forward_node.module.heads
         F_out = forward_node.module.out_channels
 
@@ -68,7 +69,7 @@ class GATConvBackwardCOO(BackwardImplementation):
                 alpha_dst = features @ att_dst[0, 0]
 
                 # Calculate attention weights.
-                C_vals = np.empty((num_entries,), dtype=val_dtype)
+                C_vals = np.empty((num_entries,), dtype=dace.bool)
                 e = np.empty((num_entries,), dtype=val_dtype)
                 softmax_sum = np.zeros((N,), dtype=val_dtype)
 
@@ -76,7 +77,7 @@ class GATConvBackwardCOO(BackwardImplementation):
                     row = rows[i]
                     col = columns[i]
                     e_tmp = alpha_src[row] + alpha_dst[col]
-                    C_vals[i] = e_tmp
+                    C_vals[i] = e_tmp > 0
                     # # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
                     e_tmp = np.exp(e_tmp)
@@ -105,38 +106,26 @@ class GATConvBackwardCOO(BackwardImplementation):
                     col = columns[i]
                     dot_prods[col] += e[i] * d_alpha_vals[i]
 
-                dE_vals = np.zeros((num_entries,), dtype=val_dtype)
-                for i in dace.map[0:num_entries]:
-                    col = columns[i]
-                    dE_vals[i] = (d_alpha_vals[i] - dot_prods[col]) * e[i]
-
-                dC_vals = dE_vals * (C_vals > 0) + dE_vals * (C_vals <= 0) * negative_slope
-
                 dl = np.zeros((N,), dtype=val_dtype)
                 dr = np.zeros((N,), dtype=val_dtype)
-
-                # Generates an incorrect SDFG!!!!
-                # for i in dace.map[0:num_entries]:
-                #     col = columns[i]
-                #     row = rows[i]
-                #     dl[col] += dC_vals[i]
-                #     dr[row] += dC_vals[i]
-
+                neg_slope = dace.define_local_scalar(val_dtype)
+                neg_slope[:] = negative_slope
                 for i in dace.map[0:num_entries]:
                     col = columns[i]
-                    dl[col] += dC_vals[i]
-
-                for i in dace.map[0:num_entries]:
                     row = rows[i]
-                    dr[row] += dC_vals[i]
+                    dE_val = dace.define_local_scalar(val_dtype)
+                    dE_val[:] = (d_alpha_vals[i] - dot_prods[col]) * e[i]
+
+                    dC_val = dace.define_local_scalar(val_dtype)
+                    # dC_val[:] = dE_val * (C_vals[i] > 0) + dE_val * (
+                    #         C_vals[i] <= 0) * neg_slope
+                    dC_val[:] = dE_val * (neg_slope + one_min_neg_slope * C_vals[i])
+                    dr[row] += dC_val
+                    dl[col] += dC_val
+
 
                 out_reshaped_dH_prime[:] = np.zeros((N, F_out), dtype=val_dtype)
 
-                # for i, k in dace.map[0:num_entries, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
-                #     col = columns[i]
-                #     mult = e[i] * output_grad[col, k]
-                #     row = rows[i]
-                #     dH_prime[row, k] += mult
                 coomm(A_rows=rows, A_cols=columns, A_vals=e, B=output_grad, C=out_reshaped_dH_prime,
                       beta=1.0,
                       transA=False)
@@ -149,8 +138,8 @@ class GATConvBackwardCOO(BackwardImplementation):
 
                 lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime,
                                                      node_features)  # F_out x F_in
-                att_dst_grad[:] = features.T @ dl  # F_out
-                att_src_grad[:] = features.T @ dr  # F_out
+                att_dst_grad[:] = dl @ features  # F_out
+                att_src_grad[:] = dr @ features  # F_out
                 bias_grad[:] = np.sum(output_grad, axis=0)
             else:
                 ### RECOMPUTE FORWARD VALUES ###
@@ -178,13 +167,13 @@ class GATConvBackwardCOO(BackwardImplementation):
                 # Calculate attention weights.
                 e = np.empty((heads, num_entries), dtype=val_dtype)
                 softmax_sum = np.zeros((N, heads), dtype=val_dtype)
-                C_vals = np.empty((num_entries, heads), dtype=val_dtype)
+                C_vals = np.empty((num_entries, heads), dtype=dace.bool)
 
                 for h, i in dace.map[0:heads, 0:num_entries]:
                     row = rows[i]
                     col = columns[i]
                     e_tmp = alpha_src[h, row] + alpha_dst[h, col]
-                    C_vals[i, h] = e_tmp
+                    C_vals[i, h] = e_tmp > 0
                     # # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
                     e_tmp = np.exp(e_tmp)
@@ -222,50 +211,25 @@ class GATConvBackwardCOO(BackwardImplementation):
                     # d_alpha_vals[i, h] += output_grad_heads[col, h, k] * features[row, h, k]
 
                 dot_prods = np.zeros((N, heads), dtype=val_dtype)
-                for i in dace.map[0:num_entries]:
+                for h, i in dace.map[0:heads, 0:num_entries]:
                     col = columns[i]
-                    dot_prods[col] += e[:, i] * d_alpha_vals[i]
+                    dot_prods[col, h] += e[h, i] * d_alpha_vals[i, h]
 
-                dE_vals = np.empty((num_entries, heads), dtype=val_dtype)
-                for i in dace.map[0:num_entries]:
-                    col = columns[i]
-                    dE_vals[i] = (d_alpha_vals[i] - dot_prods[col]) * e[:, i]
-
-                # dC_vals = np.empty((num_entries, heads), dtype=val_dtype)
-                # for h, i in dace.map[0:heads, 0:num_entries]:
-                #     dC_vals[i, h] = dE_vals[i, h] * (C_vals[i, h] > 0) + dE_vals[i, h] * (
-                #             C_vals[i, h] <= 0) * negative_slope
-                # # Bad thread mapping:
-                # # dC_vals = dE_vals * (C_vals > 0) + dE_vals * (C_vals <= 0) * negative_slope
-                #
-                # dl = np.zeros((N, heads), dtype=val_dtype)
-                # dr = np.zeros((N, heads), dtype=val_dtype)
-                #
-                # # Generates an incorrect SDFG!!!!
-                # # for i in dace.map[0:num_entries]:
-                # #     col = columns[i]
-                # #     row = rows[i]
-                # #     dl[col] += dC_vals[i]
-                # #     dr[row] += dC_vals[i]
-                #
-                # for i in dace.map[0:num_entries]:
-                #     col = columns[i]
-                #     dl[col] += dC_vals[i]
-                #
-                # for i in dace.map[0:num_entries]:
-                #     row = rows[i]
-                #     dr[row] += dC_vals[i]
 
                 dl = np.zeros((heads, N), dtype=val_dtype)
                 dr = np.zeros((heads, N), dtype=val_dtype)
                 neg_slope = dace.define_local_scalar(val_dtype)
                 neg_slope[:] = negative_slope
                 for h, i in dace.map[0:heads, 0:num_entries]:
-                    dC_val = dace.define_local_scalar(val_dtype)
-                    dC_val[:] = dE_vals[i, h] * (C_vals[i, h] > 0) + dE_vals[i, h] * (
-                            C_vals[i, h] <= 0) * neg_slope
                     col = columns[i]
                     row = rows[i]
+                    dE_val = dace.define_local_scalar(val_dtype)
+                    dE_val[:] = (d_alpha_vals[i, h] - dot_prods[col, h]) * e[h, i]
+
+                    dC_val = dace.define_local_scalar(val_dtype)
+                    # dC_val[:] = dE_val * (C_vals[i, h] > 0) + dE_val * (
+                    #         C_vals[i, h] <= 0) * neg_slope
+                    dC_val[:] = dE_val * (neg_slope + one_min_neg_slope * C_vals[i, h])
                     dr[h, row] += dC_val
                     dl[h, col] += dC_val
 
@@ -289,9 +253,8 @@ class GATConvBackwardCOO(BackwardImplementation):
                 # the latter is bugged for f = m.
                 lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime, node_features)
 
-                att_src_grad[:] = 0
-                att_dst_grad[:] = 0
-
+                # att_src_grad[:] = 0
+                # att_dst_grad[:] = 0
                 # for h, k, n in dace.map[0:heads, 0:F_out, 0:N]:
                 #     att_dst_grad[0, h, k] += dl[n, h] * features[n, h, k]
                 #     att_src_grad[0, h, k] += dr[n, h] * features[n, h, k]
