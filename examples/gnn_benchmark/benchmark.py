@@ -65,7 +65,7 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                                     num_iters=10 if not small else 2,
                                     timing_iters=100 if not small else 3)
     print()
-    print(f"\n------ {model_name.upper()} FORWARD RUNTIME [ms] ------")
+    print(f"\n------ {model_name.upper()} {hidden_size} FORWARD RUNTIME [ms] ------")
     print_time_statistics(times, func_names)
     print()
 
@@ -100,7 +100,7 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                                     num_iters=5 if not small else 2,
                                     timing_iters=20 if not small else 3)
         print()
-        print(f"\n------ {model_name.upper()} BACKWARD RUNTIME [ms] ------")
+        print(f"\n------ {model_name.upper()} {hidden_size} BACKWARD RUNTIME [ms] ------")
         print_time_statistics(times, func_names)
         print()
 
