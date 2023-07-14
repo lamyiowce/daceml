@@ -237,7 +237,6 @@ def change_map_schedule(sdfg: dace.SDFG,
         f"⏲ ⏲ ⏲ Changing maps fitting {label_regex} schedules (params {expected_params}) to {new_schedule}")
     for node, _ in sdfg.all_nodes_recursive():
         if isinstance(node, dace.sdfg.nodes.MapEntry) \
-                and node.schedule == dace.dtypes.ScheduleType.GPU_Device \
                 and len(node.map.params):
             if re.fullmatch(label_regex, node.label):
                 if expected_params is None or set(node.map.params) == set(expected_params):

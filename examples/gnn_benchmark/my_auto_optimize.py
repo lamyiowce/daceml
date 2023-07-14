@@ -94,6 +94,14 @@ def my_auto_optimize(sdfg: SDFG,
                             new_schedule=dtypes.ScheduleType.Sequential,
                             label_regex=r'examples_gnn_benchmark_implementations_gat_backward_basic_gat_backward_\d+',
                             expected_params=['h'])
+        # change_map_schedule(sdfg,
+        #                     new_schedule=dtypes.ScheduleType.Sequential,
+        #                     label_regex=r'.*',
+        #                     expected_params=['seq'])
+        # change_map_schedule(sdfg,
+        #                     new_schedule=dtypes.ScheduleType.GPU_Device,
+        #                     label_regex=r'examples_gnn_benchmark_implementations_gat_backward_basic_gat_backward_.*',
+        #                     expected_params=['k', 'inner_i', 'h'])
 
     #### END EDIT
 

@@ -123,7 +123,6 @@ class GATConvBackwardCOO(BackwardImplementation):
                     dr[row] += dC_val
                     dl[col] += dC_val
 
-
                 out_reshaped_dH_prime[:] = np.zeros((N, F_out), dtype=val_dtype)
 
                 coomm(A_rows=rows, A_cols=columns, A_vals=e, B=output_grad, C=out_reshaped_dH_prime,
@@ -190,31 +189,30 @@ class GATConvBackwardCOO(BackwardImplementation):
 
                 # SDDMM
                 d_alpha_vals = np.empty((num_entries, heads), dtype=val_dtype)
-                for h, i in dace.map[0:heads, 0:num_entries]:
-                    col = columns[i]
-                    row = rows[i]
-                    # d_alpha_vals[i] = np.einsum('hf,hf->h', output_grad_heads[col], features[row])
-                    # d_alpha_vals[i, h] = np.dot(output_grad_heads[col, h],
-                    #                             features[row, h])
-                    tmp = dace.define_local_scalar(val_dtype)
-                    tmp[:] = 0
-                    for k in dace.map[0:F_out]:
-                        # with dace.tasklet:
-                        #     out_grad << output_grad_heads[col, h, k]
-                        #     feat << features[row, h, k]
-                        #     in_val << tmp
-                        #     out_val >> tmp
-                        #     out_val = in_val + out_grad * feat
-                        tmp += output_grad_heads[col, h, k] * features[row, h, k]
-                    d_alpha_vals[i, h] = tmp
 
-                    # d_alpha_vals[i, h] += output_grad_heads[col, h, k] * features[row, h, k]
+                for h, i in dace.map[0:heads, 0:num_entries]:
+                    d_alpha_vals[i, h] = 0
+
+                # max_grid_size = int(1 << 31)
+                # num_entries_round = 0
+                # if num_entries > max_grid_size:
+                #     num_entries_round = max_grid_size * (num_entries // max_grid_size)
+                #     for seq in dace.map[0:num_entries_round:max_grid_size]:
+                #         # for inner_i, h, k in dace.map[seq:seq+max_grid_size, 0:heads, 0:F_out]:
+                #         for h, k, inner_i in dace.map[0:heads, 0:F_out, seq:seq+max_grid_size]:
+                #             col = columns[inner_i]
+                #             row = rows[inner_i]
+                #             d_alpha_vals[inner_i, h] += output_grad_heads[col, h, k] * features[row, h, k]
+
+                for h, k, inner_i in dace.map[0:heads, 0:F_out, 0:num_entries]:
+                    col = columns[inner_i]
+                    row = rows[inner_i]
+                    d_alpha_vals[inner_i, h] += output_grad_heads[col, h, k] * features[row, h, k]
 
                 dot_prods = np.zeros((N, heads), dtype=val_dtype)
                 for h, i in dace.map[0:heads, 0:num_entries]:
                     col = columns[i]
                     dot_prods[col, h] += e[h, i] * d_alpha_vals[i, h]
-
 
                 dl = np.zeros((heads, N), dtype=val_dtype)
                 dr = np.zeros((heads, N), dtype=val_dtype)
@@ -251,7 +249,8 @@ class GATConvBackwardCOO(BackwardImplementation):
                 # This has to be np.einsum('nf,nm->fm', out_reshaped_dH_prime, node_features),
                 # not np.einsum('nm,nf->fm', node_features, out_reshaped_dH_prime), because
                 # the latter is bugged for f = m.
-                lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime, node_features)
+                lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime,
+                                                     node_features)
 
                 # att_src_grad[:] = 0
                 # att_dst_grad[:] = 0
@@ -260,7 +259,7 @@ class GATConvBackwardCOO(BackwardImplementation):
                 #     att_src_grad[0, h, k] += dr[n, h] * features[n, h, k]
 
                 for h in dace.map[0:heads]:
-                    att_src_grad[0, h, :] = dr[h] @ features_perm[h] # h x n x f_out times h x n = h x f_out
+                    att_src_grad[0, h, :] = dr[h] @ features_perm[h]  # N times N x F_out = F_out
                     # att_src_grad[0, h, :] = np.einsum('nf,n->f', features_perm[h], dr[h]) # h x n x f_out times h x n = h x f_out
 
                     att_dst_grad[0, h, :] = dl[h] @ features_perm[h]
