@@ -24,6 +24,6 @@ backward=--backward
 format=coo
 dataset=ogbn-arxiv
 hidden=64
-python main.py --mode benchmark --data $dataset --hidden $hidden --model $model --impl $format --torch none $backward
+python main.py --mode dry --data $dataset --hidden $hidden --model $model --impl $format --torch none $backward
 
 echo "Done :)"
