@@ -1,7 +1,8 @@
 import logging
+from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, Tuple, Type, Mapping
+from typing import Callable, Dict, Iterable, Tuple, Type, Mapping, List
 
 import dace
 import torch
@@ -26,12 +27,22 @@ ShapeFnType = Callable[..., Tuple[int, ...]]
 
 
 @dataclass
+class ArraySpec:
+    name: str
+    dtype: torch.dtype
+    torch_shape_fn_from_module: Callable[[torch.nn.Module], ShapeFnType]
+
+    def as_torch_spec(self, module: torch.nn.Module):
+        shape_fn = self.torch_shape_fn_from_module(module)
+        return self.name, self.dtype, shape_fn
+
+@dataclass
 class ReplacementInfo:
     module_name: str
     onnx_op: Type[nodes.Node]
-    infer_shape: Callable[[SymbolicShapeInference, NodeProto], None]
-    shape_fn_from_module: Callable[[torch.nn.Module], ShapeFnType]
-    output_dtype: torch.dtype
+    outputs: List[ArraySpec]
+    buffers: List[ArraySpec]
+    symbolic_shape_infer: Callable[[SymbolicShapeInference, NodeProto], None]
 
 
 MODULES_TO_REPLACE: Dict[str, ReplacementInfo] = {}
@@ -48,7 +59,7 @@ def get_replaced_onnx_op(name: str) -> Type[nodes.Node]:
 
 
 def make_schema_dict(name, inputs: Mapping[str, dace.typeclass],
-                     outputs: Mapping[str, dace.typeclass]):
+                     outputs: OrderedDict):
     intersection = [name for name in inputs if name in outputs]
     assert len(
         intersection
@@ -270,20 +281,30 @@ def register_replacement(
         module_name: str, inputs: Mapping[str, dace.typeclass],
         outputs: Mapping[str, dace.typeclass],
         shape_infer: Callable[[SymbolicShapeInference, 'NodeProto'], None],
-        shape_fn_from_module: Callable[[torch.nn.Module], ShapeFnType]):
-    if len(outputs) > 1:
-        raise NotImplementedError(
-            "Replacing nodes with more than 1 output is not supported.")
+        shape_fn_from_module: Callable[[torch.nn.Module], ShapeFnType],
+        buffer_specs: List[ArraySpec] = None):
+    buffer_specs = buffer_specs or []
 
-    output_dtype = next(iter(outputs.values()))
+    ordered_outputs_and_buffers = OrderedDict(outputs)
+    for buffer_spec in buffer_specs:
+        ordered_outputs_and_buffers[buffer_spec.name] = buffer_spec.dtype
 
-    schema_dict = make_schema_dict(module_name, inputs, outputs)
+    schema_dict = make_schema_dict(module_name, inputs, ordered_outputs_and_buffers)
     schema = ONNXSchema.from_json(schema_dict)
     onnx_op = generate_onnx_op_placeholder(schema)
+    output_specs = []
+    for name, dtype in outputs.items():
+        output_specs.append(
+            ArraySpec(
+                name=name,
+                dtype=TYPECLASS_TO_TORCH_DTYPE[dtype],
+                torch_shape_fn_from_module=shape_fn_from_module))
+
     replacement_info = ReplacementInfo(
         module_name=module_name,
-        infer_shape=shape_infer,
-        shape_fn_from_module=shape_fn_from_module,
         onnx_op=onnx_op,
-        output_dtype=TYPECLASS_TO_TORCH_DTYPE[output_dtype])
+        outputs=output_specs,
+        symbolic_shape_infer=shape_infer,
+        buffers=[ArraySpec(spec.name, TYPECLASS_TO_TORCH_DTYPE[spec.dtype], spec.torch_shape_fn_from_module) for spec in buffer_specs]
+    )
     MODULES_TO_REPLACE[module_name] = replacement_info

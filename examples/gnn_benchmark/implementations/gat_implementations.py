@@ -6,6 +6,7 @@ import numpy as np
 from dace import nodes, SDFG, SDFGState
 
 import examples.gnn_benchmark.implementations.gat_backward
+from daceml.onnx import shape_infer_GATConv
 from daceml.onnx.nodes import onnx_op
 from daceml.onnx.op_implementations.utils import op_implementation
 from daceml.onnx.op_implementations.utils import program_for_node
@@ -22,6 +23,8 @@ assert examples.gnn_benchmark.implementations.gat_backward
 
 
 class GATConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
+    ssi_fn = shape_infer_GATConv
+
     @classmethod
     def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
                 sdfg: SDFG) -> typing.Union[nodes.Node, SDFG]:

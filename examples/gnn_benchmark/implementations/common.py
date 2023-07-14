@@ -29,6 +29,9 @@ class SparseLayerBase(ONNXForward, metaclass=abc.ABCMeta):
     def input_spec() -> Dict[str, Union[dace.typeclass, SpecialInputType]]:
         raise NotImplementedError
 
+    output_spec = {"output": SpecialInputType.VAL_DTYPE}
+    buffer_spec = []
+
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):

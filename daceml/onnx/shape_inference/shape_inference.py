@@ -58,7 +58,7 @@ def ssi_init_with_replacements(self, *args, **kwargs):
     self.__original_init__(*args, **kwargs)
     from daceml.onnx import MODULES_TO_REPLACE
     for module_name, replacement_info in MODULES_TO_REPLACE.items():
-        infer_fn = replacement_info.infer_shape
+        infer_fn = replacement_info.symbolic_shape_infer
         self.dispatcher_[module_name] = functools.partial(infer_fn, self)
 
 

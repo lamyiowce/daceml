@@ -97,8 +97,8 @@ def set_implementation(module: daceml.torch.module.DaceModule,
             node.implementation = implementation_name
 
 
-def set_memory_to_register(sdfg: dace.SDFG, array_name: str,
-                           expected_shape: Tuple[int, ...] = None):
+def change_storage(sdfg: dace.SDFG, array_name: str, new_storage=dace.StorageType.Register,
+                   expected_shape: Tuple[int, ...] = None):
     def set_storage(sdfg):
         for state in sdfg.nodes():
             for dnode in state.data_nodes():
@@ -106,11 +106,11 @@ def set_memory_to_register(sdfg: dace.SDFG, array_name: str,
                     continue
                 arr = sdfg.arrays[dnode.data]
                 if (arr.transient and not isinstance(arr, dace.data.View)
-                        and arr.storage != dace.StorageType.Register):
+                        and arr.storage != new_storage):
                     if expected_shape is None or arr.shape == expected_shape:
                         if re.fullmatch(array_name, dnode.data):
-                            print(f"  Setting storage for {dnode} to register from {arr.storage}.")
-                            arr.storage = dace.dtypes.StorageType.Register
+                            print(f"  Setting storage for {dnode} to {new_storage} from {arr.storage}.")
+                            arr.storage = new_storage
 
     for sub_sdfg in sdfg.all_sdfgs_recursive():
         set_storage(sub_sdfg)

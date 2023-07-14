@@ -392,8 +392,10 @@ class ONNXModel:
         self.outputs = new_output_names
         sdfg_utils.fuse_states(self.sdfg)
 
-        if self.cuda:
-            self.sdfg.apply_gpu_transformations()
+        # This is commented out, otherwise caching values for backward is broken. anyway, autoopt
+        # applies this.
+        # if self.cuda:
+        #     self.sdfg.apply_gpu_transformations()
 
     def _add_constant_tensor(self, tensor: Union[onnx.TensorProto,
                                                  Tuple[str, np.ndarray]],
