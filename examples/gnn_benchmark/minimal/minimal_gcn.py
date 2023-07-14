@@ -45,7 +45,7 @@ def main():
     dace_model.prepend_post_onnx_hook('set impl',
                                       lambda m: set_implementation(m, 'csr'))
 
-    criterion = torch.nn.NLLLoss()
+    criterion = torch.nn.CrossEntropyLoss()
     dace_prediction = dace_model(node_features, rowptrs, columns, edge_vals)
     loss = criterion(dace_prediction, y)
     print(f"gradients before: {dace_model.model.conv1.lin.weight.grad}")

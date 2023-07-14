@@ -146,7 +146,7 @@ def main():
     if 'single_layer' in args.model:
         loss_fn = lambda pred, targets: torch.sum(pred)
     else:
-        loss_fn = torch.nn.NLLLoss()
+        loss_fn = torch.nn.CrossEntropyLoss()
 
     check_correctness(dace_models,
                       torch_experiments=torch_experiments,

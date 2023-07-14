@@ -83,7 +83,7 @@ def torch_profile(experiment_infos: Dict[str, 'ExperimentInfo'],
         assert targets is not None
 
         if hasattr(torch_model, 'conv2'):
-            criterion = torch.nn.NLLLoss()
+            criterion = torch.nn.CrossEntropyLoss()
         else:
             criterion = lambda pred, targets: torch.sum(pred)
 
