@@ -396,7 +396,6 @@ class GATConvBackwardCOOCached(BackwardImplementation):
                     dr[row] += dC_val
                     dl[col] += dC_val
 
-                # out_reshaped_dH_prime[:] = np.zeros((N, F_out), dtype=val_dtype)
                 for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
                     out_reshaped_dH_prime[i, k] = dl[i] * att_dst[0, 0, k] + dr[i] * att_src[0, 0, k]
                 coomm(A_rows=rows, A_cols=columns, A_vals=e, B=output_grad, C=out_reshaped_dH_prime,
