@@ -623,7 +623,14 @@ class GATConvCOOCached(GATConvBase):
                   # Attention weights has the same shape as `rows`.
                   torch_shape_fn_from_module=lambda module: lambda *inputs: (
                       inputs[1].shape[0],) if module.heads == 1 else (
-                  module.heads, inputs[1].shape[0]))
+                  module.heads, inputs[1].shape[0])),
+        ArraySpec(name='features_saved', dtype=dace.float32,
+                  # Attention weights has the same shape as `rows`.
+                  torch_shape_fn_from_module=lambda module: lambda *inputs: (
+                      inputs[0].shape[0], module.lin_src.weight.shape[0]) if module.heads == 1 else
+                  (module.heads, inputs[0].shape[0], module.lin_src.weight.shape[0])
+                  ),
+
     ]
 
     @staticmethod
@@ -635,22 +642,21 @@ class GATConvCOOCached(GATConvBase):
         _, module = ssi.placeholder_id_to_module[op_attributes['module_id']]
         output_dtype = ssi.known_vi_[node.input[0]].type.tensor_type.elem_type
 
-        # Output of the node are: output, e, is_pos_C_vals.
+        # Output of the node are: output, e, is_pos_C_vals, features_saved
+        N, F_in = ssi._get_shape(node, 0)
+        heads = module.heads
+        F_out = module.out_channels
+        num_entries = ssi._get_shape(node, 1)[0]  # rows.shape[0]
 
         # Output shape.
-        out_shape = (ssi._get_shape(node,
-                                    0)[0], module.heads * module.out_channels)
+        out_shape = (N, heads * F_out)
         vi = ssi.known_vi_[node.output[0]]
         vi.CopyFrom(
             helper.make_tensor_value_info(node.output[0], output_dtype, out_shape))
 
         # Attention weight shape is (num_entries,) or (heads, num_entries)
-        num_entries = ssi._get_shape(node, 1)[0]
         vi = ssi.known_vi_[node.output[1]]
-        if module.heads == 1:
-            e_shape = (num_entries,)
-        else:
-            e_shape = (module.heads, num_entries)
+        e_shape = (num_entries,) if heads == 1 else (heads, num_entries)
         vi.CopyFrom(
             helper.make_tensor_value_info(node.output[1], output_dtype, e_shape))
 
@@ -659,12 +665,18 @@ class GATConvCOOCached(GATConvBase):
         vi.CopyFrom(
             helper.make_tensor_value_info(node.output[2], onnx.TensorProto.BOOL, e_shape))
 
+        # features_saved: N x F_out
+        features_shape = (N, F_out) if heads == 1 else (heads, N, F_out)
+        vi = ssi.known_vi_[node.output[3]]
+        vi.CopyFrom(
+            helper.make_tensor_value_info(node.output[3], output_dtype, features_shape))
+
     @staticmethod
     def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
                 dtype: dace.dtypes.Typeclasses, negative_slope: float,
                 do_bias: bool):
         def gat_op(node_features, rows, columns, lin_srcDOTweight,
-                   att_src, att_dst, bias, output, e, is_pos_C_vals):
+                   att_src, att_dst, bias, output, e, is_pos_C_vals, features_saved):
             """
             node_features: input features, N x F
             rowptrs: rowptr, N+1
@@ -677,10 +689,10 @@ class GATConvCOOCached(GATConvBase):
 
             if heads == 1:
                 # Transform input features.
-                features = np.einsum('ij,kj->ik', node_features,
+                features_saved[:] = np.einsum('ij,kj->ik', node_features,
                                      lin_srcDOTweight)
-                alpha_src = features @ att_src[0, 0]
-                alpha_dst = features @ att_dst[0, 0]
+                alpha_src = features_saved @ att_src[0, 0]
+                alpha_dst = features_saved @ att_dst[0, 0]
 
                 # Calculate attention weights.
                 softmax_sum = np.zeros((N,), dtype=dtype)
@@ -705,7 +717,7 @@ class GATConvCOOCached(GATConvBase):
 
                 for i, j in dace.map[0:N, 0:heads * num_out_features]:
                     output[i, j] = bias[j]
-                coomm(rows, columns, e, features, output, transA=True, beta=1.0)
+                coomm(rows, columns, e, features_saved, output, transA=True, beta=1.0)
 
             else:
                 # Transform input features.
@@ -720,13 +732,13 @@ class GATConvCOOCached(GATConvBase):
                 # sequentially. The loop is moved to Sequential and the
                 # inside matmul to GPU in my_auto_optimize.py.
 
-                features_perm = np.transpose(features, (1, 0, 2))
+                features_saved[:] = np.transpose(features, (1, 0, 2)) # heads x N x F_out
 
                 alpha_src = dace.define_local((heads, N,), dtype=dtype)
                 alpha_dst = dace.define_local((heads, N,), dtype=dtype)
                 for h in dace.map[0:heads] @ dace.dtypes.ScheduleType.Sequential:
-                    alpha_src[h] = features_perm[h] @ att_src[0, h]
-                    alpha_dst[h] = features_perm[h] @ att_dst[0, h]
+                    alpha_src[h] = features_saved[h] @ att_src[0, h]
+                    alpha_dst[h] = features_saved[h] @ att_dst[0, h]
 
                 # Calculate attention weights.
                 softmax_sum = np.zeros((N, heads), dtype=dtype)
@@ -752,7 +764,7 @@ class GATConvCOOCached(GATConvBase):
 
                 # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
                 for h in range(heads):
-                    coomm(rows, columns, e[h], features_perm[h],
+                    coomm(rows, columns, e[h], features_saved[h],
                           output_perm[h],
                           transA=True,
                           beta=1.0)

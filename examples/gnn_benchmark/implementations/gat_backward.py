@@ -337,7 +337,7 @@ class GATConvBackwardCOOCached(BackwardImplementation):
         def basic_gat_backward(node_features, rows, columns, lin_srcDOTweight,
                                att_src, att_dst, att_src_grad, att_dst_grad,
                                lin_srcDOTweight_grad, bias_grad, output_grad,
-                               out_reshaped_dH_prime, e, is_pos_C_vals):
+                               out_reshaped_dH_prime, e, is_pos_C_vals, features_saved):
             """
             node_features: input features, N x M
             rows: rows, K
@@ -353,17 +353,12 @@ class GATConvBackwardCOOCached(BackwardImplementation):
             """
 
             if heads == 1:
-                ### RECOMPUTE FORWARD VALUES ###
-                # Transform input features.
-                features = np.einsum('ij,kj->ik', node_features,
-                                     lin_srcDOTweight)
-
                 ### COMPUTE THE GRADIENTS ###
                 d_alpha_vals = np.zeros((num_entries,), dtype=val_dtype)
                 for i in dace.map[0:num_entries]:
                     col = columns[i]
                     row = rows[i]
-                    d_alpha_vals[i] = np.dot(output_grad[col], features[row])
+                    d_alpha_vals[i] = np.dot(output_grad[col], features_saved[row])
 
                 dot_prods = np.zeros((N,), dtype=val_dtype)
                 for i in dace.map[0:num_entries]:
@@ -401,26 +396,10 @@ class GATConvBackwardCOOCached(BackwardImplementation):
 
                 lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime,
                                                      node_features)  # F_out x F_in
-                att_dst_grad[:] = dl @ features  # F_out
-                att_src_grad[:] = dr @ features  # F_out
+                att_dst_grad[:] = dl @ features_saved  # F_out
+                att_src_grad[:] = dr @ features_saved  # F_out
                 bias_grad[:] = np.sum(output_grad, axis=0)
             else:
-                ### RECOMPUTE FORWARD VALUES ###
-                # # Transform input features.
-                # Transform input features.
-                features_tmp = np.einsum('ij,kj->ik', node_features,
-                                         lin_srcDOTweight)
-                # features: N x H x F'
-                features = np.reshape(features_tmp,
-                                      (N, heads, F_out))
-
-                # This ends up ridiculously slow because the outer loop is
-                # executed on gpu and everything inside is executed
-                # sequentially. The loop is moved to Sequential and the
-                # inside matmul to GPU in my_auto_optimize.py.
-
-                features_perm = np.transpose(features, (1, 0, 2))
-
                 ### COMPUTE THE GRADIENTS ###
                 output_grad_heads = np.reshape(output_grad, (N, heads, F_out))
 
@@ -433,7 +412,8 @@ class GATConvBackwardCOOCached(BackwardImplementation):
                 for h, k, inner_i in dace.map[0:heads, 0:F_out, 0:num_entries]:
                     col = columns[inner_i]
                     row = rows[inner_i]
-                    d_alpha_vals[h, inner_i] += output_grad_heads[col, h, k] * features[row, h, k]
+                    # d_alpha_vals[h, inner_i] += output_grad_heads[col, h, k] * features[row, h, k]
+                    d_alpha_vals[h, inner_i] += output_grad_heads[col, h, k] * features_saved[h, row, k]
 
                 dot_prods = np.zeros((N, heads), dtype=val_dtype)
                 for h, i in dace.map[0:heads, 0:num_entries]:
@@ -476,35 +456,36 @@ class GATConvBackwardCOOCached(BackwardImplementation):
                                                      node_features)
 
                 for h in dace.map[0:heads]:
-                    att_src_grad[0, h, :] = dr[h] @ features_perm[h]  # N times N x F_out = F_out
-                    att_dst_grad[0, h, :] = dl[h] @ features_perm[h]
+                    att_src_grad[0, h, :] = dr[h] @ features_saved[h]  # N times N x F_out = F_out
+                    att_dst_grad[0, h, :] = dl[h] @ features_saved[h]
                 bias_grad[:] = np.reshape(np.sum(output_grad, axis=0), (heads * F_out,))
 
         if compute_grad_for_node_features:
             def backward_fn(node_features, rows, columns, lin_srcDOTweight,
                             att_src, att_dst, att_src_grad, att_dst_grad,
                             lin_srcDOTweight_grad, bias_grad, output_grad,
-                            node_features_grad, e, is_pos_C_vals):
+                            node_features_grad, e, is_pos_C_vals, features_saved):
                 dH_prime_reshaped = np.empty((N, heads * F_out), dtype=val_dtype)
                 basic_gat_backward(node_features, rows, columns, lin_srcDOTweight,
                                    att_src, att_dst, att_src_grad, att_dst_grad,
                                    lin_srcDOTweight_grad, bias_grad, output_grad,
-                                   dH_prime_reshaped, e, is_pos_C_vals)
+                                   dH_prime_reshaped, e, is_pos_C_vals, features_saved)
                 node_features_grad[:] = dH_prime_reshaped @ lin_srcDOTweight  # N x F_in
         else:
             def backward_fn(node_features, rows, columns, lin_srcDOTweight,
                             att_src, att_dst, att_src_grad, att_dst_grad,
-                            lin_srcDOTweight_grad, bias_grad, output_grad, e, is_pos_C_vals):
+                            lin_srcDOTweight_grad, bias_grad, output_grad, e, is_pos_C_vals, features_saved):
                 dH_prime_reshaped = np.empty((N, heads * F_out), dtype=val_dtype)
                 basic_gat_backward(node_features, rows, columns, lin_srcDOTweight,
                                    att_src, att_dst, att_src_grad, att_dst_grad,
                                    lin_srcDOTweight_grad, bias_grad, output_grad,
-                                   dH_prime_reshaped, e, is_pos_C_vals)
+                                   dH_prime_reshaped, e, is_pos_C_vals, features_saved)
 
         result_node, result = autodiff_utils.backward_program_for_node(
             backward_fn, context, forward_node)
 
         connect_output_from_forward(forward_node, result_node, context, 'e')
         connect_output_from_forward(forward_node, result_node, context, 'is_pos_C_vals')
+        connect_output_from_forward(forward_node, result_node, context, 'features_saved')
 
         return result_node, result
