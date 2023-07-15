@@ -355,10 +355,25 @@ class GATConvBackwardCOOCached(BackwardImplementation):
             if heads == 1:
                 ### COMPUTE THE GRADIENTS ###
                 d_alpha_vals = np.zeros((num_entries,), dtype=val_dtype)
-                for i in dace.map[0:num_entries]:
+
+                # max_grid_size = 65535 * 8
+                # num_entries_round = 0
+                # if num_entries > max_grid_size:
+                #     num_entries_round = max_grid_size * (num_entries // max_grid_size)
+                #     for seq in dace.map[0:num_entries_round:max_grid_size]:
+                #         # for inner_i, h, k in dace.map[seq:seq+max_grid_size, 0:heads, 0:F_out]:
+                #         for inner_i, k in dace.map[seq:seq+max_grid_size, 0:F_out]:
+                #             col = columns[inner_i]
+                #             row = rows[inner_i]
+                #             d_alpha_vals[inner_i] += output_grad[col, k] * features_saved[row, k]
+                # for i, k in dace.map[num_entries_round:num_entries, 0:F_out]:
+                #     col = columns[i]
+                #     row = rows[i]
+                #     d_alpha_vals[i] += output_grad[col, k] * features_saved[row, k]
+                for k, i in dace.map[0:F_out, 0:num_entries]:
                     col = columns[i]
                     row = rows[i]
-                    d_alpha_vals[i] = np.dot(output_grad[col], features_saved[row])
+                    d_alpha_vals[i] += output_grad[col, k] * features_saved[row, k]
 
                 dot_prods = np.zeros((N,), dtype=val_dtype)
                 for i in dace.map[0:num_entries]:
@@ -374,7 +389,6 @@ class GATConvBackwardCOOCached(BackwardImplementation):
                     row = rows[i]
                     dE_val = dace.define_local_scalar(val_dtype)
                     dE_val[:] = (d_alpha_vals[i] - dot_prods[col]) * e[i]
-
                     dC_val = dace.define_local_scalar(val_dtype)
                     # dC_val[:] = dE_val * (C_vals[i] > 0) + dE_val * (
                     #         C_vals[i] <= 0) * neg_slope
@@ -382,17 +396,12 @@ class GATConvBackwardCOOCached(BackwardImplementation):
                     dr[row] += dC_val
                     dl[col] += dC_val
 
-                out_reshaped_dH_prime[:] = np.zeros((N, F_out), dtype=val_dtype)
-
+                # out_reshaped_dH_prime[:] = np.zeros((N, F_out), dtype=val_dtype)
+                for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
+                    out_reshaped_dH_prime[i, k] = dl[i] * att_dst[0, 0, k] + dr[i] * att_src[0, 0, k]
                 coomm(A_rows=rows, A_cols=columns, A_vals=e, B=output_grad, C=out_reshaped_dH_prime,
                       beta=1.0,
                       transA=False)
-
-                for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
-                    out_reshaped_dH_prime[i, k] += dl[i] * att_dst[0, 0, k]
-
-                for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
-                    out_reshaped_dH_prime[i, k] += dr[i] * att_src[0, 0, k]
 
                 lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime,
                                                      node_features)  # F_out x F_in
