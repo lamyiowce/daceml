@@ -591,10 +591,9 @@ class GCNConvCOOCached(GCNConvBase):
                 # TODO: this could be a gemm instead
                 coomm(rows, columns, edge_vals, node_features, AX_cached, beta=0.0,
                       transA=True)
-                output[:] = np.einsum('nm,fm->nf', AX_cached,
-                                      linDOTweight)
                 for i, j in dace.map[0:N, 0:num_out_features]:
-                    output[i, j] += bias[j]
+                    output[i, j] = bias[j]
+                dace.libraries.blas.gemm(A=AX_cached, B=linDOTweight, C=output, beta=1.0, trans_b=True, alpha=1.0)
         else:
             def gcn_op(node_features, rows, columns, edge_vals,
                        linDOTweight, output, AX_cached):
