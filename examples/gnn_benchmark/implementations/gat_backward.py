@@ -166,13 +166,13 @@ class GATConvBackwardCOO(BackwardImplementation):
                 # Calculate attention weights.
                 e = np.empty((heads, num_entries), dtype=val_dtype)
                 softmax_sum = np.zeros((N, heads), dtype=val_dtype)
-                C_vals = np.empty((num_entries, heads), dtype=dace.bool)
+                C_vals = np.empty((heads, num_entries), dtype=dace.bool)
 
                 for h, i in dace.map[0:heads, 0:num_entries]:
                     row = rows[i]
                     col = columns[i]
                     e_tmp = alpha_src[h, row] + alpha_dst[h, col]
-                    C_vals[i, h] = e_tmp > 0
+                    C_vals[h, i] = e_tmp > 0
                     # # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
                     e_tmp = np.exp(e_tmp)
@@ -225,9 +225,9 @@ class GATConvBackwardCOO(BackwardImplementation):
                     dE_val[:] = (d_alpha_vals[i, h] - dot_prods[col, h]) * e[h, i]
 
                     dC_val = dace.define_local_scalar(val_dtype)
-                    # dC_val[:] = dE_val * (C_vals[i, h] > 0) + dE_val * (
-                    #         C_vals[i, h] <= 0) * neg_slope
-                    dC_val[:] = dE_val * (neg_slope + one_min_neg_slope * C_vals[i, h])
+                    # dC_val[:] = dE_val * (C_vals[h, i] > 0) + dE_val * (
+                    #         C_vals[h, i] <= 0) * neg_slope
+                    dC_val[:] = dE_val * (neg_slope + one_min_neg_slope * C_vals[h, i])
                     dr[h, row] += dC_val
                     dl[h, col] += dC_val
 
