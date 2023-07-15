@@ -36,6 +36,7 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
         "semester_thesis": gat_implementations.GATConvSemesterThesis,
         "csr": gat_implementations.GATConvCSR,
         "coo": gat_implementations.GATConvCOO,
+        "coo_cached": gat_implementations.GATConvCOOCached,
         "csr_stable": gat_implementations.GATConvCSRStable,
         "csc": gat_implementations.GATConvCSC,
     }
@@ -261,8 +262,8 @@ def register_replacement_overrides(implementation_name, layer_name, idx_dtype,
     elif 'gat' in layer_name:
         register_replacement('torch_geometric.nn.conv.gat_conv.GATConv',
                              inputs=input_spec,
-                             outputs={'output': val_dtype},
-                             shape_infer=replacement_entries.shape_infer_GATConv,
+                             outputs=output_spec,
+                             shape_infer=symbolic_override_fn,
                              shape_fn_from_module=replacement_entries.make_GATConv_shape_fn,
                              buffer_specs=buffer_spec)
     else:
