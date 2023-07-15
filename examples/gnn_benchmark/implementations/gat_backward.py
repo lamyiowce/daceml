@@ -425,20 +425,20 @@ class GATConvBackwardCOOCached(BackwardImplementation):
                 output_grad_heads = np.reshape(output_grad, (N, heads, F_out))
 
                 # SDDMM
-                d_alpha_vals = np.empty((num_entries, heads), dtype=val_dtype)
+                d_alpha_vals = np.empty((heads, num_entries), dtype=val_dtype)
 
                 for h, i in dace.map[0:heads, 0:num_entries]:
-                    d_alpha_vals[i, h] = 0
+                    d_alpha_vals[h, i] = 0
 
                 for h, k, inner_i in dace.map[0:heads, 0:F_out, 0:num_entries]:
                     col = columns[inner_i]
                     row = rows[inner_i]
-                    d_alpha_vals[inner_i, h] += output_grad_heads[col, h, k] * features[row, h, k]
+                    d_alpha_vals[h, inner_i] += output_grad_heads[col, h, k] * features[row, h, k]
 
                 dot_prods = np.zeros((N, heads), dtype=val_dtype)
                 for h, i in dace.map[0:heads, 0:num_entries]:
                     col = columns[i]
-                    dot_prods[col, h] += e[h, i] * d_alpha_vals[i, h]
+                    dot_prods[col, h] += e[h, i] * d_alpha_vals[h, i]
 
                 dl = np.zeros((heads, N), dtype=val_dtype)
                 dr = np.zeros((heads, N), dtype=val_dtype)
@@ -448,8 +448,7 @@ class GATConvBackwardCOOCached(BackwardImplementation):
                     col = columns[i]
                     row = rows[i]
                     dE_val = dace.define_local_scalar(val_dtype)
-                    dE_val[:] = (d_alpha_vals[i, h] - dot_prods[col, h]) * e[h, i]
-
+                    dE_val[:] = (d_alpha_vals[h, i] - dot_prods[col, h]) * e[h, i]
                     dC_val = dace.define_local_scalar(val_dtype)
                     dC_val[:] = dE_val * (neg_slope + one_min_neg_slope * is_pos_C_vals[h, i])
                     dr[h, row] += dC_val
