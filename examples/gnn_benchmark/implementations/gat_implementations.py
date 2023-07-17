@@ -1077,12 +1077,195 @@ class GATConvCOOStableCached(GATConvBase):
                 output_perm = np.zeros((heads, N, num_out_features),
                                        dtype=dtype)  # H x N x F'
 
-                # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
                 for h in range(heads):
                     coomm(rows, columns, e[h], features_saved[h],
                           output_perm[h],
                           transA=True,
                           beta=1.0)
+
+                for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
+                    output[i, j * num_out_features + k] = (
+                            output_perm[j, i, k]
+                            + bias[j * num_out_features + k])
+
+        if do_bias:
+            return gat_op
+        else:
+            raise NotImplementedError
+
+
+@op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
+                   name="coo_stable_cached_altspmm")
+class GATConvCOOStableCachedAltSpmm(GATConvBase):
+    graph_format = sparse.CooGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': common.SpecialInputType.VAL_DTYPE,
+        'rows': common.SpecialInputType.IDX_DTYPE,
+        'columns': common.SpecialInputType.IDX_DTYPE,
+    }
+
+    buffer_spec: List[ArraySpec] = [
+        ArraySpec(name='e', dtype=dace.float32,
+                  # Attention weights has the same shape as `rows`.
+                  torch_shape_fn_from_module=lambda module: lambda *inputs: (
+                      inputs[1].shape[0],) if module.heads == 1 else (
+                  inputs[1].shape[0], module.heads)),
+        ArraySpec(name='is_pos_C_vals', dtype=dace.bool,
+                  # Attention weights has the same shape as `rows`.
+                  torch_shape_fn_from_module=lambda module: lambda *inputs: (
+                      inputs[1].shape[0],) if module.heads == 1 else (
+                  inputs[1].shape[0], module.heads)),
+        ArraySpec(name='features_saved', dtype=dace.float32,
+                  # Attention weights has the same shape as `rows`.
+                  torch_shape_fn_from_module=lambda module: lambda *inputs: (
+                      inputs[0].shape[0], module.lin_src.weight.shape[0]) if module.heads == 1 else
+                  (module.heads, inputs[0].shape[0], module.lin_src.weight.shape[0])
+                  ),
+
+    ]
+
+    @staticmethod
+    def ssi_fn(ssi: 'SymbolicShapeInference', node: 'NodeProto') -> None:
+        op_attributes = {
+            attribute_proto.name: convert_attribute_proto(attribute_proto)
+            for attribute_proto in node.attribute
+        }
+        _, module = ssi.placeholder_id_to_module[op_attributes['module_id']]
+        output_dtype = ssi.known_vi_[node.input[0]].type.tensor_type.elem_type
+
+        # Output of the node are: output, e, is_pos_C_vals, features_saved
+        N, F_in = ssi._get_shape(node, 0)
+        heads = module.heads
+        F_out = module.out_channels
+        num_entries = ssi._get_shape(node, 1)[0]  # rows.shape[0]
+
+        # Output shape.
+        out_shape = (N, heads * F_out)
+        vi = ssi.known_vi_[node.output[0]]
+        vi.CopyFrom(
+            helper.make_tensor_value_info(node.output[0], output_dtype, out_shape))
+
+        # Attention weight shape is (num_entries,) or (heads, num_entries)
+        vi = ssi.known_vi_[node.output[1]]
+        e_shape = (num_entries,) if heads == 1 else (num_entries, heads)
+        vi.CopyFrom(
+            helper.make_tensor_value_info(node.output[1], output_dtype, e_shape))
+
+        # C_vals is also (num_entries,) or (heads, num_entries), but boolean.
+        vi = ssi.known_vi_[node.output[2]]
+        vi.CopyFrom(
+            helper.make_tensor_value_info(node.output[2], onnx.TensorProto.BOOL, e_shape))
+
+        # features_saved: N x F_out
+        features_shape = (N, F_out) if heads == 1 else (heads, N, F_out)
+        vi = ssi.known_vi_[node.output[3]]
+        vi.CopyFrom(
+            helper.make_tensor_value_info(node.output[3], output_dtype, features_shape))
+
+    @staticmethod
+    def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, negative_slope: float,
+                do_bias: bool):
+        def gat_op(node_features, rows, columns, lin_srcDOTweight,
+                   att_src, att_dst, bias, output, e, is_pos_C_vals, features_saved):
+            """
+            node_features: input features, N x F
+            rowptrs: rowptr, N+1
+            columns: col, num_entries
+            lin_srcDOTweight: H * F' x F
+            att_src: H x F'
+            att_dst: H x F'
+            output: N x H * F'
+            """
+
+            if heads == 1:
+                # Transform input features.
+                features_saved[:] = np.einsum('ij,kj->ik', node_features,
+                                     lin_srcDOTweight)
+                alpha_src = features_saved @ att_src[0, 0]
+                alpha_dst = features_saved @ att_dst[0, 0]
+
+                # Calculate attention weights.
+                softmax_sum = np.zeros((N,), dtype=dtype)
+                softmax_max = np.ones((N,), dtype=dtype) * -np.inf
+
+                for i in dace.map[0:num_entries]:
+                    row = rows[i]
+                    col = columns[i]
+                    e_tmp = alpha_src[row] + alpha_dst[col]
+                    is_pos_C_vals[i] = e_tmp > 0
+                    # # LeakyReLU
+                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                    e[i] = e_tmp
+                    softmax_max[col] = max(e[i], softmax_max[col])
+
+                for j in dace.map[0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                    col = columns[j]
+                    e[j] = np.exp(e[j] - softmax_max[col])
+                    softmax_sum[col] += e[j]
+
+                # Softmax normalization.
+                for j in dace.map[0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                    colj = columns[j]
+                    e[j] = e[j] / softmax_sum[colj]
+
+                for i, j in dace.map[0:N, 0:heads * num_out_features]:
+                    output[i, j] = bias[j]
+                coomm(rows, columns, e, features_saved, output, transA=True, beta=1.0)
+
+            else:
+                # Transform input features.
+                features_tmp = np.einsum('ij,kj->ik', node_features,
+                                         lin_srcDOTweight)
+                # features: N x H x F'
+                features = np.reshape(features_tmp,
+                                      (N, heads, num_out_features))
+
+                # This ends up ridiculously slow because the outer loop is
+                # executed on gpu and everything inside is executed
+                # sequentially. The loop is moved to Sequential and the
+                # inside matmul to GPU in my_auto_optimize.py.
+
+                features_saved[:] = np.transpose(features, (1, 0, 2)) # heads x N x F_out
+
+                alpha_src = dace.define_local((heads, N,), dtype=dtype)
+                alpha_dst = dace.define_local((heads, N,), dtype=dtype)
+                for h in dace.map[0:heads] @ dace.dtypes.ScheduleType.Sequential:
+                    alpha_src[h] = features_saved[h] @ att_src[0, h]
+                    alpha_dst[h] = features_saved[h] @ att_dst[0, h]
+
+                # Calculate attention weights.
+                softmax_sum = np.zeros((N, heads), dtype=dtype)
+                softmax_max = np.ones((N, heads), dtype=dtype) * -np.inf
+
+                for i, h in dace.map[0:num_entries, 0:heads]:
+                    row = rows[i]
+                    col = columns[i]
+                    e_tmp = alpha_src[h, row] + alpha_dst[h, col]
+                    # LeakyReLU
+                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                    e[i, h] = e_tmp
+                    softmax_max[col, h] = max(e[i, h], softmax_max[col, h])
+
+                for j, h in dace.map[0:num_entries, 0:heads] @ dace.dtypes.ScheduleType.Sequential:
+                    col = columns[j]
+                    e[j, h] = np.exp(e[j, h] - softmax_max[col, h])
+                    softmax_sum[col, h] += e[j, h]
+
+                # Softmax normalization.
+                for j, h in dace.map[0:num_entries, 0:heads]:
+                    colj = columns[j]
+                    e[j, h] = e[j, h] / softmax_sum[colj, h]
+
+                output_perm = np.zeros((heads, N, num_out_features),
+                                       dtype=dtype)  # H x N x F'
+
+
+                for i, h, k in dace.map[0:num_entries, 0:heads, 0:num_out_features] @ dace.dtypes.ScheduleType.Sequential:
+                    col = columns[i]
+                    row = rows[i]
+                    mult = e[i, h] * features_saved[h, row, k]
+                    output_perm[h, col, k] += mult
 
                 for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
                     output[i, j * num_out_features + k] = (
