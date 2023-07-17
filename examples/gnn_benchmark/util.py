@@ -36,6 +36,7 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
         "semester_thesis": gat_implementations.GATConvSemesterThesis,
         "csr": gat_implementations.GATConvCSR,
         "coo": gat_implementations.GATConvCOO,
+        "coo_stable": gat_implementations.GATConvCOOStable,
         "coo_cached": gat_implementations.GATConvCOOCached,
         "csr_stable": gat_implementations.GATConvCSRStable,
         "csc": gat_implementations.GATConvCSC,

@@ -604,6 +604,155 @@ class GATConvCOO(GATConvBase):
 
 
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
+                   name="coo_stable")
+class GATConvCOOStable(GATConvBase):
+    graph_format = sparse.CooGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': common.SpecialInputType.VAL_DTYPE,
+        'rows': common.SpecialInputType.IDX_DTYPE,
+        'columns': common.SpecialInputType.IDX_DTYPE,
+    }
+
+    @staticmethod
+    def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, negative_slope: float,
+                do_bias: bool):
+        def gat_op(node_features, rows, columns, lin_srcDOTweight,
+                   att_src, att_dst, bias, output):
+            """
+            node_features: input features, N x F
+            rowptrs: rowptr, N+1
+            columns: col, num_entries
+            lin_srcDOTweight: H * F' x F
+            att_src: H x F'
+            att_dst: H x F'
+            output: N x H * F'
+            """
+
+            if heads == 1:
+                # Transform input features.
+                features = np.einsum('ij,kj->ik', node_features,
+                                     lin_srcDOTweight)
+                alpha_src = features @ att_src[0, 0]
+                alpha_dst = features @ att_dst[0, 0]
+
+                # Calculate attention weights.
+                e = np.empty((num_entries,), dtype=dtype)
+                softmax_sum = np.zeros((N,), dtype=dtype)
+                softmax_max = np.ones((N,), dtype=dtype) * -np.inf
+
+                # for l in dace.map[0:N]:
+                #     for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+                #         # Calculating e_l->colv
+                #         colv = columns[v]
+                #         e_tmp = alpha_src[l] + alpha_dst[colv]
+                #         # LeakyReLU
+                #         e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                #         e[v] = e_tmp
+                #         softmax_max[colv] = np.maximum(softmax_max[colv], e[v])
+                #
+                # # TODO: sequential map, otherwise incorrect with autoopt.
+                # for j in dace.map[
+                #          0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                #     colj = columns[j]
+                #     e[j] = np.exp(e[j] - softmax_max[colj])
+                #     softmax_sum[colj] += e[j]
+
+                for i in dace.map[0:num_entries]:
+                    row = rows[i]
+                    col = columns[i]
+                    # TODO: alpha_src gets read num_entries times, not N!
+                    e_tmp = alpha_src[row] + alpha_dst[col]
+                    # # LeakyReLU
+                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                    e[i] = e_tmp
+
+                    # # TODO: This is a workaround. With no schedule type, the results are incorrect
+                    #  on CPU with autoopt.
+                    # for i in dace.map[0:num_entries]@dace.dtypes.ScheduleType.Sequential:
+                    # col = columns[i]
+                    softmax_max[col] = max(e[i], softmax_max[col])
+
+                for j in dace.map[0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                    col = columns[j]
+                    e[j] = np.exp(e[j] - softmax_max[col])
+                    softmax_sum[col] += e[j]
+
+                # Softmax normalization.
+                for j in dace.map[0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                    colj = columns[j]
+                    e[j] = e[j] / softmax_sum[colj]
+
+                for i, j in dace.map[0:N, 0:heads * num_out_features]:
+                    output[i, j] = bias[j]
+                coomm(rows, columns, e, features, output, transA=True, beta=1.0)
+
+            else:
+                # Transform input features.
+                features_tmp = np.einsum('ij,kj->ik', node_features,
+                                         lin_srcDOTweight)
+                # features: N x H x F'
+                features = np.reshape(features_tmp,
+                                      (N, heads, num_out_features))
+
+                # This ends up ridiculously slow because the outer loop is
+                # executed on gpu and everything inside is executed
+                # sequentially. The loop is moved to Sequential and the
+                # inside matmul to GPU in my_auto_optimize.py.
+
+                features_perm = np.transpose(features, (1, 0, 2))
+
+                alpha_src = dace.define_local((heads, N,), dtype=dtype)
+                alpha_dst = dace.define_local((heads, N,), dtype=dtype)
+                for h in dace.map[0:heads] @ dace.dtypes.ScheduleType.Sequential:
+                    alpha_src[h] = features_perm[h] @ att_src[0, h]
+                    alpha_dst[h] = features_perm[h] @ att_dst[0, h]
+
+                # Calculate attention weights.
+                e = np.empty((heads, num_entries), dtype=dtype)
+                softmax_sum = np.zeros((N, heads), dtype=dtype)
+                softmax_max = np.ones((N, heads), dtype=dtype) * -np.inf
+
+                for h, i in dace.map[0:heads, 0:num_entries]:
+                    row = rows[i]
+                    col = columns[i]
+                    e_tmp = alpha_src[h, row] + alpha_dst[h, col]
+                    # # LeakyReLU
+                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                    e[h, i] = e_tmp
+                    softmax_max[col, h] = max(e[h, i], softmax_max[col, h])
+
+                for h, j in dace.map[0:heads, 0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                    col = columns[j]
+                    e[h, j] = np.exp(e[h, j] - softmax_max[col, h])
+                    softmax_sum[col, h] += e[h, j]
+
+                # Softmax normalization.
+                for h, j in dace.map[0:heads, 0:num_entries]:
+                    colj = columns[j]
+                    e[h, j] = e[h, j] / softmax_sum[colj, h]
+
+                output_perm = np.zeros((heads, N, num_out_features),
+                                       dtype=dtype)  # H x N x F'
+
+                # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
+                for h in range(heads):
+                    coomm(rows, columns, e[h], features_perm[h],
+                          output_perm[h],
+                          transA=True,
+                          beta=1.0)
+
+                for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
+                    output[i, j * num_out_features + k] = (
+                            output_perm[j, i, k]
+                            + bias[j * num_out_features + k])
+
+        if do_bias:
+            return gat_op
+        else:
+            raise NotImplementedError
+
+@op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
                    name="coo_cached")
 class GATConvCOOCached(GATConvBase):
     graph_format = sparse.CooGraph
