@@ -213,19 +213,59 @@ def flatten_blocks_for_1d_maps(sdfg: dace.SDFG, verbose=False):
         if isinstance(node, nd.MapEntry) \
                 and node.schedule == dace.dtypes.ScheduleType.GPU_Device \
                 and len(node.map.params):
-            if len(node.map.params) == 1 and node.map.gpu_block_size is None:
-                subgraph = dfg_scope.scope_subgraph(node)
-                sub_maps = get_tb_maps_recursive(subgraph)
-                if len(sub_maps) == 1:
+            subgraph = dfg_scope.scope_subgraph(node)
+            sub_maps = get_tb_maps_recursive(subgraph)
+            if len(sub_maps) == 1:
+                # If map has only one param, change to [max, 1, 1]
+                if len(node.map.params) == 1 and node.map.gpu_block_size is None:
                     print(
                         f"🧱  Changing block size: {node.map}: {node.map.gpu_block_size} -> {[total_size, 1, 1]}")
                     node.map.gpu_block_size = [total_size, 1, 1]
-                elif verbose:
-                    # Don't set the block size if there are submaps. (sub_maps contains also the current map)
-                    print("🧱  Keeping block size, map has submaps: ", node.map,
-                          node.map.gpu_block_size, node.map.params, sub_maps)
+                else:
+                    new_block_sizes = adjust_block_size(default_block_size, node, total_size)
+
+                    if new_block_sizes != default_block_size:
+                        print(
+                            f"🧱  Changing block size: {node.map}: {node.map.gpu_block_size} -> {new_block_sizes}")
+                        node.map.gpu_block_size = new_block_sizes
+                    elif verbose:
+                        print(
+                            f"🧱  Keeping block size: {node.map}: {node.map.gpu_block_size}.")
+            elif verbose:
+                # Don't set the block size if there are submaps. (sub_maps contains also the current map)
+                print("🧱  Keeping block size, map has submaps: ", node.map,
+                      node.map.gpu_block_size, node.map.params, sub_maps)
             elif verbose:
                 print("🧱  Keeping block size: ", node.map, node.map.gpu_block_size)
+
+
+def adjust_block_size(default_block_size, node, total_size):
+    new_block_sizes = []
+    remaining_size = total_size
+    for map_range, block_dim in zip(reversed(node.map.range), default_block_size):
+        start, end, step = map_range
+        range_len = (end - start + 1) // step
+        if block_dim > range_len:
+            new_block_sizes.append(max(1, range_len))
+            remaining_size = max(1, remaining_size // range_len)
+        else:
+            new_block_sizes.append(-1)
+    new_block_sizes = new_block_sizes + [-1] * 3
+    new_block_sizes = new_block_sizes[:3]
+
+    num_free = new_block_sizes.count(-1)
+    if num_free == 1:
+        # Block sizes of form [64, 8, -1] or [-1, 8, 8] or [40, -1, 8]
+        new_block_sizes[new_block_sizes.index(-1)] = remaining_size
+    elif num_free == 2:
+        # Block sizes of form [64, -1, -1] or [-1, -1, 8] or [-1, 7, -1]
+        # Set the first dim to remaining, last to 1
+        new_block_sizes[new_block_sizes.index(-1)] = remaining_size
+        new_block_sizes[new_block_sizes.index(-1)] = 1
+    elif num_free == 3:
+        # [-1, -1, -1], just use the default (array is big enough).
+        return default_block_size
+    return new_block_sizes
 
 
 def change_map_schedule(sdfg: dace.SDFG,
