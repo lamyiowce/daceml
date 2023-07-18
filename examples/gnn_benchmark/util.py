@@ -26,6 +26,7 @@ name_to_impl_class: Dict[str, Dict[str, SparseLayerBase]] = {
         "coo_cached": gcn_implementations.GCNConvCOOCached,
         "csc": gcn_implementations.GCNConvCSC,
         "csc_adapt": gcn_implementations.GCNConvCSCAdapt,
+        "csc_cached": gcn_implementations.GCNConvCSCCached,
         "ellpack_t": gcn_implementations.GCNConvEllpackTransposed,
         "ellpack": gcn_implementations.GCNConvEllpack,
         "semester_thesis": gcn_implementations.GCNConvSemesterThesis,

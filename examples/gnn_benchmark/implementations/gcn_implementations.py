@@ -373,6 +373,71 @@ class GCNConvCSCAdapt(GCNConvBase):
         return gcn_op
 
 
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csc_cached")
+class GCNConvCSCCached(GCNConvBase):
+    graph_format = sparse.CscGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': common.SpecialInputType.VAL_DTYPE,
+        'colptrs': common.SpecialInputType.IDX_DTYPE,
+        'rows': common.SpecialInputType.IDX_DTYPE,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
+    }
+
+    output_spec = {
+        'output': common.SpecialInputType.VAL_DTYPE,
+    }
+
+    buffer_spec: List[ArraySpec] = [
+        ArraySpec(name='AX_cached', dtype=dace.float32,
+                  torch_shape_fn_from_module=lambda module: lambda *inputs: (
+                      inputs[0].shape[0], inputs[0].shape[1]))
+    ]
+
+    @staticmethod
+    def ssi_fn(ssi, node):
+        op_attributes = {
+            attribute_proto.name: convert_attribute_proto(attribute_proto)
+            for attribute_proto in node.attribute
+        }
+        _, module = ssi.placeholder_id_to_module[op_attributes['module_id']]
+        weights_shape = module.lin.weight.T.shape
+        output_dtype = ssi.known_vi_[node.input[0]].type.tensor_type.elem_type
+
+        ssi._compute_matmul_shape(node,
+                                  output_dtype=output_dtype,
+                                  rhs_shape=weights_shape)
+        vi = ssi.known_vi_[node.output[1]]
+        num_nodes = ssi._get_shape(node, 0)[0]
+        num_input_features = ssi._get_shape(node, 0)[1]
+        vi.CopyFrom(helper.make_tensor_value_info(node.output[1], output_dtype,
+                                                  (num_nodes, num_input_features)))
+
+    @staticmethod
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
+                do_bias: bool):
+        if do_bias:
+            def gcn_op(node_features, colptrs, rows, edge_vals,
+                       linDOTweight, bias, output, AX_cached):
+                """
+                node_features: input features, N x M
+                row: row idxs (COO format), num_entries
+                columns: col, num_entries
+                edge_vals: values, num_entries
+                linDOTweight: F x M
+                output: N x F
+                """
+                csrmm_libnode.csrmm(colptrs, rows, edge_vals, node_features,
+                                    AX_cached, beta=0.0, transA=False)
+                for i, j in dace.map[0:N, 0:num_out_features]:
+                    output[i, j] = bias[j]
+                dace.libraries.blas.gemm(A=AX_cached, B=linDOTweight, C=output,
+                                         beta=1.0, trans_b=True, alpha=1.0)
+        else:
+            raise NotImplementedError("Not implemented yet")
+        return gcn_op
+
+
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="coo")
 class GCNConvCOO(GCNConvBase):
     graph_format = sparse.CooGraph
@@ -569,6 +634,8 @@ class GCNConvCOOCached(GCNConvBase):
                 output[:] = np.einsum('nm,fm->nf', AX_cached,
                                       linDOTweight)
         return gcn_op
+
+
 
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
