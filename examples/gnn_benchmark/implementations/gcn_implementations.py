@@ -194,46 +194,6 @@ class GCNConvCSRAdapt(GCNConvBase):
     }
 
     @staticmethod
-    def get_stats(N: int, F_in: int, F_out: int, num_entries: int,
-                  val_dtype: dace.dtypes.typeclass, idx_dtype: dace.dtypes.typeclass,
-                  do_bias: bool):
-        ## Flops.
-        # X @ W or (A.t @ X) @ W
-        matmul_flops = 2 * N * F_out * F_in
-
-        if F_in > F_out:
-            # A.t @ (X @ W)
-            spmm_flops = 2 * num_entries * F_out
-            # Bias is omitted because it's just copied into the output matrix.
-            bias_flops = 0
-        else:
-            # A.t @ X
-            spmm_flops = 2 * num_entries * F_in
-            bias_flops = N * F_out if do_bias else 0
-        flops = matmul_flops + spmm_flops + bias_flops
-
-        ## Memory movement in bytes.
-        # X @ W or (A.t @ X) @ W
-        matmul_mem = (N * F_out + F_in * F_out + N * F_in) * val_dtype.bytes
-
-        if F_in > F_out:
-            # A.t @ (X @ W)
-            # Load all entry values, input matrix and output matrix.
-            spmm_val_mem = (num_entries + N * F_out + N * F_out) * val_dtype.bytes
-        else:
-            # A.t @ X
-            # Load all entry values, input matrix and output matrix.
-            spmm_val_mem = (num_entries + N * F_in + N * F_in) * val_dtype.bytes
-        # Load all column indices and rowptrs.
-        spmm_idx_mem = (num_entries + N) * idx_dtype.bytes
-
-        # Load the whole of output matrix and whole bias.
-        bias_mem = (N * F_out + F_out) * val_dtype.bytes
-        mem = matmul_mem + spmm_val_mem + spmm_idx_mem + bias_mem
-
-        return flops, mem
-
-    @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
                 do_bias: bool):
@@ -263,10 +223,10 @@ class GCNConvCSRAdapt(GCNConvBase):
                                                             dtype=dtype)
                     csrmm_libnode.csrmm(rowptrs, columns, edge_vals, node_features,
                                         aggregated_features, beta=0.0, transA=True)
-                    output[:] = np.einsum('ij,kj->ik', aggregated_features,
-                                          linDOTweight)
                     for i, j in dace.map[0:N, 0:num_out_features]:
-                        output[i, j] += bias[j]
+                        output[i, j] = bias[j]
+                    dace.libraries.blas.gemm(A=aggregated_features, B=linDOTweight, C=output, beta=1.0,
+                                             trans_b=True, alpha=1.0)
 
 
         else:
@@ -381,12 +341,11 @@ class GCNConvCSCAdapt(GCNConvBase):
                                                             dtype=dtype)
                     csrmm_libnode.csrmm(colptrs, rows, edge_vals, node_features,
                                         aggregated_features, beta=0.0, transA=False)
-                    output[:] = np.einsum('ij,kj->ik', aggregated_features,
-                                          linDOTweight)
+
                     for i, j in dace.map[0:N, 0:num_out_features]:
-                        output[i, j] += bias[j]
-
-
+                        output[i, j] = bias[j]
+                    dace.libraries.blas.gemm(A=aggregated_features, B=linDOTweight, C=output,
+                                             beta=1.0, trans_b=True, alpha=1.0)
         else:
             def gcn_op(node_features, colptrs, rows, edge_vals,
                        linDOTweight, output):
@@ -504,10 +463,10 @@ class GCNConvCOOAdapt(GCNConvBase):
                     temp = dace.define_local((N, num_in_features), dtype=dtype)
                     coomm(rows, columns, edge_vals, node_features, temp, beta=0.0,
                           transA=True)
-                    output[:] = np.einsum('nm,fm->nf', temp,
-                                          linDOTweight)
                     for i, j in dace.map[0:N, 0:num_out_features]:
-                        output[i, j] += bias[j]
+                        output[i, j] = bias[j]
+                    dace.libraries.blas.gemm(A=temp, B=linDOTweight, C=output, beta=1.0,
+                                             trans_b=True, alpha=1.0)
         else:
             def gcn_op(node_features, rows, columns, edge_vals,
                        linDOTweight, output):
@@ -588,12 +547,12 @@ class GCNConvCOOCached(GCNConvBase):
                 linDOTweight: F x M
                 output: N x F
                 """
-                # TODO: this could be a gemm instead
                 coomm(rows, columns, edge_vals, node_features, AX_cached, beta=0.0,
                       transA=True)
                 for i, j in dace.map[0:N, 0:num_out_features]:
                     output[i, j] = bias[j]
-                dace.libraries.blas.gemm(A=AX_cached, B=linDOTweight, C=output, beta=1.0, trans_b=True, alpha=1.0)
+                dace.libraries.blas.gemm(A=AX_cached, B=linDOTweight, C=output, beta=1.0,
+                                         trans_b=True, alpha=1.0)
         else:
             def gcn_op(node_features, rows, columns, edge_vals,
                        linDOTweight, output, AX_cached):
@@ -659,7 +618,7 @@ class GCNConvEllpackTransposed(GCNConvBase):
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="ellpack_pure")
-class GCNConvEllpack(GCNConvBase):
+class GCNConvEllpackPure(GCNConvBase):
     graph_format = sparse.EllpackGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
@@ -877,10 +836,10 @@ class GCNConvCSRCOOAdapt(GCNConvBase):
                           transA=True)
                     csrmm_libnode.csrmm(csr_rowptrs, csr_columns, csr_edge_vals, node_features,
                                         temp, beta=1.0, transA=True)
-                    output[:] = np.einsum('nm,fm->nf', temp,
-                                          linDOTweight)
                     for i, j in dace.map[0:N, 0:num_out_features]:
-                        output[i, j] += bias[j]
+                        output[i, j] = bias[j]
+                    dace.libraries.blas.gemm(A=temp, B=linDOTweight, C=output, beta=1.0,
+                                             trans_b=True, alpha=1.0)
 
         else:
             def gcn_op(node_features,
