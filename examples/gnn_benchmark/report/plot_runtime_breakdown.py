@@ -6,8 +6,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 
 from examples.gnn_benchmark.report import runtime_breakdown_data
-from examples.gnn_benchmark.report.plot import get_colors
-from examples.gnn_benchmark.report.plot_common import PLOT_FOLDER
+from examples.gnn_benchmark.report.plot_common import PLOT_FOLDER, get_colors
 
 
 def convert_duration_to_ms(duration_str: str) -> float:

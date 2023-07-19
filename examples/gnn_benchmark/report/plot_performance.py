@@ -1,9 +1,8 @@
 import pandas as pd
 from matplotlib import pyplot as plt
 
-from examples.gnn_benchmark.report.plot import get_colors
 from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
-    PLOT_FOLDER, DEFAULT_LABEL_MAP, MODELING_FOLDER
+    PLOT_FOLDER, DEFAULT_LABEL_MAP, MODELING_FOLDER, get_colors
 
 fwd_filenames = ['gcn-numbers.csv', 'gat-8_heads-numbers.csv']
 bwd_filenames = ['gcn-numbers-bwd.csv']
