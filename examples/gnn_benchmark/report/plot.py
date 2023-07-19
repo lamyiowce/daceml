@@ -220,22 +220,33 @@ def main():
     # plot_midthesis_additional_datasets()
     # plot_stream_comparison()
 
+
 def plot_gcn_thesis():
     drop_names = ['torch_edge_list']
-    arxiv_df, arxiv_bwd_df = read_many_dfs(
-        filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
-                   '11.05-pyg-arxiv-1024.csv',
-                   '14.07.18.39-gcn-ogbn-arxiv-213438.csv']
-    )
-    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
-                  plot_title="GCN, OGB Arxiv")
-
-    cora_df, cora_bwd_df = read_many_dfs(
-        filenames=['18.07.15.14-gcn-cora-216728.csv',
-                   '10.05.15.40-pyg-gcn-cora-191680.csv', ]
-    )
-    plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
-                  plot_title="GCN, Cora", drop_names=drop_names)
+    data = {
+        "OGB Arxiv": [
+            '10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
+            '11.05-pyg-arxiv-1024.csv',
+            '19.07.09.55-gcn-ogbn-arxiv-217319.csv',
+        ],
+        "Cora": [
+            '18.07.15.14-gcn-cora-216728.csv',
+            '10.05.15.40-pyg-gcn-cora-191680.csv',
+        ],
+        "Citeseer": [
+            '19.07.08.35-gcn-citeseer-217313.csv',
+        ],
+        "Pubmed": [
+            '19.07.08.36-gcn-pubmed-217317.csv'
+        ],
+        "Flickr": [],
+        "Reddit": []
+    }
+    for name, datalist in data.items():
+        if len(datalist) > 0:
+            df, bwd_df = read_many_dfs(filenames=datalist)
+            plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name,
+                          plot_title=f"GCN, {name}", drop_names=drop_names)
 
 
 def plot_gat_bwd():
