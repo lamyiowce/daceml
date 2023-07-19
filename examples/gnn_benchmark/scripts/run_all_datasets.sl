@@ -23,9 +23,9 @@ export DACE_default_build_folder=./.dacecache-$SLURM_JOB_ID
 export DACE_compiler_cuda_default_block_size=64,8,1
 export DACE_compiler_cuda_max_concurrent_streams=-1
 model=gcn
-formats="csr_adapt coo_adapt csc_adapt"
+formats="coo_adapt csr_adapt csc_adapt coo_cached csc_cached csr_coo_adapt-0.99"
 backward=--backward
-datasets="cora ogbn-arxiv"
+datasets="ogbn-arxiv"
 
 #hidden_sizes="8 32 512 1024"
 hidden_sizes="8 16 32 64 128 256 512 1024"
