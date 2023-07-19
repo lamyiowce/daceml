@@ -47,6 +47,7 @@ def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False):
         ax = df.plot(figsize=figsize, kind='barh', ylabel='Runtime [ms]',
                      xlabel='Hidden size', color=colors,
                      xerr=std_df, label='Forward', width=bar_width)
+        legend_handles, legend_labels = ax.get_legend_handles_labels()
     else:
         bwd_df, bwd_std_df = prep_df(bwd_df)
         if len(bwd_df.columns) != len(df.columns):
@@ -58,6 +59,7 @@ def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False):
                          xerr=bwd_std_df,
                          label='Backward',
                          width=bar_width)
+        legend_handles, legend_labels = ax.get_legend_handles_labels()
         df.plot(kind='barh',
                 ylabel='Runtime [ms]',
                 xlabel='Hidden size',
@@ -91,6 +93,8 @@ def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False):
     else:
         plt.legend(labels, loc='upper left' if name == 'gcn' else 'lower right')
 
+    ax.legend(legend_handles[::-1], labels[::-1])
+
     plt.xticks(rotation=0)
 
     for container in ax.containers:
@@ -120,8 +124,11 @@ def plot_compare_csr_coo_cutoffs():
 
 
 def main():
+    # 18.07 Thesis
+    plot_gcn_thesis()
+
     # 06.07 plot GAT bwd
-    plot_gat_bwd()
+    # plot_gat_bwd()
 
     # # 16.06 plot GAT forward single layer.
     # plot_gat_single_layer()
@@ -213,14 +220,31 @@ def main():
     # plot_midthesis_additional_datasets()
     # plot_stream_comparison()
 
+def plot_gcn_thesis():
+    drop_names = ['torch_edge_list']
+    arxiv_df, arxiv_bwd_df = read_many_dfs(
+        filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
+                   '11.05-pyg-arxiv-1024.csv',
+                   '14.07.18.39-gcn-ogbn-arxiv-213438.csv']
+    )
+    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
+                  plot_title="GCN, OGB Arxiv")
+
+    cora_df, cora_bwd_df = read_many_dfs(
+        filenames=['18.07.15.14-gcn-cora-216728.csv',
+                   '10.05.15.40-pyg-gcn-cora-191680.csv', ]
+    )
+    plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
+                  plot_title="GCN, Cora", drop_names=drop_names)
+
 
 def plot_gat_bwd():
     arxiv_df, arxiv_bwd_df = read_many_dfs(
         filenames=[
             '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
             '06.06.16.48-pyg-gat-ogbn-arxiv-203173.csv',
-            "06.07.15.21-gat-ogbn-arxiv-206508.csv",
-
+            # "06.07.15.21-gat-ogbn-arxiv-206508.csv",
+            '15.07.15.54-gat-ogbn-arxiv-214176.csv',
         ],
         backward=True
     )
@@ -230,7 +254,8 @@ def plot_gat_bwd():
         filenames=['18.05.14.43-pyg-gat-cora-198393.csv',
                    '18.05.14.59-pyg-gat-cora-198400.csv',
                    '06.06.16.41-pyg-gat-cora-203173.csv',
-                   "06.07.15.09-gat-cora-206508.csv",
+                   # "06.07.15.09-gat-cora-206508.csv",
+                   '15.07.15.30-gat-cora-214176.csv'
                    ],
         backward=True
     )
