@@ -7,6 +7,8 @@ from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
 def main():
     # 18.07 Thesis
     plot_gcn_thesis()
+    plot_compare_cutoffs()
+
 
     # 06.07 plot GAT bwd
     # plot_gat_bwd()
@@ -53,7 +55,7 @@ def main():
     # plot_backward("data/24-04-gcn-reduce-gpuauto-simplify", model='GCN')
     # plot_backward("data/24-04-gcn-single-reduce-gpuauto-simplify", model='GCN Single layer')
 
-    # plot_compare_csr_coo_cutoffs()
+    # plot_compare_cutoffs()
 
     # arxiv_df, arxiv_bwd_df = read_many_dfs(
     #     filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
@@ -106,13 +108,12 @@ def plot_gcn_thesis():
     drop_names = ['torch_edge_list']
     data = {
         "OGB Arxiv": [
-            '10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
-            '11.05-pyg-arxiv-1024.csv',
+            '19.07.12.02-pyg-gcn-ogbn-arxiv-217423.csv',
             '19.07.09.55-gcn-ogbn-arxiv-217319.csv',
         ],
         "Cora": [
             '18.07.15.14-gcn-cora-216728.csv',
-            '10.05.15.40-pyg-gcn-cora-191680.csv',
+            '19.07.11.57-pyg-gcn-cora-217423.csv',
         ],
         "Citeseer": [
             '19.07.11.47-pyg-gcn-citeseer-217423.csv',
@@ -123,20 +124,35 @@ def plot_gcn_thesis():
             '19.07.11.52-pyg-gcn-pubmed-217423.csv',
             '19.07.08.36-gcn-pubmed-217317.csv'
         ],
-        "Flickr": [],
-        "Reddit": []
+        "Flickr": [
+            '19.07.12.10-pyg-gcn-flickr-217453.csv',
+            '19.07.12.24-gcn-flickr-217459.csv',
+        ],
+        "Reddit": [
+            '19.07.12.35-pyg-gcn-reddit-217461.csv',
+            '19.07.13.48-gcn-reddit-217460.csv',
+        ]
     }
+
     for name, datalist in data.items():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
             plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name,
                           plot_title=f"GCN, {name}", drop_names=drop_names)
 
+    # for name, datalist in data.items():
+    #     if len(datalist) > 0:
+    #         df, bwd_df = read_many_dfs(filenames=datalist)
+    #         plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name + ' short',
+    #                       plot_title=f"GCN, {name}", drop_names=drop_names,
+    #                       sizes=[8, 32, 128, 512])
+
 
 def plot_gat_bwd():
+    drop_names = ['torch_csr', 'torch_edge_list']
     arxiv_df, arxiv_bwd_df = read_many_dfs(
         filenames=[
-            '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
+            # '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
             '06.06.16.48-pyg-gat-ogbn-arxiv-203173.csv',
             # "06.07.15.21-gat-ogbn-arxiv-206508.csv",
             '15.07.15.54-gat-ogbn-arxiv-214176.csv',
@@ -144,10 +160,12 @@ def plot_gat_bwd():
         backward=True
     )
     plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gat-ogbn-arxiv',
-                  plot_title="GAT, OGB Arxiv", sizes=[8, 16, 32, 64, 128, 256])
+                  plot_title="GAT, OGB Arxiv", sizes=[8, 16, 32, 64, 128],
+                  drop_names=drop_names)
     cora_df, cora_bwd_df = read_many_dfs(
-        filenames=['18.05.14.43-pyg-gat-cora-198393.csv',
-                   '18.05.14.59-pyg-gat-cora-198400.csv',
+        filenames=[
+            # '18.05.14.43-pyg-gat-cora-198393.csv',
+            #        '18.05.14.59-pyg-gat-cora-198400.csv',
                    '06.06.16.41-pyg-gat-cora-203173.csv',
                    # "06.07.15.09-gat-cora-206508.csv",
                    '15.07.15.30-gat-cora-214176.csv'
@@ -155,21 +173,42 @@ def plot_gat_bwd():
         backward=True
     )
     plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gat-cora',
-                  plot_title="GAT, Cora", sizes=[8, 16, 32, 64, 128, 256])
+                  plot_title="GAT, Cora", sizes=[8, 16, 32, 64, 128],
+                  drop_names=drop_names)
 
 
-def plot_compare_csr_coo_cutoffs():
-    arxiv_df, arxiv_bwd_df = read_many_dfs(
-        filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
-                   '11.05-pyg-arxiv-1024.csv',
-                   '16.05.12.53-gcn-ogbn-arxiv-196721.csv',
-                   '16.05.13.59-gcn-csr_adapt-ogbn-arxiv-196780.csv',
-                   '23.05.13.27-gcn-ogbn-arxiv-202455.csv']
-    )
-    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
-                  plot_title="OGB Arxiv, cutoff comparison",
-                  drop_names=['torch_edge_list', 'torch_csr'], sizes=[16, 256],
-                  legend_outside=True)
+def plot_compare_cutoffs():
+    data = {
+        'Cora': [
+            '19.07.14.44-gcn-cora-csccoo-compare-217536.csv',
+            '19.07.14.44-gcn-cora-csrcoo-compare-217535.csv',
+            '19.07.11.57-pyg-gcn-cora-217423.csv',
+        ],
+        'Arxiv': [
+            '19.07.15.11-gcn-ogbn-arxiv-csrcoo-compare-217535.csv',
+            '19.07.15.11-gcn-ogbn-arxiv-csccoo-compare-217536.csv',
+            '19.07.12.02-pyg-gcn-ogbn-arxiv-217423.csv',
+        ]
+    }
+
+    for name, datalist in data.items():
+        if len(datalist) > 0:
+            df, bwd_df = read_many_dfs(filenames=datalist)
+            plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name,
+                          plot_title=f"GCN, {name}", sizes=[8, 256], legend_outside=True)
+
+    # Old
+    # arxiv_df, arxiv_bwd_df = read_many_dfs(
+    #     filenames=['10.05.15.33-pyg-gcn-ogbn-arxiv-191680.csv',
+    #                '11.05-pyg-arxiv-1024.csv',
+    #                '16.05.12.53-gcn-ogbn-arxiv-196721.csv',
+    #                '16.05.13.59-gcn-csr_adapt-ogbn-arxiv-196780.csv',
+    #                '23.05.13.27-gcn-ogbn-arxiv-202455.csv']
+    # )
+    # plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
+    #               plot_title="OGB Arxiv, cutoff comparison",
+    #               drop_names=['torch_edge_list', 'torch_csr'], sizes=[16, 256],
+    #               legend_outside=True)
 
 
 def plot_gat_single_layer():

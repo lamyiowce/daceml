@@ -70,7 +70,7 @@ def get_colors(names: pd.Series):
     greens = ['olivedrab', 'yellowgreen', 'forestgreen', 'limegreen',
               'seagreen', 'mediumseagreen',
               'lightseagreen', 'mediumturquoise', 'paleturquoise', 'steelblue',
-              'lightskyblue']
+              'lightskyblue'] * 2
     # Get unique names. If 'torch' is in the name, use red, otherwise green.
     unique_names = names.unique()
     color_dict = {}
@@ -101,7 +101,7 @@ def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False):
     df, std_df = prep_df(full_df)
     colors = get_colors(df.columns)
     bar_width = 0.75
-    figsize = (6, 2 + len(df) * 1.2)
+    figsize = (6, 1.5 + len(df) * 1.5)
     if bwd_df is None:
         ax = df.plot(figsize=figsize, kind='barh', ylabel='Runtime [ms]',
                      xlabel='Hidden size', color=colors,
