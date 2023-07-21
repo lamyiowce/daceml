@@ -105,32 +105,39 @@ def main():
 
 
 def plot_gcn_thesis():
-    drop_names = ['torch_edge_list']
+    drop_names = ['torch_edge_list', 'dace_coo_cached', 'dace_csc_cached']
     data = {
         "OGB Arxiv": [
             '19.07.12.02-pyg-gcn-ogbn-arxiv-217423.csv',
             '19.07.09.55-gcn-ogbn-arxiv-217319.csv',
+            '20.07.13.16-gcn-ogbn-arxiv-218302.csv',
         ],
         "Cora": [
             '18.07.15.14-gcn-cora-216728.csv',
+            '20.07.13.15-gcn-cora-218300.csv',
             '19.07.11.57-pyg-gcn-cora-217423.csv',
         ],
         "Citeseer": [
             '19.07.11.47-pyg-gcn-citeseer-217423.csv',
             '19.07.08.35-gcn-citeseer-217313.csv',
             '18.07.16.31-gcn-citeseer-216728.csv',
+            '20.07.13.42-gcn-citeseer-218300.csv',
         ],
         "Pubmed": [
             '19.07.11.52-pyg-gcn-pubmed-217423.csv',
-            '19.07.08.36-gcn-pubmed-217317.csv'
+            '19.07.08.36-gcn-pubmed-217317.csv',
+            '20.07.14.08-gcn-pubmed-218300.csv',
         ],
         "Flickr": [
             '19.07.12.10-pyg-gcn-flickr-217453.csv',
             '19.07.12.24-gcn-flickr-217459.csv',
+            '20.07.14.34-gcn-flickr-218300.csv',
         ],
         "Reddit": [
             '19.07.12.35-pyg-gcn-reddit-217461.csv',
             '19.07.13.48-gcn-reddit-217460.csv',
+            '19.07.15.53-gcn-reddit-217567.csv',
+            '20.07.13.44-gcn-reddit-218302.csv',
         ]
     }
 
@@ -138,7 +145,7 @@ def plot_gcn_thesis():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
             plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name,
-                          plot_title=f"GCN, {name}", drop_names=drop_names)
+                          plot_title=f"GCN, {name}", drop_names=drop_names, skip_timestamp=True)
 
     # for name, datalist in data.items():
     #     if len(datalist) > 0:
