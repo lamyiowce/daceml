@@ -1,6 +1,6 @@
 import argparse
 import faulthandler
-import functools
+import gc
 import logging
 from collections import OrderedDict
 from pathlib import Path
@@ -148,10 +148,16 @@ def main():
     else:
         loss_fn = torch.nn.CrossEntropyLoss()
 
+    targets = torch.clone(data.y, memory_format=torch.contiguous_format)
+    if not torch_experiments:
+        print("No torch, deleting torch data var.")
+        del data
+        gc.collect()
+
     check_correctness(dace_models,
                       torch_experiments=torch_experiments,
                       loss_fn=loss_fn,
-                      targets=data.y,
+                      targets=targets,
                       backward=args.backward)
 
     if args.mode == 'benchmark' or args.mode == 'benchmark_small':
@@ -168,7 +174,7 @@ def main():
         do_benchmark(dace_models,
                      backward=args.backward,
                      loss_fn=loss_fn,
-                     targets=data.y,
+                     targets=targets,
                      hidden_size=args.hidden,
                      model_name=args.model,
                      dace_tag=dace_tag,
@@ -184,7 +190,7 @@ def main():
                       torch_edge_list_args,
                       args,
                       backward=args.backward,
-                      targets=data.y,
+                      targets=targets,
                       skip_torch_csr=args.torch != 'both' and args.torch != 'csr',
                       skip_torch_edge_list=args.torch != 'both' and args.torch != 'edge_list')
     elif args.mode != 'dry':
