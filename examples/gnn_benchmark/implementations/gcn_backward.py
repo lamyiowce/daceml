@@ -561,17 +561,18 @@ class GCNConvBackwardCOO(BackwardImplementation):
                                             linDOTweight, node_features_grad,
                                             linDOTweight_grad, bias_grad,
                                             output_grad):
-            # Grad X = A @ Grad G @ W
-            temp = dace.define_local((N, M), dtype=val_dtype)
-            temp[:] = output_grad @ linDOTweight
-
-            gcn_backward(node_features, rows, columns, edge_vals,
-                         linDOTweight_grad, bias_grad, output_grad)
-
+            # Grad X = A @ Grad Y @ W
+            # Grad W = (A @ Grad Y)^T @ X
+            temp = dace.define_local((N, F), dtype=val_dtype)
+            # A @ Grad Y
             # `columns` and `rows` are switched because transA=False doesn't work here
             # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
-            coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0,
+            coomm(columns, rows, edge_vals, output_grad, temp, beta=0.0,
                   transA=True)
+            linDOTweight_grad[:] = np.einsum('ji,jk->ik', temp, node_features)
+            # @ W
+            node_features_grad[:] = temp @ linDOTweight
+            bias_grad[:] = np.sum(output_grad, axis=0)
 
         result_node, result = autodiff_utils.backward_program_for_node(
             gcn_backward_with_node_features if compute_grad_for_node_features else gcn_backward,
