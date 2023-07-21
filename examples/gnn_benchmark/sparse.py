@@ -60,9 +60,10 @@ class CsrGraph(SparseGraph):
         idx_dtype = idx_dtype or rows.dtype
         sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols)
         rowptrs, columns, edge_vals = sparse.csr()
-        self.edge_vals = edge_vals.contiguous() if edge_vals is not None else None
-        self.rowptrs = rowptrs.to(idx_dtype).contiguous()
-        self.columns = columns.to(idx_dtype).contiguous()
+        self.edge_vals = torch.clone(edge_vals, memory_format=torch.contiguous_format) if edge_vals is not None else None
+        self.rowptrs = torch.clone(rowptrs.to(idx_dtype), memory_format=torch.contiguous_format)
+        self.columns = torch.clone(columns.to(idx_dtype), memory_format=torch.contiguous_format)
+        del sparse
         super().__init__(node_features)
 
     def data_list(self):
@@ -128,11 +129,12 @@ class CscGraph(SparseGraph):
                                            sparse_sizes=(N, N))
         colptrs, rows, edge_vals = sparse.csc()
         if edge_vals is not None:
-            self.edge_vals = edge_vals.contiguous()
+            self.edge_vals = torch.clone(edge_vals, memory_format=torch.contiguous_format)
         else:
             self.edge_vals = None
-        self.colptrs = colptrs.to(idx_dtype).contiguous()
-        self.rows = rows.to(idx_dtype).contiguous()
+        self.colptrs = torch.clone(colptrs.to(idx_dtype), memory_format=torch.contiguous_format)
+        self.rows = torch.clone(rows.to(idx_dtype), memory_format=torch.contiguous_format)
+        del sparse
         super().__init__(node_features)
 
     def data_list(self):
