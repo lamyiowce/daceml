@@ -14,6 +14,7 @@ from torch_geometric.nn import FusedGATConv
 import examples.gnn_benchmark.torch_util
 from examples.gnn_benchmark import models
 from examples.gnn_benchmark.benchmark import do_benchmark
+from examples.gnn_benchmark.common import get_loss_and_targets
 from examples.gnn_benchmark.correctness import check_correctness
 from examples.gnn_benchmark.datasets import get_dataset
 from examples.gnn_benchmark.torch_profile import torch_profile
@@ -138,22 +139,19 @@ def main():
 
     print("Running experiment: ", experiment)
 
-    if 'single_layer' in args.model:
-        loss_fn = lambda pred, targets: torch.sum(pred)
-    else:
-        loss_fn = torch.nn.CrossEntropyLoss()
+    loss_fn, targets = get_loss_and_targets(args.model, args.val_dtype, data, num_classes)
 
     check_correctness(dace_models=dict(),
                       torch_experiments=experiment,
                       loss_fn=loss_fn,
-                      targets=data.y,
+                      targets=targets,
                       backward=args.backward)
     if args.mode == 'benchmark' or args.mode == 'benchmark_small':
         do_benchmark(dict(),
                      torch_experiments=experiment,
                      backward=args.backward,
                      loss_fn=loss_fn,
-                     targets=data.y,
+                     targets=targets,
                      hidden_size=args.hidden,
                      model_name=args.model,
                      dace_tag=None,

@@ -13,6 +13,7 @@ import examples.gnn_benchmark.torch_util
 from daceml import onnx as donnx
 from examples.gnn_benchmark import models
 from examples.gnn_benchmark.benchmark import do_benchmark
+from examples.gnn_benchmark.common import get_loss_and_targets
 from examples.gnn_benchmark.correctness import check_correctness
 from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
@@ -147,12 +148,8 @@ def main():
                                                                                            add_edge_weight)
         torch_experiments += [('torch_edge_list', torch_model, torch_edge_list_args)]
 
-    if 'single_layer' in args.model:
-        loss_fn = lambda pred, targets: torch.sum(pred)
-    else:
-        loss_fn = torch.nn.CrossEntropyLoss()
+    loss_fn, targets = get_loss_and_targets(args.model, args.val_dtype, data, num_classes)
 
-    targets = torch.clone(data.y, memory_format=torch.contiguous_format)
     if not torch_experiments:
         print("No torch, deleting torch data var.")
         del data
