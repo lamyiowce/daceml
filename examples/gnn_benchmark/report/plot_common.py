@@ -9,17 +9,19 @@ DEFAULT_LABEL_MAP = {
     'torch_csr': 'Torch CSR',
     'torch_edge_list': 'Torch Edge List',
     'torch_dgnn': 'Torch DGNN-GAT',
-    'dace_csr': 'Dace CSR',
-    'dace_csr_adapt': 'Dace CSR (adapt MM order)',
-    'dace_coo': 'Dace COO',
-    'dace_coo_adapt': 'Dace COO (adapt MM order)',
-    'dace_csc': 'Dace CSC',
-    'dace_csc_adapt': 'Dace CSC (adapt MM order)',
-    'dace_csr_coo_adapt': 'Dace CSR/COO adapt, CSR 50%',
-    'dace_csr_coo_adapt-0.99': 'Dace CSR/COO adapt, CSR 99%',
-    'dace_csr_coo': 'Dace CSR/COO, CSR 50%',
-    'dace_coo_cached': 'Dace COO (cached)',
-    'dace_csc_cached': 'Dace CSC (cached)',
+    'dace_csr': 'DaCe CSR',
+    'dace_csr_adapt': 'DaCe CSR (adapt MM order)',
+    'dace_coo': 'DaCe COO',
+    'dace_coo_adapt': 'DaCe COO (adapt MM order)',
+    'dace_csc': 'DaCe CSC',
+    'dace_csc_adapt': 'DaCe CSC (adapt MM order)',
+    'dace_csr_coo_adapt': 'DaCe CSR/COO adapt, CSR 50%',
+    'dace_csr_coo_adapt-0.99': 'DaCe CSR/COO adapt, CSR 99%',
+    'dace_csr_coo': 'DaCe CSR/COO, CSR 50%',
+    'dace_coo_cached': 'DaCe COO (cached)',
+    'dace_coo_adapt_cached': 'DaCe COO (cached)',
+    'dace_csc_cached': 'DaCe CSC (cached)',
+    'dace_csc_adapt_cached': 'DaCe CSC (cached)',
 }
 
 DEFAULT_LABEL_MAP.update(
@@ -97,7 +99,8 @@ def prep_df(full_df):
     return df, std_df
 
 
-def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False):
+def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False,
+              skip_timestamp=False):
     df, std_df = prep_df(full_df)
     colors = get_colors(df.columns)
     bar_width = 0.75
@@ -162,7 +165,12 @@ def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False):
 
     plt.tight_layout()
     # put today's date in the filename
-    plt.savefig(
-        PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {name}.pdf',
-        bbox_inches='tight')
+    clean_name = name.replace(',', '').replace('+', '').replace('  ', ' ').replace(':', '')
+
+    if skip_timestamp:
+        path = PLOT_FOLDER / 'thesis' / f'{clean_name}.pdf'
+    else:
+        path = PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {clean_name}.pdf'
+
+    plt.savefig(path, bbox_inches='tight')
     plt.show()
