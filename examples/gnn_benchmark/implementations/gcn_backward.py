@@ -630,7 +630,6 @@ class GCNConvBackwardCOOAdapt(BackwardImplementation):
                 temp = dace.define_local((N, F_in), dtype=val_dtype)
                 coomm(rows, columns, edge_vals, node_features, temp, transA=True,
                       beta=0.0)
-                bias_grad[:] = np.sum(output_grad, axis=0)
                 linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp)
             else:
                 # Grad W = (A @ Grad Y).t @ X
@@ -639,8 +638,8 @@ class GCNConvBackwardCOOAdapt(BackwardImplementation):
                 # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
                 coomm(columns, rows, edge_vals, output_grad, temp, transA=True,
                       beta=0.0)
-                bias_grad[:] = np.sum(output_grad, axis=0)
                 linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
+            bias_grad[:] = np.sum(output_grad, axis=0)
 
         def gcn_backward_with_node_features(node_features, rows, columns,
                                             edge_vals,
@@ -648,28 +647,33 @@ class GCNConvBackwardCOOAdapt(BackwardImplementation):
                                             linDOTweight_grad, bias_grad,
                                             output_grad):
             # Grad X = A @ Grad Y @ W
-            if F_out > F_in:
+            if F_out > 2 * F_in:
+                # Grad X = A @ (Grad Y @ W)
                 temp = dace.define_local((N, F_in), dtype=val_dtype)
-                # If F > M, then first compute temp (result N x F_in), then SpMM (result N x F_in).
                 temp[:] = output_grad @ linDOTweight
-
-                gcn_backward(node_features, rows, columns, edge_vals,
-                             linDOTweight_grad, bias_grad, output_grad)
-
+                coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0, transA=True)
+                # Grad W = Grad Y.t @ (A.t @ X)
+                temp_W = dace.define_local((N, F_in), dtype=val_dtype)
+                coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0, transA=True)
+                linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp_W)
                 # `columns` and `rows` are switched because transA=False doesn't work here
                 # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
                 coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0,
                       transA=True)
             else:
                 # If F_out < F_in, then first compute A @ Grad Y SpMM (result N x F_out), then @ W (result N x F_in).
+                # Grad X = A @ Grad Y @ W
+                # Grad W = (A @ Grad Y)^T @ X
                 temp = dace.define_local((N, F_out), dtype=val_dtype)
+                # A @ Grad Y
                 # `columns` and `rows` are switched because transA=False doesn't work here
                 # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
                 coomm(columns, rows, edge_vals, output_grad, temp, beta=0.0,
                       transA=True)
-                gcn_backward(node_features, rows, columns, edge_vals,
-                             linDOTweight_grad, bias_grad, output_grad)
+                linDOTweight_grad[:] = np.einsum('ji,jk->ik', temp, node_features)
+                # @ W
                 node_features_grad[:] = temp @ linDOTweight
+            bias_grad[:] = np.sum(output_grad, axis=0)
 
         result_node, result = autodiff_utils.backward_program_for_node(
             gcn_backward_with_node_features if compute_grad_for_node_features else gcn_backward,
@@ -813,8 +817,6 @@ class GCNConvBackwardCOOAdaptCached(BackwardImplementation):
             # Compute the gradient of the GCN layer.
             if F_out >= F_in:
                 # Grad W = Grad Y.t @ (A.t @ X)
-
-                bias_grad[:] = np.sum(output_grad, axis=0)
                 linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, AX_cached)
             else:
                 # Grad W = (A @ Grad Y).t @ X
@@ -823,8 +825,8 @@ class GCNConvBackwardCOOAdaptCached(BackwardImplementation):
                 # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
                 coomm(columns, rows, edge_vals, output_grad, temp, transA=True,
                       beta=0.0)
-                bias_grad[:] = np.sum(output_grad, axis=0)
                 linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
+            bias_grad[:] = np.sum(output_grad, axis=0)
 
         def gcn_backward_with_node_features(node_features, rows, columns,
                                             edge_vals,
@@ -832,28 +834,31 @@ class GCNConvBackwardCOOAdaptCached(BackwardImplementation):
                                             linDOTweight_grad, bias_grad,
                                             output_grad, AX_cached):
             # Grad X = A @ Grad Y @ W
-            if F_out > F_in:
+            if F_out > 2 * F_in:
+                # Grad X = A @ (Grad Y @ W)
                 temp = dace.define_local((N, F_in), dtype=val_dtype)
-                # If F > M, then first compute temp (result N x F_in), then SpMM (result N x F_in).
                 temp[:] = output_grad @ linDOTweight
-
-                gcn_backward(node_features, rows, columns, edge_vals,
-                             linDOTweight_grad, bias_grad, output_grad, AX_cached)
-
+                coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0, transA=True)
+                # Grad W = Grad Y.t @ (A.t @ X)
+                linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, AX_cached)
                 # `columns` and `rows` are switched because transA=False doesn't work here
                 # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
-                coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0,
-                      transA=True)
+                coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0, transA=True)
             else:
-                # If F_out < F_in, then first compute A @ Grad Y SpMM (result N x F_out), then @ W (result N x F_in).
+                # If F_out < F_in, then first compute A @ Grad Y SpMM (result N x F_out), then
+                # @ W (result N x F_in).
+                # Grad X = A @ Grad Y @ W
+                # Grad W = (A @ Grad Y)^T @ X
                 temp = dace.define_local((N, F_out), dtype=val_dtype)
+                # A @ Grad Y
                 # `columns` and `rows` are switched because transA=False doesn't work here
                 # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
                 coomm(columns, rows, edge_vals, output_grad, temp, beta=0.0,
                       transA=True)
-                gcn_backward(node_features, rows, columns, edge_vals,
-                             linDOTweight_grad, bias_grad, output_grad, AX_cached)
+                linDOTweight_grad[:] = np.einsum('ji,jk->ik', temp, node_features)
+                # @ W
                 node_features_grad[:] = temp @ linDOTweight
+            bias_grad[:] = np.sum(output_grad, axis=0)
 
         result_node, result = autodiff_utils.backward_program_for_node(
             gcn_backward_with_node_features if compute_grad_for_node_features else gcn_backward,
@@ -1090,8 +1095,6 @@ class GCNConvBackwardHybridCSCCOOAdapt(BackwardImplementation):
                 csrmm(csc_colptrs, csc_rows, csc_edge_vals, node_features,
                       temp, transA=False, beta=1.0)
                 linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp)
-
-                bias_grad[:] = np.sum(output_grad, axis=0)
             else:
                 # Grad W = (A_csr.t @ Grad Y + A_coo.t @ Grad Y).t @ X
                 temp = dace.define_local((N, F_out), dtype=val_dtype)
@@ -1101,8 +1104,8 @@ class GCNConvBackwardHybridCSCCOOAdapt(BackwardImplementation):
                       beta=0.0)
                 csrmm(csc_colptrs, csc_rows, csc_edge_vals, output_grad, temp, transA=True,
                       beta=1.0)
-                bias_grad[:] = np.sum(output_grad, axis=0)
                 linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
+            bias_grad[:] = np.sum(output_grad, axis=0)
 
         def gcn_backward_with_node_features(node_features,
                                             csc_colptrs, csc_rows, csc_edge_vals,
@@ -1110,7 +1113,7 @@ class GCNConvBackwardHybridCSCCOOAdapt(BackwardImplementation):
                                             linDOTweight, node_features_grad,
                                             linDOTweight_grad, bias_grad,
                                             output_grad):
-            if F_out > F_in:
+            if F_out > 2 * F_in:
                 # Grad X = A_csr @ (Grad G @ W) + A_coo @ (Grad G @ W)
 
                 temp = dace.define_local((N, F_in), dtype=val_dtype)
@@ -1122,6 +1125,14 @@ class GCNConvBackwardHybridCSCCOOAdapt(BackwardImplementation):
                       transA=True)
                 csrmm(csc_colptrs, csc_rows, csc_edge_vals, temp, node_features_grad, beta=1.0,
                       transA=True)
+
+                # Grad W = Grad Y.t @ (A.t @ X)
+                temp_W = dace.define_local((N, F_in), dtype=val_dtype)
+                coomm(coo_rows, coo_columns, coo_edge_vals, temp, node_features_grad, beta=0.0,
+                      transA=True)
+                csrmm(csc_colptrs, csc_rows, csc_edge_vals, temp, node_features_grad, beta=1.0,
+                      transA=False)
+                linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp_W)
             else:
                 # Grad X = (A_csr @ Grad G + A_coo @ Grad G) @ W
 
@@ -1133,10 +1144,9 @@ class GCNConvBackwardHybridCSCCOOAdapt(BackwardImplementation):
                 csrmm(csc_colptrs, csc_rows, csc_edge_vals, output_grad, temp, beta=1.0,
                       transA=True)
                 node_features_grad[:] = temp @ linDOTweight
+                linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
+            bias_grad[:] = np.sum(output_grad, axis=0)
 
-            gcn_backward(node_features, csc_colptrs, csc_rows, csc_edge_vals,
-                         coo_rows, coo_columns, coo_edge_vals,
-                         linDOTweight_grad, bias_grad, output_grad)
 
         result_node, result = autodiff_utils.backward_program_for_node(
             gcn_backward_with_node_features if compute_grad_for_node_features else gcn_backward,
