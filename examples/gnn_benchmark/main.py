@@ -67,6 +67,8 @@ def main():
     parser.add_argument('--model', choices=model_dict.keys(), required=True)
     parser.add_argument('--hidden', type=int, default=None, required=True)
     parser.add_argument('--heads', type=int, default=8)
+    parser.add_argument('--force-num-features', type=int, default=None)
+    parser.add_argument('--num-layers', type=int, default=2)
     parser.add_argument('--outfile', type=str, default=None)
     parser.add_argument('--name', type=str, default='dace')
     parser.add_argument('--idx-dtype', type=str, default='int32')
@@ -94,7 +96,8 @@ def main():
     log = logging.getLogger(__name__)
     log.setLevel(logging.INFO)
 
-    data = get_dataset(args.data, device, val_dtype=args.val_dtype)
+    data = get_dataset(args.data, device, val_dtype=args.val_dtype,
+                       force_num_features=args.force_num_features)
 
     print("Num node features: ", data.num_node_features)
     num_classes = data.y.max().item() + 1
@@ -114,7 +117,8 @@ def main():
     # Define models.
     additional_kwargs = {} if 'gcn' in args.model else {'num_heads': args.heads}
     torch_model = model_class(data.num_node_features, num_hidden_features, num_classes,
-                              bias_init=bias_init_fn, bias=not args.no_bias, **additional_kwargs)
+                              args.num_layers, bias_init=bias_init_fn, bias=not args.no_bias,
+                              **additional_kwargs)
     torch_model = torch_model.to(
         args.val_dtype).to(device)
     torch_model.eval()

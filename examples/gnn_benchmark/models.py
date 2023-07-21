@@ -14,9 +14,10 @@ except ImportError:
 
 
 class GCNSingleLayer(torch.nn.Module):
-    def __init__(self, num_node_features, num_hidden_features, num_classes,
+    def __init__(self, num_node_features, num_hidden_features, num_classes, num_layers,
                  bias=True, bias_init=torch.nn.init.zeros_):
         del num_classes
+        del num_layers
         super().__init__()
         self.conv = GCNConv(num_node_features,
                             num_hidden_features,
@@ -33,29 +34,29 @@ class GCNSingleLayer(torch.nn.Module):
 
 
 class GCN(torch.nn.Module):
-    def __init__(self, num_node_features, num_hidden_features, num_classes,
+    def __init__(self, num_node_features, num_hidden_features, num_classes, num_layers,
                  bias=True, bias_init=torch.nn.init.zeros_):
         super().__init__()
-        self.conv1 = GCNConv(num_node_features,
-                             num_hidden_features,
-                             normalize=False,
-                             add_self_loops=False,
-                             bias=bias)
-        self.conv2 = GCNConv(num_hidden_features,
-                             num_classes,
-                             normalize=False,
-                             add_self_loops=False,
-                             bias=bias)
-        if bias:
-            bias_init(self.conv1.bias)
-            bias_init(self.conv2.bias)
+        self.convs = torch.nn.ModuleList()
+        for i in range(num_layers):
+            in_channels = num_node_features if i == 0 else num_hidden_features
+            out_channels = num_classes if i == num_layers - 1 else num_hidden_features
+            conv = GCNConv(in_channels,
+                           out_channels,
+                           normalize=False,
+                           add_self_loops=False,
+                           bias=bias)
+            if bias:
+                bias_init(conv.bias)
+            self.convs.append(conv)
 
         self.act = nn.ReLU()
 
     def forward(self, x, *edge_info):
-        x = self.conv1(x, *edge_info)  # Size: `hidden size`
-        x = self.act(x)  # ReLU
-        x = self.conv2(x, *edge_info)  # Size: `num_classes`
+        for conv in self.convs[:-1]:
+            x = conv(x, *edge_info)  # Size: `hidden size`
+            x = self.act(x)  # ReLU
+        x = self.convs[-1](x, *edge_info)  # Size: `num_classes`
         return x
 
 
