@@ -59,6 +59,7 @@ def main():
     parser.add_argument('--backward', action='store_true')
     parser.add_argument('--model', choices=model_dict.keys(), required=True)
     parser.add_argument('--hidden', type=int, default=None, required=True)
+    parser.add_argument('--num_layers', type=int, default=2)
     parser.add_argument('--outfile', type=str, default=None)
     parser.add_argument('--idx-dtype', type=str, default='int32')
     parser.add_argument('--val-dtype', type=str, default='float32')
@@ -123,7 +124,7 @@ def main():
         raise ValueError(f'Unknown torch impl {args.torch}.')
 
     torch_model = model_class(data.num_node_features, num_hidden_features,
-                              num_classes,
+                              num_classes, args.num_layers,
                               bias_init=torch.nn.init.uniform_,
                               **model_kwargs)
 
