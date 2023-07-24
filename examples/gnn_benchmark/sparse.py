@@ -24,13 +24,18 @@ class SparseGraph(GraphMatrix):
 
     def __init__(self,
                  node_features: torch.Tensor,
+                 compute_input_grad: bool,
                  *args, **kwargs
                  ):
-        self.node_features = node_features.contiguous() if node_features is not None else None
+        if node_features is not None:
+            self.node_features = node_features.contiguous()
+            self.node_features.requires_grad = compute_input_grad
+        else:
+            self.node_features = None
 
     @classmethod
-    def from_pyg_data(cls, data: torch_geometric.data.Data, idx_dtype=None,
-                      **kwargs):
+    def from_pyg_data(cls, data: torch_geometric.data.Data, compute_input_grad: bool,
+                      idx_dtype=None, **kwargs):
         edge_index = data.edge_index
         edge_weight = data.edge_weight
         sparse_matrix = cls(node_features=data.x,
@@ -38,6 +43,7 @@ class SparseGraph(GraphMatrix):
                             rows=edge_index[0],
                             cols=edge_index[1],
                             idx_dtype=idx_dtype,
+                            compute_input_grad=compute_input_grad,
                             **kwargs)
         return sparse_matrix
 
@@ -55,16 +61,19 @@ class CsrGraph(SparseGraph):
                  edge_vals: Optional[torch.Tensor],
                  rows: torch.Tensor,
                  cols: torch.Tensor,
-                 idx_dtype: Optional[torch.dtype] = None
+                 idx_dtype: Optional[torch.dtype] = None,
+                 *args,
+                 **kwargs
                  ):
         idx_dtype = idx_dtype or rows.dtype
         sparse = torch_sparse.SparseTensor(value=edge_vals, row=rows, col=cols)
         rowptrs, columns, edge_vals = sparse.csr()
-        self.edge_vals = torch.clone(edge_vals, memory_format=torch.contiguous_format) if edge_vals is not None else None
+        self.edge_vals = torch.clone(edge_vals,
+                                     memory_format=torch.contiguous_format) if edge_vals is not None else None
         self.rowptrs = torch.clone(rowptrs.to(idx_dtype), memory_format=torch.contiguous_format)
         self.columns = torch.clone(columns.to(idx_dtype), memory_format=torch.contiguous_format)
         del sparse
-        super().__init__(node_features)
+        super().__init__(node_features, *args, **kwargs)
 
     def data_list(self):
         data_list = self.rowptrs, self.columns
@@ -88,7 +97,9 @@ class CooGraph(SparseGraph):
                  edge_vals: Optional[torch.Tensor],
                  rows: torch.Tensor,
                  cols: torch.Tensor,
-                 idx_dtype: Optional[torch.dtype] = None
+                 idx_dtype: Optional[torch.dtype] = None,
+                 *args,
+                 **kwargs
                  ):
         idx_dtype = idx_dtype or rows.dtype
         if edge_vals is not None:
@@ -97,7 +108,7 @@ class CooGraph(SparseGraph):
             self.edge_vals = None
         self.cols = cols.to(idx_dtype).contiguous()
         self.rows = rows.to(idx_dtype).contiguous()
-        super().__init__(node_features)
+        super().__init__(node_features, *args, **kwargs)
 
     def data_list(self):
         data_list = self.rows, self.cols
@@ -121,7 +132,9 @@ class CscGraph(SparseGraph):
                  edge_vals: torch.Tensor,
                  rows: torch.Tensor,
                  cols: torch.Tensor,
-                 idx_dtype: Optional[torch.dtype] = None
+                 idx_dtype: Optional[torch.dtype] = None,
+                 *args,
+                 **kwargs,
                  ):
         idx_dtype = idx_dtype or rows.dtype
         N = node_features.shape[0]
@@ -135,7 +148,7 @@ class CscGraph(SparseGraph):
         self.colptrs = torch.clone(colptrs.to(idx_dtype), memory_format=torch.contiguous_format)
         self.rows = torch.clone(rows.to(idx_dtype), memory_format=torch.contiguous_format)
         del sparse
-        super().__init__(node_features)
+        super().__init__(node_features, *args, **kwargs)
 
     def data_list(self):
         if self.edge_vals is not None:
@@ -158,7 +171,9 @@ class HybridCsrCooGraph(SparseGraph):
                  rows: torch.Tensor,
                  cols: torch.Tensor,
                  csr_cutoff: float,
-                 idx_dtype: Optional[torch.dtype] = None
+                 idx_dtype: Optional[torch.dtype] = None,
+                 *args,
+                 **kwargs,
                  ):
         idx_dtype = idx_dtype or rows.dtype
 
@@ -196,7 +211,7 @@ class HybridCsrCooGraph(SparseGraph):
                 columns.shape[
                     0]), 'CSR and COO columns do not add up to the total number of columns.'
 
-        super().__init__(node_features)
+        super().__init__(node_features, *args, **kwargs)
 
     def data_list(self):
         if self.csr_edge_vals is not None and self.coo_edge_vals is not None:
@@ -230,7 +245,9 @@ class HybridCscCooGraph(SparseGraph):
                  rows: torch.Tensor,
                  cols: torch.Tensor,
                  csr_cutoff: float,
-                 idx_dtype: Optional[torch.dtype] = None
+                 idx_dtype: Optional[torch.dtype] = None,
+                 *args,
+                 **kwargs,
                  ):
         # Construct a HybridCsrCooGraph with the transposed data.
         csr_coo = HybridCsrCooGraph(node_features, edge_vals, rows=cols,
@@ -244,7 +261,7 @@ class HybridCscCooGraph(SparseGraph):
         self.coo_rows = csr_coo.coo_cols
         self.coo_cols = csr_coo.coo_rows
         self.coo_edge_vals = csr_coo.coo_edge_vals
-        super().__init__(node_features)
+        super().__init__(node_features, *args, **kwargs)
 
     def data_list(self):
         if self.csc_edge_vals is not None and self.coo_edge_vals is not None:
@@ -278,9 +295,15 @@ class EllpackGraph(GraphMatrix):
                  rows: torch.Tensor,
                  cols: torch.Tensor,
                  block_size: int,
-                 idx_dtype: Optional[torch.dtype] = None
+                 compute_input_grad: bool,
+                 idx_dtype: Optional[torch.dtype] = None,
                  ):
-        self.node_features = node_features.contiguous()
+        if node_features is not None:
+            self.node_features = node_features.contiguous()
+            self.node_features.requires_grad = compute_input_grad
+        else:
+            self.node_features = None
+
         idx_dtype = idx_dtype or rows.dtype
         device = rows.device
 
@@ -349,10 +372,12 @@ class EllpackGraph(GraphMatrix):
 
     @classmethod
     def from_pyg_data(cls, data: torch_geometric.data.Data, block_size: int,
+                      compute_input_grad: bool,
                       idx_dtype: Union[str, torch.dtype] = 'keep'):
         return cls(data.x, edge_vals=data.edge_weight, rows=data.edge_index[0],
                    cols=data.edge_index[1],
-                   idx_dtype=idx_dtype, block_size=block_size)
+                   idx_dtype=idx_dtype, block_size=block_size,
+                   compute_input_grad=compute_input_grad)
 
     @classmethod
     def from_dense(cls, adjacency_matrix: torch.Tensor,
@@ -376,8 +401,10 @@ class EllpackTransposedGraph(EllpackGraph):
 
     @classmethod
     def from_pyg_data(cls, data: torch_geometric.data.Data, block_size: int,
+                      compute_input_grad: bool,
                       idx_dtype: Union[str, torch.dtype] = 'keep'):
         # Same as for EllpackGraph, but the rows and cols are switched.
         return cls(data.x, edge_vals=data.edge_weight, rows=data.edge_index[1],
                    cols=data.edge_index[0],
-                   idx_dtype=idx_dtype, block_size=block_size)
+                   idx_dtype=idx_dtype, block_size=block_size,
+                   compute_input_grad=compute_input_grad)

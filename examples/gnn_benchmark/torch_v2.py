@@ -44,6 +44,12 @@ def parse_impl_spec(impl_spec: str):
     return impl_name, impl_args, bwd_impl_name, bwd_impl_args
 
 
+def copy_and_set_grad(tensor: torch.Tensor, requires_grad):
+    tensor = tensor.detach().clone(memory_format=torch.contiguous_format)
+    tensor.requires_grad = requires_grad
+    return tensor
+
+
 def main():
     model_dict = {'gcn': models.GCN,
                   'linear': models.LinearModel,
@@ -105,21 +111,21 @@ def main():
         from torch_geometric.nn import CuGraphGATConv
         assert 'gat' in args.model
         graph_inputs = CuGraphModule.to_csc(data.edge_index)
-        inputs = (data.x, *graph_inputs)
+        inputs = (copy_and_set_grad(data.x, requires_grad=args.input_grad), *graph_inputs)
         model_kwargs = {'gat_layer': CuGraphGATConv}
     elif 'dgnn' in args.torch:
         assert 'gat' in args.model
         from torch_geometric.nn import FusedGATConv
         graph_inputs = FusedGATConv.to_graph_format(data.edge_index)
-        inputs = (data.x, *graph_inputs)
+        inputs = (copy_and_set_grad(data.x, requires_grad=args.input_grad), *graph_inputs)
         model_kwargs = {'gat_layer': FusedGATConv}
     elif 'edge_list' in args.torch:
         add_edge_weight = hasattr(data, 'edge_weight') and 'gcn' in args.model
         inputs = examples.gnn_benchmark.torch_util.make_torch_edge_list_args(
-            data, add_edge_weight)
+            data, add_edge_weight, input_grad=args.input_grad)
     elif 'csr' in args.torch:
         inputs = examples.gnn_benchmark.torch_util.make_torch_csr_args(
-            data)
+            data, input_grad=args.input_grad)
     else:
         raise ValueError(f'Unknown torch impl {args.torch}.')
 

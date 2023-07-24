@@ -11,7 +11,7 @@ from torch_geometric.transforms import GCNNorm
 
 import examples.gnn_benchmark.torch_util
 from daceml import onnx as donnx
-from examples.gnn_benchmark import models
+from examples.gnn_benchmark import models, torch_util
 from examples.gnn_benchmark.benchmark import do_benchmark
 from examples.gnn_benchmark.common import get_loss_and_targets
 from examples.gnn_benchmark.correctness import check_correctness
@@ -19,7 +19,8 @@ from examples.gnn_benchmark.data_optimizer import optimize_data
 from examples.gnn_benchmark.datasets import get_dataset
 from examples.gnn_benchmark.experiment_info import ExperimentInfo
 from examples.gnn_benchmark.torch_profile import torch_profile
-from examples.gnn_benchmark.util import name_to_impl_class, create_dace_model
+from examples.gnn_benchmark.util import name_to_impl_class
+from examples.gnn_benchmark.create_dace_model import create_dace_model
 
 faulthandler.enable()
 donnx.default_implementation = "pure"
@@ -65,6 +66,7 @@ def main():
     parser.add_argument('--no-bias', action='store_true')
     parser.add_argument('--threadblock-dynamic', action='store_true')
     parser.add_argument('--backward', action='store_true')
+    parser.add_argument('--input-grad', action='store_true')
     parser.add_argument('--model', choices=model_dict.keys(), required=True)
     parser.add_argument('--hidden', type=int, default=None, required=True)
     parser.add_argument('--heads', type=int, default=8)
@@ -133,7 +135,7 @@ def main():
         gcn_norm = GCNNorm(add_self_loops=True)
         data = gcn_norm(data)
 
-    torch_model, dace_models = optimize_data(torch_model, dace_models, data)
+    torch_model, dace_models = optimize_data(torch_model, dace_models, data, compute_input_grad=args.input_grad)
 
     for k, v in dace_models.items():
         print(f"Impl: {k}")
@@ -142,12 +144,13 @@ def main():
     torch_experiments = []
     torch_csr_args, torch_edge_list_args = None, None
     if args.torch == 'csr' or args.torch == 'both':
-        torch_csr_args = examples.gnn_benchmark.torch_util.make_torch_csr_args(data)
+        torch_csr_args = torch_util.make_torch_csr_args(data, input_grad=args.input_grad)
         torch_experiments += [('torch_csr', torch_model, torch_csr_args)]
     if args.torch == 'edge_list' or args.torch == 'both':
         add_edge_weight = hasattr(data, 'edge_weight') and 'gcn' in args.model
-        torch_edge_list_args = examples.gnn_benchmark.torch_util.make_torch_edge_list_args(data,
-                                                                                           add_edge_weight)
+        torch_edge_list_args = torch_util.make_torch_edge_list_args(data,
+                                                                    add_edge_weight,
+                                                                    input_grad=args.input_grad)
         torch_experiments += [('torch_edge_list', torch_model, torch_edge_list_args)]
 
     loss_fn, targets = get_loss_and_targets(args.model, args.val_dtype, data, num_classes)
@@ -226,7 +229,8 @@ def create_experiments(args, torch_model):
                                                               do_opt=not args.no_opt,
                                                               device=device,
                                                               gen_code=not args.no_gen_code,
-                                                              backward=args.backward)
+                                                              backward=args.backward,
+                                                              compute_input_grad=args.input_grad)
         info = ExperimentInfo(impl_name=impl_name,
                               bwd_impl_name=bwd_impl_name,
                               model_eval=dace_model_eval,

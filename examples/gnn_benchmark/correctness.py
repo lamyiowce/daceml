@@ -81,7 +81,8 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
 
     if torch_preds:
         reference_pred = torch_preds[0]
-        reference_name, reference_model, _ = torch_experiments[0]
+        reference_name, reference_model, reference_input = torch_experiments[0]
+        reference_input_features = reference_input[0]
         for (name, model, _,), pred in zip(torch_experiments[1:],
                                            torch_preds[1:]):
             check_equal(pred, reference_pred, name_result=name,
@@ -100,11 +101,17 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
         if USE_GPU:
             torch.cuda.synchronize()
 
-        for (name, model, _,), pred in zip(torch_experiments[1:],
+        for (name, model, inputs,), pred in zip(torch_experiments[1:],
                                            torch_preds[1:]):
             if hasattr(model, '_orig_mod'):
                 model = model._orig_mod
             check_gradients(model, reference_model, name, reference_name,
+                            verbose=True)
+            if reference_input_features.requires_grad:
+                check_equal(result=inputs[0].grad,
+                            expected=reference_input_features.grad,
+                            name_result=name + ": input_features.grad",
+                            name_expected=reference_name + ": input_features.grad",
                             verbose=True)
 
     if dace_models:
@@ -165,6 +172,12 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
                                                                     reference_model,
                                                                     name_result=f"Gradients for DaCe {name}",
                                                                     name_expected=reference_name + "gradients")
+                    if reference_input_features.requires_grad:
+                        check_equal(result=args[0].grad,
+                                    expected=reference_input_features.grad,
+                                    name_result=f"input_features.grad for DaCe {name}",
+                                    name_expected=reference_name + ": input_features.grad",
+                                    verbose=True)
 
     correct_keys = [key for key, value in dace_models.items() if value.correct]
     incorrect_keys = [key for key, value in dace_models.items() if
