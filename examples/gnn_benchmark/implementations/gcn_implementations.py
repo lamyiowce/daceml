@@ -33,6 +33,12 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
     ssi_fn = shape_infer_GCNConv
 
     @staticmethod
+    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses,
+                do_bias: bool):
+        raise NotImplementedError
+
+    @staticmethod
     def forward_can_be_applied(node: onnx_op.ONNXOp, state: SDFGState,
                                sdfg: SDFG) -> bool:
         if node.module.add_self_loops:
@@ -48,11 +54,11 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
     @classmethod
     def forward(cls, node: onnx_op.ONNXOp, state: SDFGState,
                 sdfg: SDFG) -> Union[nodes.Node, SDFG]:
-        N, do_bias, dtype, num_entries, num_in_features, num_out_features = cls.get_info(
-            node, state, sdfg)
+        N, do_bias, dtype, num_entries, num_in_features, num_out_features, is_first_layer = \
+            cls.get_info(node, state, sdfg)
 
         gcn_op = cls.make_op(N, num_in_features, num_out_features, num_entries,
-                             dtype, do_bias)
+                             dtype, do_bias, is_first_layer)
 
         return program_for_node(gcn_op, sdfg, state, node)
 
@@ -74,7 +80,8 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
                 continue
 
         do_bias = 'bias' in [inp.name for inp in node.schema.inputs]
-        return N, do_bias, dtype, num_entries, num_in_features, num_out_features
+        is_first_layer = node.module.is_first
+        return N, do_bias, dtype, num_entries, num_in_features, num_out_features, is_first_layer
 
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
@@ -91,7 +98,7 @@ class GCNConvSemesterThesis(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         def gcn_op(node_features, rowptrs, columns, edge_vals,
                    linDOTweight, output):
             """
@@ -139,7 +146,7 @@ class GCNConvCSR(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             def gcn_op(node_features, rowptrs, columns, edge_vals,
                        linDOTweight, bias, output):
@@ -196,7 +203,7 @@ class GCNConvCSRAdapt(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             def gcn_op(node_features, rowptrs, columns, edge_vals,
                        linDOTweight, bias, output):
@@ -270,9 +277,9 @@ class GCNConvCSC(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         def gcn_op(node_features, colptrs, rows, edge_vals,
-                   linDOTweight, output):
+                   linDOTweight, output, bias):
             """
             node_features: input features, N x M
             colptrs: row pointers (CSR format), N+1
@@ -281,23 +288,55 @@ class GCNConvCSC(GCNConvBase):
             linDOTweight: F x M
             output: N x F
             """
+            # Transform-first.
             features = dace.define_local((N, num_out_features), dtype=dtype)
             features[:] = np.einsum('ij,kj->ik', node_features, linDOTweight)
-
+            for i, j in dace.map[0:N, 0:num_out_features]:
+                output[i, j] = bias[j]
             # A is in CSC format, so in order to compute A.t @ B, we call CSR
             # matmul. This is because CSC(A) = CSR(A.t).
             csrmm_libnode.csrmm(colptrs, rows, edge_vals, features, output,
-                                transA=False)
+                                transA=False, beta=1.0)
+        if not do_bias:
+            raise NotImplementedError("CSC GCNConv without bias not implemented")
+        return gcn_op
 
-        if do_bias:
-            def bias_prog(node_features, colptrs, rows, edge_vals,
-                          linDOTweight, bias, output):
-                gcn_op(node_features, colptrs, rows, edge_vals,
-                       linDOTweight, output)
-                for i, j in dace.map[0:N, 0:num_out_features]:
-                    output[i, j] += bias[j]
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csc_propagate_first")
+class GCNConvCSCPropagateFirst(GCNConvBase):
+    graph_format = sparse.CscGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': common.SpecialInputType.VAL_DTYPE,
+        'colptrs': common.SpecialInputType.IDX_DTYPE,
+        'rows': common.SpecialInputType.IDX_DTYPE,
+        'edge_vals': common.SpecialInputType.VAL_DTYPE,
+    }
 
-            return bias_prog
+    @staticmethod
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
+                do_bias: bool, is_first_layer: bool):
+        def gcn_op(node_features, colptrs, rows, edge_vals,
+                   linDOTweight, output, bias):
+            """
+            node_features: input features, N x M
+            colptrs: row pointers (CSR format), N+1
+            rows: col, num_entries
+            edge_vals: values, num_entries
+            linDOTweight: F x M
+            output: N x F
+            """
+            # Propagate-first
+            aggregated_features = dace.define_local((N, num_in_features),
+                                                    dtype=dtype)
+            csrmm_libnode.csrmm(colptrs, rows, edge_vals, node_features,
+                                aggregated_features, beta=0.0, transA=False)
+
+            for i, j in dace.map[0:N, 0:num_out_features]:
+                output[i, j] = bias[j]
+            dace.libraries.blas.gemm(A=aggregated_features, B=linDOTweight, C=output,
+                                     beta=1.0, trans_b=True, alpha=1.0)
+        if not do_bias:
+            raise NotImplementedError("CSC GCNConv without bias not implemented")
         return gcn_op
 
 
@@ -315,7 +354,7 @@ class GCNConvCSCAdapt(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             def gcn_op(node_features, colptrs, rows, edge_vals,
                        linDOTweight, bias, output):
@@ -330,6 +369,7 @@ class GCNConvCSCAdapt(GCNConvBase):
                 Compute X' = A.t @ X @ W.t + b
                 """
                 if num_in_features > num_out_features:
+                    # Transform-first
                     for i, j in dace.map[0:N, 0:num_out_features]:
                         output[i, j] = bias[j]
                     features = dace.define_local((N, num_out_features), dtype=dtype)
@@ -338,6 +378,7 @@ class GCNConvCSCAdapt(GCNConvBase):
                     csrmm_libnode.csrmm(colptrs, rows, edge_vals, features,
                                         output, beta=1.0, transA=False)
                 else:
+                    # Propagate-first
                     aggregated_features = dace.define_local((N, num_in_features),
                                                             dtype=dtype)
                     csrmm_libnode.csrmm(colptrs, rows, edge_vals, node_features,
@@ -348,29 +389,7 @@ class GCNConvCSCAdapt(GCNConvBase):
                     dace.libraries.blas.gemm(A=aggregated_features, B=linDOTweight, C=output,
                                              beta=1.0, trans_b=True, alpha=1.0)
         else:
-            def gcn_op(node_features, colptrs, rows, edge_vals,
-                       linDOTweight, output):
-                """
-                node_features: input features, N x M
-                rowptrs: row pointers (CSR format), N+1
-                columns: col, num_entries
-                edge_vals: values, num_entries
-                linDOTweight: F x M
-                output: N x F
-                """
-                if num_in_features > num_out_features:
-                    features = dace.define_local((N, num_out_features), dtype=dtype)
-                    features[:] = np.einsum('ij,kj->ik', node_features,
-                                            linDOTweight)
-                    csrmm_libnode.csrmm(colptrs, rows, edge_vals, features,
-                                        output, beta=1.0, transA=False)
-                else:
-                    aggregated_features = dace.define_local((N, num_in_features),
-                                                            dtype=dtype)
-                    csrmm_libnode.csrmm(colptrs, rows, edge_vals, node_features,
-                                        aggregated_features, beta=0.0, transA=False)
-                    output[:] = np.einsum('ij,kj->ik', aggregated_features,
-                                          linDOTweight)
+            raise NotImplementedError("Not implemented without bias")
         return gcn_op
 
 
@@ -416,7 +435,7 @@ class GCNConvCSCCached(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             def gcn_op(node_features, colptrs, rows, edge_vals,
                        linDOTweight, bias, output, AX_cached):
@@ -481,7 +500,7 @@ class GCNConvCSCAdaptCached(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             def gcn_op(node_features, colptrs, rows, edge_vals,
                        linDOTweight, bias, output, AX_cached):
@@ -495,8 +514,8 @@ class GCNConvCSCAdaptCached(GCNConvBase):
 
                 Compute X' = A.t @ X @ W.t + b
                 """
-                if num_in_features > num_out_features:
-
+                if (not is_first_layer and num_out_features < num_in_features) or (is_first_layer and 2 * num_out_features < num_in_features):
+                    # Transform first.
                     for i, j in dace.map[0:N, 0:num_out_features]:
                         output[i, j] = bias[j]
                     features = dace.define_local((N, num_out_features), dtype=dtype)
@@ -505,6 +524,7 @@ class GCNConvCSCAdaptCached(GCNConvBase):
                     csrmm_libnode.csrmm(colptrs, rows, edge_vals, features,
                                         output, beta=1.0, transA=False)
                 else:
+                    # Propagate-first.
                     csrmm_libnode.csrmm(colptrs, rows, edge_vals, node_features,
                                         AX_cached, beta=0.0, transA=False)
                     for i, j in dace.map[0:N, 0:num_out_features]:
@@ -531,7 +551,7 @@ class GCNConvCOO(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             def gcn_op(node_features, rows, columns, edge_vals,
                        linDOTweight, bias, output):
@@ -581,7 +601,7 @@ class GCNConvCOOAdapt(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             # Y = A.t @ X @ W.t + b
             def gcn_op(node_features, rows, columns, edge_vals,
@@ -680,7 +700,7 @@ class GCNConvCOOCached(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             def gcn_op(node_features, rows, columns, edge_vals,
                        linDOTweight, bias, output, AX_cached):
@@ -758,7 +778,7 @@ class GCNConvCOOAdaptCached(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             # Y = A.t @ X @ W.t + b
             def gcn_op(node_features, rows, columns, edge_vals,
@@ -780,7 +800,7 @@ class GCNConvCOOAdaptCached(GCNConvBase):
                         output[i, j] = bias[j]
                     coomm(rows, columns, edge_vals, features, output, beta=1.0,
                           transA=True)
-                else: # num_out_features >= num_in_features
+                else:  # num_out_features >= num_in_features
                     # Y = (A.t @ X) @ W.t + b
                     coomm(rows, columns, edge_vals, node_features, AX_cached, beta=0.0,
                           transA=True)
@@ -806,7 +826,7 @@ class GCNConvEllpackTransposed(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         # num_entries is the maximal number of values in a column.
         def gcn_op(node_features, rows, edge_vals,
                    linDOTweight, output):
@@ -851,7 +871,7 @@ class GCNConvEllpackPure(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         # num_entries is the maximal number of values in a row.
         def gcn_op(node_features, columns, edge_vals,
                    linDOTweight, output):
@@ -963,7 +983,7 @@ class GCNConvCSRCOO(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             # Y = A_coo.t @ (X @ W.t) + A_csr.t @ (X @ W.t) + b
 
@@ -1028,7 +1048,7 @@ class GCNConvCSRCOOAdapt(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             def gcn_op(node_features,
                        csr_rowptrs, csr_columns, csr_edge_vals,
@@ -1113,7 +1133,7 @@ class GCNConvCSCCOOAdapt(GCNConvBase):
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
                 num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
+                do_bias: bool, is_first_layer: bool):
         if do_bias:
             def gcn_op(node_features,
                        csc_colptrs, csc_rows, csc_edge_vals,

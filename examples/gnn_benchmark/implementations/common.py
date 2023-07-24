@@ -32,10 +32,7 @@ class SparseLayerBase(ONNXForward, metaclass=abc.ABCMeta):
     output_spec = {"output": SpecialInputType.VAL_DTYPE}
     buffer_spec = []
 
-    @staticmethod
-    def make_op(N: int, num_in_features: int, num_out_features: int, num_entries: int, dtype: dace.dtypes.Typeclasses,
-                do_bias: bool):
-        raise NotImplementedError
+
 
     allowed_idx_dtypes = [torch.int8, torch.int16, torch.int32, torch.int64]
 
