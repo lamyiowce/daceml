@@ -5,8 +5,11 @@ from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
 
 
 def main():
+    # 23.07
+    plot_gcn_schemes()
+
     # 18.07 Thesis
-    plot_gcn_thesis()
+    # plot_gcn_thesis()
     # plot_compare_cutoffs()
 
     # 06.07 plot GAT bwd
@@ -103,6 +106,39 @@ def main():
     # plot_stream_comparison()
 
 
+def plot_gcn_schemes():
+    # drop_names = ['torch_edge_list', 'dace_coo_cached', 'dace_csc_cached']
+    data = {
+        "OGB Arxiv": [
+            '24.07.13.43-gcn_single_layer-ogbn-arxiv-221634.csv'
+        ],
+        "Cora": [
+        ],
+        "Citeseer": [
+        ],
+        "Pubmed": [
+        ],
+        "Flickr": [
+        ],
+        "Reddit": [
+        ]
+    }
+
+    for name, datalist in data.items():
+        if len(datalist) > 0:
+            df, bwd_df = read_many_dfs(filenames=datalist)
+            plot_backward(df=df[df['Num Features'] == 128], bwd_df=bwd_df[bwd_df['Num Features'] == 128],
+                          tag='GCN ' + name, plot_column='Size',
+                          plot_title=f"GCN Single Layer, {name}", drop_names=[],
+                          skip_timestamp=True)
+
+            plot_backward(df=df[df['Size'] == 128],
+                          bwd_df=bwd_df[bwd_df['Size'] == 128], tag='GCN ' + name,
+                          plot_column='Num Features',
+                          plot_title=f"GCN Single Layer, {name}", drop_names=[],
+                          skip_timestamp=True)
+
+
 def plot_gcn_thesis():
     drop_names = ['torch_edge_list', 'dace_coo_cached', 'dace_csc_cached']
     data = {
@@ -172,20 +208,20 @@ def plot_gat_bwd():
         backward=True
     )
     plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gat-ogbn-arxiv',
-                  plot_title="GAT, OGB Arxiv", sizes=[8, 16, 32, 64, 128],
+                  plot_title="GAT, OGB Arxiv", filter_y=[8, 16, 32, 64, 128],
                   drop_names=drop_names)
     cora_df, cora_bwd_df = read_many_dfs(
         filenames=[
             # '18.05.14.43-pyg-gat-cora-198393.csv',
             #        '18.05.14.59-pyg-gat-cora-198400.csv',
-                   '06.06.16.41-pyg-gat-cora-203173.csv',
-                   # "06.07.15.09-gat-cora-206508.csv",
-                   '15.07.15.30-gat-cora-214176.csv'
-                   ],
+            '06.06.16.41-pyg-gat-cora-203173.csv',
+            # "06.07.15.09-gat-cora-206508.csv",
+            '15.07.15.30-gat-cora-214176.csv'
+        ],
         backward=True
     )
     plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gat-cora',
-                  plot_title="GAT, Cora", sizes=[8, 16, 32, 64, 128],
+                  plot_title="GAT, Cora", filter_y=[8, 16, 32, 64, 128],
                   drop_names=drop_names)
 
 
@@ -207,7 +243,7 @@ def plot_compare_cutoffs():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
             plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name,
-                          plot_title=f"GCN, {name}", sizes=[8, 256], legend_outside=True)
+                          plot_title=f"GCN, {name}", filter_y=[8, 256], legend_outside=True)
 
     # Old
     # arxiv_df, arxiv_bwd_df = read_many_dfs(
@@ -232,7 +268,7 @@ def plot_gat_single_layer():
         backward=False
     )
     plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
-                  plot_title="GAT Single Layer, OGB Arxiv", sizes=[8, 16, 32, 64, 128, 256],
+                  plot_title="GAT Single Layer, OGB Arxiv", filter_y=[8, 16, 32, 64, 128, 256],
                   drop_names=['torch_edge_list'])
     cora_df, cora_bwd_df = read_many_dfs(
         filenames=[
@@ -242,7 +278,7 @@ def plot_gat_single_layer():
         backward=False
     )
     plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
-                  plot_title="GAT Single Layer, Cora", sizes=[8, 16, 32, 64, 128, 256])
+                  plot_title="GAT Single Layer, Cora", filter_y=[8, 16, 32, 64, 128, 256])
 
 
 def plot_gat_model():
@@ -256,7 +292,7 @@ def plot_gat_model():
         backward=False
     )
     plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
-                  plot_title="GAT, OGB Arxiv", sizes=[8, 16, 32, 64, 128, 256])
+                  plot_title="GAT, OGB Arxiv", filter_y=[8, 16, 32, 64, 128, 256])
     cora_df, cora_bwd_df = read_many_dfs(
         filenames=['18.05.14.43-pyg-gat-cora-198393.csv',
                    '18.05.14.59-pyg-gat-cora-198400.csv',
@@ -267,7 +303,7 @@ def plot_gat_model():
         backward=False
     )
     plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
-                  plot_title="GAT, Cora", sizes=[8, 16, 32, 64, 128, 256])
+                  plot_title="GAT, Cora", filter_y=[8, 16, 32, 64, 128, 256])
 
 
 def plot_gcn_single_layer():
@@ -281,7 +317,7 @@ def plot_gcn_single_layer():
         backward=True
     )
     plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gcn-ogbn-arxiv',
-                  plot_title="GCN Single Layer, OGB Arxiv", sizes=[8, 16, 32, 64, 128, 256],
+                  plot_title="GCN Single Layer, OGB Arxiv", filter_y=[8, 16, 32, 64, 128, 256],
                   drop_names=['torch_edge_list', 'torch_csr'])
     cora_df, cora_bwd_df = read_many_dfs(
         filenames=[
@@ -292,7 +328,7 @@ def plot_gcn_single_layer():
         backward=True
     )
     plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gcn-cora',
-                  plot_title="GCN Single Layer, Cora", sizes=[8, 16, 32, 64, 128, 256])
+                  plot_title="GCN Single Layer, Cora", filter_y=[8, 16, 32, 64, 128, 256])
 
 
 def plot_midthesis_additional_datasets():
@@ -309,7 +345,7 @@ def plot_midthesis_main_datasets():
                    '03.05.18.24-gcn-ogbn-arxiv-alt-sizes-185598.csv',
                    '03.05.19.41-gcn-ogbn-arxiv-alt-sizes-185634.csv']
     )
-    plot_backward(tag='arxiv', sizes=[16, 64, 256, 1024],
+    plot_backward(tag='arxiv', filter_y=[16, 64, 256, 1024],
                   plot_title='GCN, OGBN Arxiv', df=arxiv_df,
                   bwd_df=arxiv_bwd_df)
     plot_backward(tag='arxiv', plot_title='GCN, OGBN Arxiv', df=arxiv_df,
@@ -318,7 +354,7 @@ def plot_midthesis_main_datasets():
         filenames=['01.05.11.17-gcn-cora-183528.csv',
                    '03.05.17.14-gcn-cora-csc-185561.csv',
                    '03.05.18.04-gcn-cora-alt-sizes-185598.csv'])
-    plot_backward(tag="cora", sizes=[16, 64, 256, 1024], plot_title='GCN, Cora',
+    plot_backward(tag="cora", filter_y=[16, 64, 256, 1024], plot_title='GCN, Cora',
                   df=cora_df,
                   bwd_df=cora_bwd_df)
     plot_backward(tag="cora", plot_title='GCN, Cora', df=cora_df,
@@ -342,13 +378,13 @@ def plot_stream_comparison():
               label_map=labels)
 
 
-def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None,
-                  sizes=None, drop_names=None,
+def plot_backward(tag, plot_title, plot_column='Size', labels=None, df=None, bwd_df=None,
+                  filter_y=None, drop_names=None,
                   legend_outside=False, skip_timestamp=False):
     if df is None:
         df = pd.read_csv(DATA_FOLDER / (tag + '.csv'), comment='#')
-    if sizes is not None:
-        df = df[df['Size'].isin(sizes)]
+    if filter_y is not None:
+        df = df[df[plot_column].isin(filter_y)]
     if drop_names is not None:
         df = df[~df['Name'].isin(drop_names)]
 
@@ -362,15 +398,17 @@ def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None,
         else:
             print(f"Could not find backward file {bwd_path}.")
     if bwd_df is not None:
-        if sizes is not None:
-            bwd_df = bwd_df[bwd_df['Size'].isin(sizes)]
+        if filter_y is not None:
+            bwd_df = bwd_df[bwd_df[plot_column].isin(filter_y)]
         if drop_names is not None:
             bwd_df = bwd_df[~bwd_df['Name'].isin(drop_names)]
 
-        make_plot(df, f"{plot_title}:  BWD + FWD", labels, bwd_df=bwd_df,
+        make_plot(df, f"{plot_title}:  BWD + FWD", label_map=labels, plot_column=plot_column,
+                  bwd_df=bwd_df,
                   legend_outside=legend_outside, skip_timestamp=skip_timestamp)
     else:
-        make_plot(df, f"{plot_title}: forward pass", labels, skip_timestamp=skip_timestamp)
+        make_plot(df, f"{plot_title}: forward pass", label_map=labels, plot_column=plot_column,
+                  skip_timestamp=skip_timestamp)
 
 
 def plot_adapt_matmul_order():

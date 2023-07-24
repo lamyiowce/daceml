@@ -19,9 +19,9 @@ DEFAULT_LABEL_MAP = {
     'dace_csr_coo_adapt-0.99': 'DaCe CSR/COO adapt, CSR 99%',
     'dace_csr_coo': 'DaCe CSR/COO, CSR 50%',
     'dace_coo_cached': 'DaCe COO (cached)',
-    'dace_coo_adapt_cached': 'DaCe COO (cached)',
+    'dace_coo_adapt_cached': 'DaCe COO (adapt, cached)',
     'dace_csc_cached': 'DaCe CSC (cached)',
-    'dace_csc_adapt_cached': 'DaCe CSC (cached)',
+    'dace_csc_adapt_cached': 'DaCe CSC (adapt, cached)',
 }
 
 DEFAULT_LABEL_MAP.update(
@@ -32,6 +32,12 @@ DEFAULT_LABEL_MAP.update(
     {f'{key}_compiled': f'{name} (compiled)' for key, name in
      DEFAULT_LABEL_MAP.items() if
      'torch' in key})
+
+COLUMN_PRETTY_NAMES = {
+    'Size': 'Hidden size',
+    'Num Features': 'Input feature size',
+    'Num Layers': 'Number of layers',
+}
 
 PLOT_FOLDER = Path(__file__).parent / 'plots'
 MODELING_FOLDER = Path(__file__).parent / 'modeling'
@@ -86,10 +92,10 @@ def get_colors(names: pd.Series):
     return names.map(color_dict)
 
 
-def prep_df(full_df):
-    full_df = full_df.drop_duplicates(subset=['Size', 'Model', 'Name'])
-    df = full_df.pivot(index='Size', columns='Name', values='Median')
-    std_df = full_df.pivot(index='Size', columns='Name', values='Stdev')
+def prep_df(full_df, column):
+    full_df = full_df.drop_duplicates(subset=['Size', 'Model', 'Name', 'Num Features', 'Num Layers'])
+    df = full_df.pivot(index=column, columns='Name', values='Median')
+    std_df = full_df.pivot(index=column, columns='Name', values='Stdev')
     print(df)
     sorted_cols = sorted(df.columns,
                          key=lambda x: ('torch' in x, 'edge_list' in x))
@@ -99,18 +105,18 @@ def prep_df(full_df):
     return df, std_df
 
 
-def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False,
+def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_outside=False,
               skip_timestamp=False):
-    df, std_df = prep_df(full_df)
+    df, std_df = prep_df(full_df, column=plot_column)
     colors = get_colors(df.columns)
     bar_width = 0.85
     figsize = (1.5 + len(df) * 1.5, 6)
     if bwd_df is None:
         ax = df.plot(figsize=figsize, kind='bar', ylabel='Runtime [ms]',
-                     xlabel='Hidden size', color=colors,
+                     xlabel=COLUMN_PRETTY_NAMES[plot_column], color=colors,
                      yerr=std_df, label='Forward', width=bar_width)
     else:
-        bwd_df, bwd_std_df = prep_df(bwd_df)
+        bwd_df, bwd_std_df = prep_df(bwd_df, plot_column)
         if len(bwd_df.columns) != len(df.columns):
             print('Warning: bwd_df and df have different lengths')
             print('Differing columns: ', set(bwd_df.columns) ^ set(df.columns))
@@ -122,7 +128,7 @@ def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False,
                          width=bar_width)
         df.plot(kind='bar',
                 ylabel='Runtime [ms]',
-                xlabel='Hidden size',
+                xlabel=COLUMN_PRETTY_NAMES[plot_column],
                 color='white',
                 alpha=0.3,
                 yerr=std_df,
@@ -137,7 +143,7 @@ def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False,
     else:
         ax.set_ylim(ymax=max((df + std_df).max().max() * 1.09, 0.9))
     ax.set_ylabel("Runtime [ms]")
-    ax.set_xlabel("Hidden size")
+    ax.set_xlabel(COLUMN_PRETTY_NAMES[plot_column])
     plt.title(name.upper())
 
     default_label_map = {
