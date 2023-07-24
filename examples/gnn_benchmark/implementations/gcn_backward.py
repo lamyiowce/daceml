@@ -654,12 +654,9 @@ class GCNConvBackwardCOOAdapt(BackwardImplementation):
                 coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0, transA=True)
                 # Grad W = Grad Y.t @ (A.t @ X)
                 temp_W = dace.define_local((N, F_in), dtype=val_dtype)
-                coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0, transA=True)
+                # TransA=False but doesn't work, so arguments are switched.
+                coomm(rows, columns, edge_vals, node_features, temp_W, beta=0.0, transA=True)
                 linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, temp_W)
-                # `columns` and `rows` are switched because transA=False doesn't work here
-                # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
-                coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0,
-                      transA=True)
             else:
                 # If F_out < F_in, then first compute A @ Grad Y SpMM (result N x F_out), then @ W (result N x F_in).
                 # Grad X = A @ Grad Y @ W
@@ -841,9 +838,6 @@ class GCNConvBackwardCOOAdaptCached(BackwardImplementation):
                 coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0, transA=True)
                 # Grad W = Grad Y.t @ (A.t @ X)
                 linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, AX_cached)
-                # `columns` and `rows` are switched because transA=False doesn't work here
-                # with CuSPARSE for some reason. It seems to be a bug in CuSPARSE?
-                coomm(columns, rows, edge_vals, temp, node_features_grad, beta=0.0, transA=True)
             else:
                 # If F_out < F_in, then first compute A @ Grad Y SpMM (result N x F_out), then
                 # @ W (result N x F_in).
