@@ -26,6 +26,7 @@ class GCNSingleLayer(torch.nn.Module):
                             bias=bias)
         if bias:
             bias_init(self.conv.bias)
+        self.conv.is_first = True
 
     def forward(self, x, *edge_info):
         x = self.conv(x, *edge_info)
@@ -48,6 +49,7 @@ class GCN(torch.nn.Module):
                            bias=bias)
             if bias:
                 bias_init(conv.bias)
+            conv.is_first = i == 0
             self.convs.append(conv)
 
         self.act = nn.ReLU()

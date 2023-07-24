@@ -301,7 +301,7 @@ class GCNConvCSC(GCNConvBase):
             raise NotImplementedError("CSC GCNConv without bias not implemented")
         return gcn_op
 
-@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csc_propagate_first")
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csc_alt")
 class GCNConvCSCPropagateFirst(GCNConvBase):
     graph_format = sparse.CscGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
@@ -368,7 +368,7 @@ class GCNConvCSCAdapt(GCNConvBase):
 
                 Compute X' = A.t @ X @ W.t + b
                 """
-                if num_in_features > num_out_features:
+                if num_in_features >= num_out_features:
                     # Transform-first
                     for i, j in dace.map[0:N, 0:num_out_features]:
                         output[i, j] = bias[j]
