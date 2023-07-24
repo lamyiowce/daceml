@@ -103,43 +103,41 @@ def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False,
               skip_timestamp=False):
     df, std_df = prep_df(full_df)
     colors = get_colors(df.columns)
-    bar_width = 0.75
-    figsize = (6, 1.5 + len(df) * 1.5)
+    bar_width = 0.85
+    figsize = (1.5 + len(df) * 1.5, 6)
     if bwd_df is None:
-        ax = df.plot(figsize=figsize, kind='barh', ylabel='Runtime [ms]',
+        ax = df.plot(figsize=figsize, kind='bar', ylabel='Runtime [ms]',
                      xlabel='Hidden size', color=colors,
-                     xerr=std_df, label='Forward', width=bar_width)
-        legend_handles, legend_labels = ax.get_legend_handles_labels()
+                     yerr=std_df, label='Forward', width=bar_width)
     else:
         bwd_df, bwd_std_df = prep_df(bwd_df)
         if len(bwd_df.columns) != len(df.columns):
             print('Warning: bwd_df and df have different lengths')
             print('Differing columns: ', set(bwd_df.columns) ^ set(df.columns))
         ax = bwd_df.plot(figsize=figsize,
-                         kind='barh',
+                         kind='bar',
                          color=colors,
-                         xerr=bwd_std_df,
+                         yerr=bwd_std_df,
                          label='Backward',
                          width=bar_width)
-        legend_handles, legend_labels = ax.get_legend_handles_labels()
-        df.plot(kind='barh',
+        df.plot(kind='bar',
                 ylabel='Runtime [ms]',
                 xlabel='Hidden size',
                 color='white',
                 alpha=0.3,
-                xerr=std_df,
+                yerr=std_df,
                 ax=ax,
                 label='Forward',
                 width=bar_width)
 
     ax.set_axisbelow(True)
-    ax.xaxis.grid(color='lightgray', linestyle='--')
+    ax.yaxis.grid(color='lightgray', linestyle='--')
     if bwd_df is not None and bwd_std_df is not None:
-        ax.set_xlim(xmax=max((bwd_df + bwd_std_df).max().max() * 1.09, 0.9))
+        ax.set_ylim(ymax=max((bwd_df + bwd_std_df).max().max() * 1.09, 0.9))
     else:
-        ax.set_xlim(xmax=max((df + std_df).max().max() * 1.09, 0.9))
-    ax.set_xlabel("Runtime [ms]")
-    ax.set_ylabel("Hidden size")
+        ax.set_ylim(ymax=max((df + std_df).max().max() * 1.09, 0.9))
+    ax.set_ylabel("Runtime [ms]")
+    ax.set_xlabel("Hidden size")
     plt.title(name.upper())
 
     default_label_map = {
@@ -153,9 +151,9 @@ def make_plot(full_df, name, label_map=None, bwd_df=None, legend_outside=False,
     if legend_outside:
         plt.legend(labels, loc='center left', bbox_to_anchor=(1, 0.5))
     else:
-        plt.legend(labels, loc='upper left' if name == 'gcn' else 'lower right')
+        plt.legend(labels, loc='upper left' if 'gcn' in name.lower() else 'lower right')
 
-    ax.legend(legend_handles[::-1], labels[::-1])
+    # ax.legend(legend_handles[::-1], labels[::-1])
 
     plt.xticks(rotation=0)
 

@@ -7,8 +7,7 @@ from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
 def main():
     # 18.07 Thesis
     plot_gcn_thesis()
-    plot_compare_cutoffs()
-
+    # plot_compare_cutoffs()
 
     # 06.07 plot GAT bwd
     # plot_gat_bwd()
@@ -108,36 +107,42 @@ def plot_gcn_thesis():
     drop_names = ['torch_edge_list', 'dace_coo_cached', 'dace_csc_cached']
     data = {
         "OGB Arxiv": [
-            '19.07.12.02-pyg-gcn-ogbn-arxiv-217423.csv',
-            '19.07.09.55-gcn-ogbn-arxiv-217319.csv',
-            '20.07.13.16-gcn-ogbn-arxiv-218302.csv',
+            # '19.07.12.02-pyg-gcn-ogbn-arxiv-217423.csv',
+            # '19.07.09.55-gcn-ogbn-arxiv-217319.csv',
+            # '20.07.13.16-gcn-ogbn-arxiv-218302.csv',
+            '21.07.12.51-pyg-gcn-ogbn-arxiv-219071.csv',
+            '21.07.11.57-gcn-ogbn-arxiv-219037.csv',
+            '21.07.10.55-pyg-gcn-ogbn-arxiv-219003.csv',
         ],
         "Cora": [
-            '18.07.15.14-gcn-cora-216728.csv',
-            '20.07.13.15-gcn-cora-218300.csv',
-            '19.07.11.57-pyg-gcn-cora-217423.csv',
+            '21.07.10.53-pyg-gcn-cora-219003.csv',
+            '21.07.12.37-gcn-cora-219037.csv',
+            '21.07.12.50-pyg-gcn-cora-219071.csv',
+            # '18.07.15.14-gcn-cora-216728.csv',
+            # '20.07.13.15-gcn-cora-218300.csv',
+            # '19.07.11.57-pyg-gcn-cora-217423.csv',
         ],
         "Citeseer": [
-            '19.07.11.47-pyg-gcn-citeseer-217423.csv',
-            '19.07.08.35-gcn-citeseer-217313.csv',
-            '18.07.16.31-gcn-citeseer-216728.csv',
-            '20.07.13.42-gcn-citeseer-218300.csv',
+            # '19.07.11.47-pyg-gcn-citeseer-217423.csv',
+            # '19.07.08.35-gcn-citeseer-217313.csv',
+            # '18.07.16.31-gcn-citeseer-216728.csv',
+            # '20.07.13.42-gcn-citeseer-218300.csv',
         ],
         "Pubmed": [
-            '19.07.11.52-pyg-gcn-pubmed-217423.csv',
-            '19.07.08.36-gcn-pubmed-217317.csv',
-            '20.07.14.08-gcn-pubmed-218300.csv',
+            # '19.07.11.52-pyg-gcn-pubmed-217423.csv',
+            # '19.07.08.36-gcn-pubmed-217317.csv',
+            # '20.07.14.08-gcn-pubmed-218300.csv',
         ],
         "Flickr": [
-            '19.07.12.10-pyg-gcn-flickr-217453.csv',
-            '19.07.12.24-gcn-flickr-217459.csv',
-            '20.07.14.34-gcn-flickr-218300.csv',
+            # '19.07.12.10-pyg-gcn-flickr-217453.csv',
+            # '19.07.12.24-gcn-flickr-217459.csv',
+            # '20.07.14.34-gcn-flickr-218300.csv',
         ],
         "Reddit": [
-            '19.07.12.35-pyg-gcn-reddit-217461.csv',
-            '19.07.13.48-gcn-reddit-217460.csv',
-            '19.07.15.53-gcn-reddit-217567.csv',
-            '20.07.13.44-gcn-reddit-218302.csv',
+            # '19.07.12.35-pyg-gcn-reddit-217461.csv',
+            # '19.07.13.48-gcn-reddit-217460.csv',
+            # '19.07.15.53-gcn-reddit-217567.csv',
+            # '20.07.13.44-gcn-reddit-218302.csv',
         ]
     }
 
@@ -339,7 +344,7 @@ def plot_stream_comparison():
 
 def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None,
                   sizes=None, drop_names=None,
-                  legend_outside=False):
+                  legend_outside=False, skip_timestamp=False):
     if df is None:
         df = pd.read_csv(DATA_FOLDER / (tag + '.csv'), comment='#')
     if sizes is not None:
@@ -363,9 +368,9 @@ def plot_backward(tag, plot_title, labels=None, df=None, bwd_df=None,
             bwd_df = bwd_df[~bwd_df['Name'].isin(drop_names)]
 
         make_plot(df, f"{plot_title}:  BWD + FWD", labels, bwd_df=bwd_df,
-                  legend_outside=legend_outside)
+                  legend_outside=legend_outside, skip_timestamp=skip_timestamp)
     else:
-        make_plot(df, f"{plot_title}: forward pass", labels)
+        make_plot(df, f"{plot_title}: forward pass", labels, skip_timestamp=skip_timestamp)
 
 
 def plot_adapt_matmul_order():
