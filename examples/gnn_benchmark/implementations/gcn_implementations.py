@@ -780,7 +780,7 @@ class GCNConvCOOAdaptCached(GCNConvBase):
                         output[i, j] = bias[j]
                     coomm(rows, columns, edge_vals, features, output, beta=1.0,
                           transA=True)
-                else:
+                else: # num_out_features >= num_in_features
                     # Y = (A.t @ X) @ W.t + b
                     coomm(rows, columns, edge_vals, node_features, AX_cached, beta=0.0,
                           transA=True)
