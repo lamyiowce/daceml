@@ -89,6 +89,8 @@ def main():
     args.idx_dtype = dtype_str_to_torch_type[args.idx_dtype]
     args.val_dtype = dtype_str_to_torch_type[args.val_dtype]
 
+    if 'single_layer' in args.model:
+        args.num_layers = 1
     model_class = model_dict[args.model]
     num_hidden_features = args.hidden
     args.outfile = Path(args.outfile) if args.outfile is not None else None
@@ -99,8 +101,8 @@ def main():
 
     data = get_dataset(args.data, device, val_dtype=args.val_dtype,
                        force_num_features=args.force_num_features)
-
-    print("Num node features: ", data.num_node_features)
+    num_node_features = data.num_node_features
+    print("Num node features: ", num_node_features)
     num_classes = data.y.max().item() + 1
     print("Num classes: ", num_classes)
     print("Num hidden features: ", num_hidden_features)
@@ -183,6 +185,8 @@ def main():
                      outfile=args.outfile,
                      small=args.mode == 'benchmark_small',
                      torch_experiments=torch_experiments,
+                     num_layers=args.num_layers,
+                     in_features_size=num_node_features
                      )
     elif args.mode == 'torch_profile':
         torch_profile(dace_models,

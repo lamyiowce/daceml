@@ -21,6 +21,8 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  use_gpu: bool,
                  model_name: str,
                  hidden_size: int,
+                 in_features_size: int,
+                 num_layers: int,
                  outfile: Optional[pathlib.Path] = None,
                  small: bool = False):
     from examples.gnn_benchmark.performance_measurement import \
@@ -70,7 +72,8 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
     print()
 
     if outfile is not None:
-        write_stats_to_file(func_names, times, model_name, hidden_size, outfile)
+        write_stats_to_file(func_names, times, model_name, hidden_size, in_features_size,
+                            num_layers, outfile)
 
     ### Backward pass.
     if backward:
@@ -106,11 +109,11 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
         if outfile is not None:
             path = outfile.with_name(outfile.stem + "-bwd.csv")
-            write_stats_to_file(func_names, times, model_name, hidden_size,
-                                path)
+            write_stats_to_file(func_names, times, model_name, hidden_size, in_features_size,
+                                num_layers, path)
 
 
-def write_stats_to_file(func_names, times, model_name, hidden_size,
+def write_stats_to_file(func_names, times, model_name, hidden_size, in_features_size, num_layers,
                         file_path: pathlib.Path):
     add_header = not file_path.exists()
     with open(file_path, 'a') as file:
@@ -120,16 +123,16 @@ def write_stats_to_file(func_names, times, model_name, hidden_size,
                 f"# HOST {socket.gethostname()}, GPU {torch.cuda.get_device_name()}\n")
 
             headers = [
-                'Name', 'Model', 'Size', 'Min', 'Mean',
-                'Median',
+                'Name', 'Model', 'Size', 'Num Features', 'Num Layers', 'Min', 'Mean', 'Median',
                 'Stdev', 'Max'
             ]
             file.write(','.join(headers) + '\n')
         file.write(
-            stats_as_csv_entry(times, func_names, model_name, hidden_size))
+            stats_as_csv_entry(times, func_names, model_name, hidden_size, in_features_size,
+                               num_layers))
 
 
-def stats_as_csv_entry(times, func_names, model, hidden_size):
+def stats_as_csv_entry(times, func_names, model, hidden_size, in_features_size, num_layers):
     """ Print timing statistics.
     :param times: the result of time_funcs.
     :param func_names: a name to use for each function timed.
@@ -138,7 +141,7 @@ def stats_as_csv_entry(times, func_names, model, hidden_size):
     out = ''
     for name, func_time, in zip(func_names, times):
         row = [
-            name, model, hidden_size,
+            name, model, hidden_size, in_features_size, num_layers,
             min(func_time),
             statistics.mean(func_time),
             statistics.median(func_time),
