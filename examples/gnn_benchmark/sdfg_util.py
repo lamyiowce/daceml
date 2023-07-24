@@ -111,6 +111,10 @@ def change_storage(sdfg: dace.SDFG, array_name: str, new_storage=dace.StorageTyp
                         if re.fullmatch(array_name, dnode.data):
                             print(f"  Setting storage for {dnode} to {new_storage} from {arr.storage}.")
                             arr.storage = new_storage
+                            if arr.lifetime == dace.dtypes.AllocationLifetime.Persistent:
+                                print(
+                                    f"  Setting lifetime for {dnode} to Scope from {arr.lifetime}.")
+                                arr.lifetime = dace.AllocationLifetime.Scope
 
     for sub_sdfg in sdfg.all_sdfgs_recursive():
         set_storage(sub_sdfg)
