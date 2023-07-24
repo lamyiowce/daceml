@@ -178,10 +178,6 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
         add_hook(dace_model, "dace_auto_optimize", apply_dace_auto_optimize,
                  backward)
 
-    if persistent_mem:
-        print("---> Adding persistent memory hook.")
-        specialize_mem_onnx(dace_model)
-
     fn = lambda forward_sdfg, backward_sdfg: sdfg_util.change_storage(
         backward_sdfg, '__tmp3')
     dace_model.append_post_autodiff_hook("Set __tmp3 to register", fn)
@@ -231,6 +227,10 @@ def add_hooks(dace_model: DaceModule, backward: bool, device: torch.device,
         add_hook(dace_model,
                  "Move 'examples_gnn_benchmark_implementations_gat_backward_basic_gat_backward_142_8___tmp18' to register",
                  fn, backward)
+
+    if persistent_mem:
+        print("---> Adding persistent memory hook.")
+        specialize_mem_onnx(dace_model)
 
     print("/////////////////////")
     print(">>> Model hooks:")
