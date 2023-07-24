@@ -158,7 +158,9 @@ def main():
                      dace_tag=None,
                      use_gpu=use_gpu,
                      outfile=args.outfile,
-                     small=args.mode == 'benchmark_small')
+                     small=args.mode == 'benchmark_small',
+                     num_layers=args.num_layers,
+                     in_features_size=data.num_node_features)
     # elif args.mode == 'torch_profile':
     #     torch_profile(dict(),
     #                   torch_model,
