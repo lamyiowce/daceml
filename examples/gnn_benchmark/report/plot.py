@@ -107,52 +107,66 @@ def main():
 
 
 def plot_gcn_schemes():
-    # drop_names = ['torch_edge_list', 'dace_coo_cached', 'dace_csc_cached']
     data = {
-        "OGB Arxiv": [
-            '24.07.13.43-gcn_single_layer-ogbn-arxiv-221634.csv'
+        "No input grad": [
+            '24.07.17.59-gcn_single_layer-ogbn-arxiv-221825.csv',
+            '24.07.16.00-gcn_single_layer-ogbn-arxiv-221752.csv',
+            '24.07.13.43-gcn_single_layer-ogbn-arxiv-221634.csv',
         ],
-        "Cora": [
+        "With input grad": [
+            '24.07.17.14-gcn_single_layer-ogbn-arxiv-221824.csv',
+            '24.07.15.57-gcn_single_layer-ogbn-arxiv-input-grad-221749.csv',
         ],
-        "Citeseer": [
-        ],
-        "Pubmed": [
-        ],
-        "Flickr": [
-        ],
-        "Reddit": [
-        ]
+    }
+    subsets = {
+        'with caching': ['dace_csc', 'dace_csc_cached', 'dace_csc_adapt_cached'],
+        'no caching': ['dace_csc', 'dace_csc_alt', 'dace_csc_adapt'],
+    }
+
+    labels = {
+        'dace_csc': 'FWD: Transform-first, BWD: fused-propagate',
+        'dace_csc_alt': 'FWD: Propagate-first, BWD: split-propagate',
+        'dace_csc_adapt': 'Adaptive, no caching',
+        'dace_csc_cached': 'FWD: Propagate-first, BWD: split-propagate, with caching',
+        'dace_csc_adapt_cached': 'Adaptive with caching',
     }
 
     for name, datalist in data.items():
         if len(datalist) > 0:
-            df, bwd_df = read_many_dfs(filenames=datalist)
-            plot_backward(df=df[df['Num Features'] == 128], bwd_df=bwd_df[bwd_df['Num Features'] == 128],
-                          tag='GCN ' + name, plot_column='Size',
-                          plot_title=f"GCN Single Layer, {name}", drop_names=[],
-                          skip_timestamp=True)
+            for subset_name, subset in subsets.items():
+                df, bwd_df = read_many_dfs(filenames=datalist)
+                plot_backward(df=df[df['Num Features'] == 128],
+                              bwd_df=bwd_df[bwd_df['Num Features'] == 128],
+                              tag='GCN ' + name, plot_column='Size',
+                              plot_title=f"GCN Single Layer, {subset_name}, {name}",
+                              include_only_names=subset,
+                              labels=labels,
+                              skip_timestamp=True,
+                              xlabel='Output features size')
 
-            plot_backward(df=df[df['Size'] == 128],
-                          bwd_df=bwd_df[bwd_df['Size'] == 128], tag='GCN ' + name,
-                          plot_column='Num Features',
-                          plot_title=f"GCN Single Layer, {name}", drop_names=[],
-                          skip_timestamp=True)
+                # plot_backward(df=df[df['Size'] == 128],
+                #               bwd_df=bwd_df[bwd_df['Size'] == 128], tag='GCN ' + name,
+                #               plot_column='Num Features',
+                #               plot_title=f"GCN Single Layer, {subset_name}, {name}",
+                #               include_only_names=subset,
+                #               labels=labels,
+                #               skip_timestamp=True)
 
 
 def plot_gcn_thesis():
-    drop_names = ['torch_edge_list', 'dace_coo_cached', 'dace_csc_cached']
+    drop_names = ['torch_edge_list', 'dace_coo_adapt_cached', 'dace_csc_adapt_cached']
     data = {
         "OGB Arxiv": [
             # '19.07.12.02-pyg-gcn-ogbn-arxiv-217423.csv',
             # '19.07.09.55-gcn-ogbn-arxiv-217319.csv',
             # '20.07.13.16-gcn-ogbn-arxiv-218302.csv',
             '21.07.12.51-pyg-gcn-ogbn-arxiv-219071.csv',
-            '21.07.11.57-gcn-ogbn-arxiv-219037.csv',
+            '24.07.21.59-gcn-ogbn-arxiv-221963.csv',
             '21.07.10.55-pyg-gcn-ogbn-arxiv-219003.csv',
         ],
         "Cora": [
             '21.07.10.53-pyg-gcn-cora-219003.csv',
-            '21.07.12.37-gcn-cora-219037.csv',
+            '24.07.22.27-gcn-cora-221963.csv',
             '21.07.12.50-pyg-gcn-cora-219071.csv',
             # '18.07.15.14-gcn-cora-216728.csv',
             # '20.07.13.15-gcn-cora-218300.csv',
@@ -379,14 +393,16 @@ def plot_stream_comparison():
 
 
 def plot_backward(tag, plot_title, plot_column='Size', labels=None, df=None, bwd_df=None,
-                  filter_y=None, drop_names=None,
-                  legend_outside=False, skip_timestamp=False):
+                  filter_y=None, drop_names=None, include_only_names=None, color_map=None,
+                  legend_outside=False, skip_timestamp=False, xlabel=None):
     if df is None:
         df = pd.read_csv(DATA_FOLDER / (tag + '.csv'), comment='#')
     if filter_y is not None:
         df = df[df[plot_column].isin(filter_y)]
     if drop_names is not None:
         df = df[~df['Name'].isin(drop_names)]
+    if include_only_names is not None:
+        df = df[df['Name'].isin(include_only_names)]
 
     default_labels = DEFAULT_LABEL_MAP.copy()
     default_labels.update(labels or {})
@@ -402,13 +418,15 @@ def plot_backward(tag, plot_title, plot_column='Size', labels=None, df=None, bwd
             bwd_df = bwd_df[bwd_df[plot_column].isin(filter_y)]
         if drop_names is not None:
             bwd_df = bwd_df[~bwd_df['Name'].isin(drop_names)]
+        if include_only_names is not None:
+            bwd_df = bwd_df[bwd_df['Name'].isin(include_only_names)]
 
         make_plot(df, f"{plot_title}:  BWD + FWD", label_map=labels, plot_column=plot_column,
-                  bwd_df=bwd_df,
-                  legend_outside=legend_outside, skip_timestamp=skip_timestamp)
+                  bwd_df=bwd_df, xlabel=xlabel,
+                  legend_outside=legend_outside, skip_timestamp=skip_timestamp, color_map=color_map)
     else:
         make_plot(df, f"{plot_title}: forward pass", label_map=labels, plot_column=plot_column,
-                  skip_timestamp=skip_timestamp)
+                  skip_timestamp=skip_timestamp, xlabel=xlabel, color_map=color_map)
 
 
 def plot_adapt_matmul_order():

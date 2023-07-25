@@ -35,7 +35,7 @@ DEFAULT_LABEL_MAP.update(
 
 COLUMN_PRETTY_NAMES = {
     'Size': 'Hidden size',
-    'Num Features': 'Input feature size',
+    'Num Features': 'Input features size',
     'Num Layers': 'Number of layers',
 }
 
@@ -106,14 +106,15 @@ def prep_df(full_df, column):
 
 
 def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_outside=False,
-              skip_timestamp=False):
+              skip_timestamp=False, xlabel=None, color_map=None):
+    plt.rcParams.update({'font.size': 13})
     df, std_df = prep_df(full_df, column=plot_column)
-    colors = get_colors(df.columns)
+    colors = color_map or get_colors(df.columns)
     bar_width = 0.85
-    figsize = (1.5 + len(df) * 1.5, 6)
+    figsize = (1.5 + len(df) * 0.8, 6.)
     if bwd_df is None:
         ax = df.plot(figsize=figsize, kind='bar', ylabel='Runtime [ms]',
-                     xlabel=COLUMN_PRETTY_NAMES[plot_column], color=colors,
+                     xlabel=xlabel or COLUMN_PRETTY_NAMES[plot_column], color=colors,
                      yerr=std_df, label='Forward', width=bar_width)
     else:
         bwd_df, bwd_std_df = prep_df(bwd_df, plot_column)
@@ -125,12 +126,13 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
                          color=colors,
                          yerr=bwd_std_df,
                          label='Backward',
-                         width=bar_width)
+                         width=bar_width,
+                         edgecolor=(1.0,1.0,1.0,0.4))
         df.plot(kind='bar',
                 ylabel='Runtime [ms]',
-                xlabel=COLUMN_PRETTY_NAMES[plot_column],
-                color='white',
-                alpha=0.3,
+                xlabel=xlabel or COLUMN_PRETTY_NAMES[plot_column],
+                color='black',
+                alpha=0.2,
                 yerr=std_df,
                 ax=ax,
                 label='Forward',
@@ -143,8 +145,8 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     else:
         ax.set_ylim(ymax=max((df + std_df).max().max() * 1.09, 0.9))
     ax.set_ylabel("Runtime [ms]")
-    ax.set_xlabel(COLUMN_PRETTY_NAMES[plot_column])
-    plt.title(name.upper())
+    ax.set_xlabel(xlabel or COLUMN_PRETTY_NAMES[plot_column])
+    # plt.title(name.upper())
 
     default_label_map = {
         'torch_csr': 'Torch CSR',
@@ -154,10 +156,6 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     default_label_map.update(label_map or {})
     labels = [default_label_map.get(name, name) for name in df.columns]
 
-    if legend_outside:
-        plt.legend(labels, loc='center left', bbox_to_anchor=(1, 0.5))
-    else:
-        plt.legend(labels, loc='upper left' if 'gcn' in name.lower() else 'lower right')
 
     # ax.legend(legend_handles[::-1], labels[::-1])
 
@@ -165,7 +163,25 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
 
     for container in ax.containers:
         if hasattr(container, 'patches'):
-            ax.bar_label(container, fmt="%.2f")
+            if container.patches[0].get_facecolor()[-1] < 1.0:
+                padding = -0.95
+            else:
+                padding = 3.2
+            # Set text size.
+            # Make the labels appear on top z.
+            ax.bar_label(container, fmt="%.2f", padding=padding, fontsize=6, zorder=10)
+
+    bars = ax.patches
+    patterns = ('\\\\\\\\\\', '/////', '|||||')
+    hatches = [p for p in patterns for i in range(len(df))]
+    for bar, hatch in zip(bars, hatches):
+        if bar.get_facecolor()[-1] == 1.0:
+            bar.set_hatch(hatch)
+
+    if legend_outside:
+        plt.legend(labels, loc='center left', bbox_to_anchor=(1, 0.5))
+    else:
+        plt.legend(labels, loc='upper left' if 'gcn' in name.lower() else 'lower right')
 
     plt.tight_layout()
     # put today's date in the filename
