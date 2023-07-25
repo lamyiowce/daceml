@@ -84,6 +84,25 @@ class GCNConvBase(SparseLayerBase, metaclass=abc.ABCMeta):
         return N, do_bias, dtype, num_entries, num_in_features, num_out_features, is_first_layer
 
 
+def symbolic_shape_inference_with_cache(ssi, node):
+    op_attributes = {
+        attribute_proto.name: convert_attribute_proto(attribute_proto)
+        for attribute_proto in node.attribute
+    }
+    _, module = ssi.placeholder_id_to_module[op_attributes['module_id']]
+    weights_shape = module.lin.weight.T.shape
+    output_dtype = ssi.known_vi_[node.input[0]].type.tensor_type.elem_type
+
+    ssi._compute_matmul_shape(node,
+                              output_dtype=output_dtype,
+                              rhs_shape=weights_shape)
+    vi = ssi.known_vi_[node.output[1]]
+    num_nodes = ssi._get_shape(node, 0)[0]
+    num_input_features = ssi._get_shape(node, 0)[1]
+    vi.CopyFrom(helper.make_tensor_value_info(node.output[1], output_dtype,
+                                              (num_nodes, num_input_features)))
+
+
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                    name="semester_thesis")
 class GCNConvSemesterThesis(GCNConvBase):
@@ -297,9 +316,11 @@ class GCNConvCSC(GCNConvBase):
             # matmul. This is because CSC(A) = CSR(A.t).
             csrmm_libnode.csrmm(colptrs, rows, edge_vals, features, output,
                                 transA=False, beta=1.0)
+
         if not do_bias:
             raise NotImplementedError("CSC GCNConv without bias not implemented")
         return gcn_op
+
 
 @op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csc_alt")
 class GCNConvCSCPropagateFirst(GCNConvBase):
@@ -335,6 +356,7 @@ class GCNConvCSCPropagateFirst(GCNConvBase):
                 output[i, j] = bias[j]
             dace.libraries.blas.gemm(A=aggregated_features, B=linDOTweight, C=output,
                                      beta=1.0, trans_b=True, alpha=1.0)
+
         if not do_bias:
             raise NotImplementedError("CSC GCNConv without bias not implemented")
         return gcn_op
@@ -413,24 +435,7 @@ class GCNConvCSCCached(GCNConvBase):
                       inputs[0].shape[0], inputs[0].shape[1]))
     ]
 
-    @staticmethod
-    def ssi_fn(ssi, node):
-        op_attributes = {
-            attribute_proto.name: convert_attribute_proto(attribute_proto)
-            for attribute_proto in node.attribute
-        }
-        _, module = ssi.placeholder_id_to_module[op_attributes['module_id']]
-        weights_shape = module.lin.weight.T.shape
-        output_dtype = ssi.known_vi_[node.input[0]].type.tensor_type.elem_type
-
-        ssi._compute_matmul_shape(node,
-                                  output_dtype=output_dtype,
-                                  rhs_shape=weights_shape)
-        vi = ssi.known_vi_[node.output[1]]
-        num_nodes = ssi._get_shape(node, 0)[0]
-        num_input_features = ssi._get_shape(node, 0)[1]
-        vi.CopyFrom(helper.make_tensor_value_info(node.output[1], output_dtype,
-                                                  (num_nodes, num_input_features)))
+    ssi_fn = symbolic_shape_inference_with_cache
 
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
@@ -478,24 +483,7 @@ class GCNConvCSCAdaptCached(GCNConvBase):
                       inputs[0].shape[0], inputs[0].shape[1]))
     ]
 
-    @staticmethod
-    def ssi_fn(ssi, node):
-        op_attributes = {
-            attribute_proto.name: convert_attribute_proto(attribute_proto)
-            for attribute_proto in node.attribute
-        }
-        _, module = ssi.placeholder_id_to_module[op_attributes['module_id']]
-        weights_shape = module.lin.weight.T.shape
-        output_dtype = ssi.known_vi_[node.input[0]].type.tensor_type.elem_type
-
-        ssi._compute_matmul_shape(node,
-                                  output_dtype=output_dtype,
-                                  rhs_shape=weights_shape)
-        vi = ssi.known_vi_[node.output[1]]
-        num_nodes = ssi._get_shape(node, 0)[0]
-        num_input_features = ssi._get_shape(node, 0)[1]
-        vi.CopyFrom(helper.make_tensor_value_info(node.output[1], output_dtype,
-                                                  (num_nodes, num_input_features)))
+    ssi_fn = symbolic_shape_inference_with_cache
 
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
@@ -514,7 +502,8 @@ class GCNConvCSCAdaptCached(GCNConvBase):
 
                 Compute X' = A.t @ X @ W.t + b
                 """
-                if (not is_first_layer and num_out_features < num_in_features) or (is_first_layer and 2 * num_out_features < num_in_features):
+                if (not is_first_layer and num_out_features < num_in_features) or (
+                        is_first_layer and 2 * num_out_features < num_in_features):
                     # Transform first.
                     for i, j in dace.map[0:N, 0:num_out_features]:
                         output[i, j] = bias[j]
@@ -678,24 +667,7 @@ class GCNConvCOOCached(GCNConvBase):
                       inputs[0].shape[0], inputs[0].shape[1]))
     ]
 
-    @staticmethod
-    def ssi_fn(ssi, node):
-        op_attributes = {
-            attribute_proto.name: convert_attribute_proto(attribute_proto)
-            for attribute_proto in node.attribute
-        }
-        _, module = ssi.placeholder_id_to_module[op_attributes['module_id']]
-        weights_shape = module.lin.weight.T.shape
-        output_dtype = ssi.known_vi_[node.input[0]].type.tensor_type.elem_type
-
-        ssi._compute_matmul_shape(node,
-                                  output_dtype=output_dtype,
-                                  rhs_shape=weights_shape)
-        vi = ssi.known_vi_[node.output[1]]
-        num_nodes = ssi._get_shape(node, 0)[0]
-        num_input_features = ssi._get_shape(node, 0)[1]
-        vi.CopyFrom(helper.make_tensor_value_info(node.output[1], output_dtype,
-                                                  (num_nodes, num_input_features)))
+    ssi_fn = symbolic_shape_inference_with_cache
 
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
@@ -756,24 +728,7 @@ class GCNConvCOOAdaptCached(GCNConvBase):
                       inputs[0].shape[0], inputs[0].shape[1]))
     ]
 
-    @staticmethod
-    def ssi_fn(ssi, node):
-        op_attributes = {
-            attribute_proto.name: convert_attribute_proto(attribute_proto)
-            for attribute_proto in node.attribute
-        }
-        _, module = ssi.placeholder_id_to_module[op_attributes['module_id']]
-        weights_shape = module.lin.weight.T.shape
-        output_dtype = ssi.known_vi_[node.input[0]].type.tensor_type.elem_type
-
-        ssi._compute_matmul_shape(node,
-                                  output_dtype=output_dtype,
-                                  rhs_shape=weights_shape)
-        vi = ssi.known_vi_[node.output[1]]
-        num_nodes = ssi._get_shape(node, 0)[0]
-        num_input_features = ssi._get_shape(node, 0)[1]
-        vi.CopyFrom(helper.make_tensor_value_info(node.output[1], output_dtype,
-                                                  (num_nodes, num_input_features)))
+    ssi_fn = symbolic_shape_inference_with_cache
 
     @staticmethod
     def make_op(N: int, num_in_features: int, num_out_features: int,
@@ -791,7 +746,8 @@ class GCNConvCOOAdaptCached(GCNConvBase):
                 linDOTweight: F x M
                 output: N x F
                 """
-                if (not is_first_layer and num_out_features < num_in_features) or (is_first_layer and 2 * num_out_features < num_in_features):
+                if (not is_first_layer and num_out_features < num_in_features) or (
+                        is_first_layer and 2 * num_out_features < num_in_features):
                     # Y = A.t @ (X @ W.t) + b
                     features = dace.define_local((N, num_out_features), dtype=dtype)
                     features[:] = np.einsum('ij,kj->ik', node_features,
@@ -1199,4 +1155,67 @@ class GCNConvCSCCOOAdapt(GCNConvBase):
                                         temp, beta=1.0, transA=False)
                     output[:] = np.einsum('nm,fm->nf', temp,
                                           linDOTweight)
+        return gcn_op
+
+
+@op_implementation(op="torch_geometric.nn.conv.gcn_conv.GCNConv", name="csc_coo_adapt_cached")
+class GCNConvCSCCOOAdaptCached(GCNConvBase):
+    graph_format = sparse.HybridCscCooGraph
+    input_spec: Dict[str, dace.dtypes.typeclass] = {
+        'node_features': common.SpecialInputType.VAL_DTYPE,
+        'csc_colptrs': common.SpecialInputType.IDX_DTYPE,
+        'csc_rows': common.SpecialInputType.IDX_DTYPE,
+        'csc_edge_vals': common.SpecialInputType.VAL_DTYPE,
+        'coo_rows': common.SpecialInputType.IDX_DTYPE,
+        'coo_columns': common.SpecialInputType.IDX_DTYPE,
+        'coo_edge_vals': common.SpecialInputType.VAL_DTYPE,
+    }
+
+    buffer_spec: List[ArraySpec] = [
+        ArraySpec(name='AX_cached', dtype=dace.float32,
+                  torch_shape_fn_from_module=lambda module: lambda *inputs: (
+                      inputs[0].shape[0], inputs[0].shape[1]))
+    ]
+
+    ssi_fn = symbolic_shape_inference_with_cache
+
+    @staticmethod
+    def make_op(N: int, num_in_features: int, num_out_features: int,
+                num_entries: int, dtype: dace.dtypes.Typeclasses,
+                do_bias: bool, is_first_layer: bool):
+        if do_bias:
+            def gcn_op(node_features,
+                       csc_colptrs, csc_rows, csc_edge_vals,
+                       coo_rows, coo_columns, coo_edge_vals,
+                       linDOTweight, bias, output, AX_cached):
+                """
+                node_features: input features, N x M
+                ...
+                linDOTweight: F x M
+                output: N x F
+                """
+                if (not is_first_layer and num_out_features < num_in_features) or (is_first_layer and 2 * num_out_features < num_in_features):
+                    # Y = A_coo.t @ (X @ W.t) + A_csr.t @ (X @ W.t) + b
+                    features = dace.define_local((N, num_out_features), dtype=dtype)
+                    features[:] = np.einsum('ij,kj->ik', node_features,
+                                            linDOTweight)
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] = bias[j]
+                    coomm(coo_rows, coo_columns, coo_edge_vals, features, output, beta=1.0,
+                          transA=True)
+                    csrmm_libnode.csrmm(csc_colptrs, csc_rows, csc_edge_vals, features,
+                                        output, beta=1.0, transA=False)
+                else:
+                    # Y = (A_coo.t @ X + A_csr.t @ X) @ W.t + b
+                    coomm(coo_rows, coo_columns, coo_edge_vals, node_features, AX_cached, beta=0.0,
+                          transA=True)
+                    csrmm_libnode.csrmm(csc_colptrs, csc_rows, csc_edge_vals, node_features,
+                                        AX_cached, beta=1.0, transA=False)
+                    for i, j in dace.map[0:N, 0:num_out_features]:
+                        output[i, j] = bias[j]
+                    dace.libraries.blas.gemm(A=AX_cached, B=linDOTweight, C=output, beta=1.0,
+                                             trans_b=True, alpha=1.0)
+
+        else:
+            raise NotImplementedError("Not implemented yet")
         return gcn_op
