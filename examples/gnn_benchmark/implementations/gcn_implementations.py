@@ -791,7 +791,7 @@ class GCNConvCOOAdaptCached(GCNConvBase):
                 linDOTweight: F x M
                 output: N x F
                 """
-                if num_in_features > num_out_features:
+                if (not is_first_layer and num_out_features < num_in_features) or (is_first_layer and 2 * num_out_features < num_in_features):
                     # Y = A.t @ (X @ W.t) + b
                     features = dace.define_local((N, num_out_features), dtype=dtype)
                     features[:] = np.einsum('ij,kj->ik', node_features,

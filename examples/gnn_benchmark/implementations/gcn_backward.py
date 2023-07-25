@@ -386,7 +386,7 @@ class GCNConvBackwardCSCAdapt(BackwardImplementation):
                                             linDOTweight, node_features_grad,
                                             linDOTweight_grad, bias_grad,
                                             output_grad):
-            if F_out > 2 * F_in:
+            if F_out >= 2 * F_in:
                 # Grad X = A @ (Grad Y @ W)
                 temp = dace.define_local((N, F_in), dtype=val_dtype)
                 temp[:] = output_grad @ linDOTweight
@@ -886,7 +886,7 @@ class GCNConvBackwardCOOAdaptCached(BackwardImplementation):
             # The gradient of the adjacency matrix is not computed.
 
             # Compute the gradient of the GCN layer.
-            if F_out >= F_in:
+            if 2 * F_out >= F_in:
                 # Grad W = Grad Y.t @ (A.t @ X)
                 linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, AX_cached)
             else:
@@ -905,7 +905,7 @@ class GCNConvBackwardCOOAdaptCached(BackwardImplementation):
                                             linDOTweight_grad, bias_grad,
                                             output_grad, AX_cached):
             # Grad X = A @ Grad Y @ W
-            if F_out > 2 * F_in:
+            if F_out >= F_in:
                 # Grad X = A @ (Grad Y @ W)
                 temp = dace.define_local((N, F_in), dtype=val_dtype)
                 temp[:] = output_grad @ linDOTweight
