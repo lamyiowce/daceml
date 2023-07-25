@@ -63,6 +63,8 @@ def main():
                                            'benchmark_small', 'torch_profile'],
                         required=True)
     parser.add_argument('--backward', action='store_true')
+    parser.add_argument('--input-grad', action='store_true')
+    parser.add_argument('--force-num-features', type=int, default=None)
     parser.add_argument('--model', choices=model_dict.keys(), required=True)
     parser.add_argument('--hidden', type=int, default=None, required=True)
     parser.add_argument('--num_layers', type=int, default=2)
@@ -89,7 +91,8 @@ def main():
     log = logging.getLogger(__name__)
     log.setLevel(logging.INFO)
 
-    data = get_dataset(args.data, device, val_dtype=args.val_dtype)
+    data = get_dataset(args.data, device, val_dtype=args.val_dtype,
+                       force_num_features=args.force_num_features)
 
     print("Num node features: ", data.num_node_features)
     num_classes = data.y.max().item() + 1
