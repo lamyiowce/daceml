@@ -252,7 +252,7 @@ class HybridCscCooGraph(SparseGraph):
         # Construct a HybridCsrCooGraph with the transposed data.
         csr_coo = HybridCsrCooGraph(node_features, edge_vals, rows=cols,
                                     cols=rows, csr_cutoff=csr_cutoff,
-                                    idx_dtype=idx_dtype)
+                                    idx_dtype=idx_dtype, *args, **kwargs)
         self.cutoff_len = csr_coo.cutoff_len
         # CSC is transposed CSR.
         self.csc_colptrs = csr_coo.csr_rowptrs
