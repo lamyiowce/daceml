@@ -197,4 +197,6 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
         path = PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {clean_name}.pdf'
 
     plt.savefig(path, bbox_inches='tight')
+
+    plt.title(name.upper())
     plt.show()

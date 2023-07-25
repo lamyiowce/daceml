@@ -6,10 +6,10 @@ from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
 
 def main():
     # 23.07
-    plot_gcn_schemes()
+    # plot_gcn_schemes()
 
     # 18.07 Thesis
-    # plot_gcn_thesis()
+    plot_gcn_thesis()
     # plot_compare_cutoffs()
 
     # 06.07 plot GAT bwd
@@ -154,45 +154,43 @@ def plot_gcn_schemes():
 
 
 def plot_gcn_thesis():
-    drop_names = ['torch_edge_list', 'dace_coo_adapt_cached', 'dace_csc_adapt_cached']
+    drop_names = ['torch_edge_list']
     data = {
         "OGB Arxiv": [
-            # '19.07.12.02-pyg-gcn-ogbn-arxiv-217423.csv',
-            # '19.07.09.55-gcn-ogbn-arxiv-217319.csv',
-            # '20.07.13.16-gcn-ogbn-arxiv-218302.csv',
-            '21.07.12.51-pyg-gcn-ogbn-arxiv-219071.csv',
+            '25.07.07.19-pyg-gcn-ogbn-arxiv-222314.csv',
+            # '21.07.12.51-pyg-gcn-ogbn-arxiv-219071.csv',
             '24.07.21.59-gcn-ogbn-arxiv-221963.csv',
-            '21.07.10.55-pyg-gcn-ogbn-arxiv-219003.csv',
+            # '21.07.10.55-pyg-gcn-ogbn-arxiv-219003.csv',
+            # '25.07.11.49-gcn-ogbn-arxiv-222541.csv',
+            '25.07.12.44-gcn-ogbn-arxiv-222570.csv',
         ],
         "Cora": [
-            '21.07.10.53-pyg-gcn-cora-219003.csv',
+            # '21.07.10.53-pyg-gcn-cora-219003.csv',
             '24.07.22.27-gcn-cora-221963.csv',
-            '21.07.12.50-pyg-gcn-cora-219071.csv',
+            '25.07.07.26-pyg-gcn-cora-222314.csv',
+            '25.07.12.20-gcn-cora-222570.csv',
+            # '21.07.12.50-pyg-gcn-cora-219071.csv',
             # '18.07.15.14-gcn-cora-216728.csv',
             # '20.07.13.15-gcn-cora-218300.csv',
             # '19.07.11.57-pyg-gcn-cora-217423.csv',
         ],
         "Citeseer": [
-            # '19.07.11.47-pyg-gcn-citeseer-217423.csv',
-            # '19.07.08.35-gcn-citeseer-217313.csv',
-            # '18.07.16.31-gcn-citeseer-216728.csv',
-            # '20.07.13.42-gcn-citeseer-218300.csv',
+            '25.07.07.32-pyg-gcn-citeseer-222314.csv',
+            '25.07.07.32-pyg-gcn-citeseer-222314.csv',
         ],
         "Pubmed": [
-            # '19.07.11.52-pyg-gcn-pubmed-217423.csv',
-            # '19.07.08.36-gcn-pubmed-217317.csv',
-            # '20.07.14.08-gcn-pubmed-218300.csv',
+            '25.07.07.28-pyg-gcn-pubmed-222314.csv',
+            '25.07.07.28-pyg-gcn-pubmed-222314.csv',
         ],
         "Flickr": [
-            # '19.07.12.10-pyg-gcn-flickr-217453.csv',
-            # '19.07.12.24-gcn-flickr-217459.csv',
-            # '20.07.14.34-gcn-flickr-218300.csv',
+            '25.07.07.18-gcn-flickr-222313.csv',
+            '25.07.12.21-gcn-flickr-222571.csv',
+            '25.07.07.35-pyg-gcn-flickr-222314.csv',
         ],
         "Reddit": [
-            # '19.07.12.35-pyg-gcn-reddit-217461.csv',
-            # '19.07.13.48-gcn-reddit-217460.csv',
-            # '19.07.15.53-gcn-reddit-217567.csv',
-            # '20.07.13.44-gcn-reddit-218302.csv',
+            '25.07.07.46-gcn-reddit-222313.csv',
+            '25.07.07.39-pyg-gcn-reddit-222314.csv',
+            '25.07.12.46-gcn-reddit-222571.csv',
         ]
     }
 
