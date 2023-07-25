@@ -111,7 +111,7 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     df, std_df = prep_df(full_df, column=plot_column)
     colors = color_map or get_colors(df.columns)
     bar_width = 0.85
-    figsize = (1.5 + len(df) * 0.8, 6.)
+    figsize = (1.5 + len(df) * 0.9, 6.)
     if bwd_df is None:
         ax = df.plot(figsize=figsize, kind='bar', ylabel='Runtime [ms]',
                      xlabel=xlabel or COLUMN_PRETTY_NAMES[plot_column], color=colors,
@@ -127,7 +127,8 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
                          yerr=bwd_std_df,
                          label='Backward',
                          width=bar_width,
-                         edgecolor=(1.0,1.0,1.0,0.4))
+                         edgecolor=(1.0,1.0,1.0,0.4),
+                         error_kw=dict(ecolor='gray', lw=1, capsize=1, capthick=1))
         df.plot(kind='bar',
                 ylabel='Runtime [ms]',
                 xlabel=xlabel or COLUMN_PRETTY_NAMES[plot_column],
@@ -136,6 +137,7 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
                 yerr=std_df,
                 ax=ax,
                 label='Forward',
+                error_kw=dict(ecolor='gray', lw=1, capsize=1, capthick=1),
                 width=bar_width)
 
     ax.set_axisbelow(True)
@@ -164,15 +166,17 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     for container in ax.containers:
         if hasattr(container, 'patches'):
             if container.patches[0].get_facecolor()[-1] < 1.0:
-                padding = -0.95
+                padding = 6
+                label_type = 'center'
             else:
-                padding = 3.2
+                padding = 6
+                label_type = 'edge'
             # Set text size.
             # Make the labels appear on top z.
-            ax.bar_label(container, fmt="%.2f", padding=padding, fontsize=6, zorder=10)
+            ax.bar_label(container, fmt="%.2f", padding=padding, fontsize=7, zorder=10, rotation=90, label_type=label_type)
 
     bars = ax.patches
-    patterns = ('\\\\\\\\\\', '/////', '|||||')
+    patterns = ('\\\\\\\\\\', '/////', '|||||', '....', 'xxxx', '++++')
     hatches = [p for p in patterns for i in range(len(df))]
     for bar, hatch in zip(bars, hatches):
         if bar.get_facecolor()[-1] == 1.0:
