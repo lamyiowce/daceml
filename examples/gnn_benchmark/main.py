@@ -139,7 +139,8 @@ def main():
         gcn_norm = GCNNorm(add_self_loops=True)
         data = gcn_norm(data)
 
-    torch_model, dace_models = optimize_data(torch_model, dace_models, data, compute_input_grad=args.input_grad)
+    torch_model, dace_models = optimize_data(torch_model, dace_models, data,
+                                             compute_input_grad=args.input_grad)
 
     for k, v in dace_models.items():
         print(f"Impl: {k}")
