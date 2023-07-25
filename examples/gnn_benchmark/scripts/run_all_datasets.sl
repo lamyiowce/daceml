@@ -28,7 +28,8 @@ formats="coo_adapt csr_adapt csc_adapt coo_cached csc_cached csr_coo_adapt-0.99"
 #formats="csr_coo_adapt-0.01 csr_coo_adapt-0.10 csr_coo_adapt-0.25 csr_coo_adapt-0.50 csr_coo_adapt-0.75 csr_coo_adapt-0.9 csr_coo_adapt-0.99 csr_coo_adapt-0.999"
 #formats="csc_coo_adapt-0.01 csc_coo_adapt-0.10 csc_coo_adapt-0.25 csc_coo_adapt-0.50 csc_coo_adapt-0.75 csc_coo_adapt-0.9 csc_coo_adapt-0.99 csc_coo_adapt-0.999"
 backward=--backward
-datasets="cora ogbn-arxiv"
+datasets="flickr reddit"
+#datasets="cora ogbn-arxiv pubmed citeseer"
 
 #hidden_sizes="8 32 512 1024"
 hidden_sizes="8 16 32 64 128 256 512 1024"
