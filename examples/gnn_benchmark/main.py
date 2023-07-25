@@ -120,7 +120,11 @@ def main():
     print("CUDA available: ", torch.cuda.is_available())
 
     # Define models.
-    additional_kwargs = {} if 'gcn' in args.model else {'num_heads': args.heads}
+    additional_kwargs = {}
+    if 'gat' in args.model:
+        additional_kwargs['num_heads'] = args.heads
+    if args.input_grad:
+        additional_kwargs['compute_input_grad'] = True
     torch_model = model_class(data.num_node_features, num_hidden_features, num_classes,
                               args.num_layers, bias_init=bias_init_fn, bias=not args.no_bias,
                               **additional_kwargs)

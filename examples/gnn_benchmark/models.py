@@ -15,6 +15,7 @@ except ImportError:
 
 class GCNSingleLayer(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes, num_layers,
+                 compute_input_grad=False,
                  bias=True, bias_init=torch.nn.init.zeros_):
         del num_classes
         del num_layers
@@ -26,7 +27,7 @@ class GCNSingleLayer(torch.nn.Module):
                             bias=bias)
         if bias:
             bias_init(self.conv.bias)
-        self.conv.is_first = True
+        self.conv.is_first = not compute_input_grad
 
     def forward(self, x, *edge_info):
         x = self.conv(x, *edge_info)
@@ -36,6 +37,7 @@ class GCNSingleLayer(torch.nn.Module):
 
 class GCN(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes, num_layers,
+                 compute_input_grad=False,
                  bias=True, bias_init=torch.nn.init.zeros_):
         super().__init__()
         self.convs = torch.nn.ModuleList()
@@ -49,7 +51,10 @@ class GCN(torch.nn.Module):
                            bias=bias)
             if bias:
                 bias_init(conv.bias)
-            conv.is_first = i == 0
+            if compute_input_grad:
+                conv.is_first = False
+            else:
+                conv.is_first = i == 0
             self.convs.append(conv)
 
         self.act = nn.ReLU()
