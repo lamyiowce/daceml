@@ -478,6 +478,103 @@ class GATConvCSRStable(GATConvBase):
             return bias_prog
         return gat_op
 
+@op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
+                   name="csr_stable")
+class GATConvCSRStable(GATConvBase):
+    graph_format = sparse.CsrGraph
+    input_spec = {
+        "node_features": SpecialInputType.VAL_DTYPE,
+        "rowptrs": SpecialInputType.IDX_DTYPE,
+        "columns": SpecialInputType.IDX_DTYPE,
+    }
+
+    @staticmethod
+    def make_op(N: int, heads: int, num_out_features: int, num_entries: int,
+                dtype: dace.dtypes.Typeclasses, negative_slope: float,
+                do_bias: bool):
+        def gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
+                   att_src, att_dst, output):
+            """
+            node_features: input features, N x F
+            rowptrs: rowptr, N+1
+            columns: col, num_entries
+            lin_srcDOTweight: H * F' x F
+            att_src: 1 x H x F'
+            att_dst: 1 x H x F'
+            output: N x H * F'
+            """
+
+            # Transform input features.
+            features = dace.define_local((N, heads, num_out_features),
+                                         dtype=dtype)
+            features_tmp = np.einsum('ij,kj->ik', node_features,
+                                     lin_srcDOTweight)
+
+            # features: N x H x F'
+            features[:] = np.reshape(features_tmp,
+                                     (N, heads, num_out_features))
+
+            alpha_src = np.sum(features * att_src, axis=-1)  # shape: N x H
+            alpha_dst = np.sum(features * att_dst, axis=-1)  # N x H
+
+            # Calculate attention weights.
+            e = np.zeros((num_entries, heads), dtype=dtype)
+            softmax_sum = np.zeros((N, heads), dtype=dtype)
+            softmax_max = np.ones((N, heads), dtype=dtype) * -np.inf
+
+            for l in dace.map[0:N]:
+                for v in dace.map[rowptrs[l]:rowptrs[l + 1]]:
+                    # Calculating e_l->colv
+                    colv = columns[v]
+                    e_tmp = alpha_src[l] + alpha_dst[colv]
+                    # LeakyReLU
+                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                    e[v] = e_tmp
+                    softmax_max[colv] = np.maximum(softmax_max[colv], e[v])
+
+            # TODO: sequential map, otherwise incorrect with autoopt.
+            for j in dace.map[
+                     0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                colj = columns[j]
+                e[j] = np.exp(e[j] - softmax_max[colj])
+                softmax_sum[colj] += e[j]
+
+            # Softmax normalization.
+            for j in dace.map[0:num_entries]:
+                colj = columns[j]
+                e[j] = e[j] / softmax_sum[colj]
+
+            if heads == 1:
+                csrmm(rowptrs, columns, e,
+                      np.reshape(features, (N, num_out_features)), output,
+                      transA=True, beta=0.0)
+            else:
+                output_perm = np.zeros((heads, N, num_out_features),
+                                       dtype=dtype)  # H x N x F'
+                features_perm = np.transpose(features, (1, 0, 2))  # H x N x F'
+                e_perm = np.transpose(e, (1, 0))  # H x num_entries
+                # for h in dace.map[0:heads]@dace.dtypes.ScheduleType.Unrolled:
+                for h in range(heads):
+                    csrmm(rowptrs, columns, e_perm[h], features_perm[h],
+                          output_perm[h],
+                          transA=True,
+                          beta=1.0)
+
+                output[:] = np.reshape(np.transpose(output_perm, (1, 0, 2)),
+                                       (N, heads * num_out_features))
+
+        if do_bias:
+            def bias_prog(node_features, rowptrs, columns, lin_srcDOTweight,
+                          att_src, att_dst, bias, output):
+                gat_op(node_features, rowptrs, columns, lin_srcDOTweight,
+                       att_src, att_dst,
+                       output)
+                for i, j in dace.map[0:N, 0:heads * num_out_features]:
+                    output[i, j] += bias[j]
+
+            return bias_prog
+        return gat_op
+
 
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
                    name="coo")
