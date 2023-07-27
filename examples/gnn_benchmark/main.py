@@ -123,7 +123,7 @@ def main():
     additional_kwargs = {}
     if 'gat' in args.model:
         additional_kwargs['num_heads'] = args.heads
-    if args.input_grad:
+    if args.input_grad and 'gcn' in args.model:
         additional_kwargs['compute_input_grad'] = True
     torch_model = model_class(data.num_node_features, num_hidden_features, num_classes,
                               args.num_layers, bias_init=bias_init_fn, bias=not args.no_bias,
