@@ -25,12 +25,19 @@ def csrmm(A_rowptrs,
     C[:] = beta * C
     N = A_rowptrs.shape[0] - 1
     K = B.shape[1]
-    for i, k in dace.map[0:N, 0:K]:
-        for j in dace.map[A_rowptrs[i]:A_rowptrs[i + 1]]:
-            # Below lines result in compile errors when enabling thread block dynamic scheduling.
-            column = A_columns[j]
-            mult = B[i, k] * A_values[j]
-            C[column, k] += mult
+    if transA:
+        for i, k in dace.map[0:N, 0:K]:
+            for j in dace.map[A_rowptrs[i]:A_rowptrs[i + 1]]:
+                # Below lines result in compile errors when enabling thread block dynamic scheduling.
+                column = A_columns[j]
+                mult = B[i, k] * A_values[j]
+                C[column, k] += mult
+    else:
+        for i, k in dace.map[0:N, 0:K]:
+            for j in dace.map[A_rowptrs[i]:A_rowptrs[i + 1]]:
+                row = A_columns[j]
+                mult = B[row, k] * A_values[j]
+                C[i, k] += mult
 
 
 @oprepo.replaces('examples.gnn_benchmark.csrmm_libnode.csrmm')
