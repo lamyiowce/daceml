@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=gnn_benchmark      # Job name
-#SBATCH --time=02:00:00              # Wall time limit (days-hrs:min:sec)
+#SBATCH --time=04:00:00              # Wall time limit (days-hrs:min:sec)
 #SBATCH --output=gnn_benchmark_%j.log     # Path to the standard output and error files relative to the working directory
 #SBATCH -p intelv100
 #SBATCH --account=g34
@@ -24,12 +24,11 @@ export DACE_default_build_folder=./.dacecache-$SLURM_JOB_ID
 export DACE_compiler_cuda_default_block_size=64,8,1
 export DACE_compiler_cuda_max_concurrent_streams=-1
 model=gcn
-formats="coo_adapt csr_adapt csc_adapt coo_cached csc_cached csr_coo_adapt-0.99"
+formats="coo_adapt_cached csc_adapt_cached csc_coo_adapt_cached-0.9"
 #formats="csr_coo_adapt-0.01 csr_coo_adapt-0.10 csr_coo_adapt-0.25 csr_coo_adapt-0.50 csr_coo_adapt-0.75 csr_coo_adapt-0.9 csr_coo_adapt-0.99 csr_coo_adapt-0.999"
 #formats="csc_coo_adapt-0.01 csc_coo_adapt-0.10 csc_coo_adapt-0.25 csc_coo_adapt-0.50 csc_coo_adapt-0.75 csc_coo_adapt-0.9 csc_coo_adapt-0.99 csc_coo_adapt-0.999"
 backward=--backward
-datasets="flickr reddit"
-#datasets="cora ogbn-arxiv pubmed citeseer"
+datasets="cora ogbn-arxiv pubmed citeseer flickr reddit"
 
 #hidden_sizes="8 32 512 1024"
 hidden_sizes="8 16 32 64 128 256 512 1024"
