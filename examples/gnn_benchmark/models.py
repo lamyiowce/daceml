@@ -83,6 +83,7 @@ class GAT(torch.nn.Module):
                  num_node_features,
                  features_per_head,
                  num_classes,
+                 num_layers,
                  gat_layer=GATConv,
                  num_heads=8,
                  bias=True,
@@ -92,34 +93,55 @@ class GAT(torch.nn.Module):
             additional_kwargs = {}
         else:
             additional_kwargs = {"add_self_loops": False}
-        self.conv1 = gat_layer(num_node_features,
+
+        self.convs = torch.nn.ModuleList()
+
+        if num_layers == 1:
+            self.convs.append(gat_layer(num_node_features,
+                                        num_classes,
+                                        heads=1,
+                                        bias=bias,
+                                        **additional_kwargs))
+        else:
+            self.convs.append(gat_layer(num_node_features,
+                                        features_per_head,
+                                        heads=num_heads,
+                                        bias=bias,
+                                        **additional_kwargs))
+
+            for i in range(num_layers - 2):
+                conv = gat_layer(features_per_head * num_heads,
                                features_per_head,
                                heads=num_heads,
                                bias=bias,
                                **additional_kwargs)
-        self.conv2 = gat_layer(features_per_head * num_heads,
-                               num_classes,
-                               heads=1,
-                               bias=bias,
-                               **additional_kwargs)
+                self.convs.append(conv)
+
+            self.convs.append(gat_layer(features_per_head * num_heads,
+                                        num_classes,
+                                        heads=1,
+                                        bias=bias,
+                                        **additional_kwargs))
         if bias:
-            bias_init(self.conv1.bias)
-            bias_init(self.conv2.bias)
+            for layer in self.convs:
+                bias_init(layer.bias)
         self.act = nn.ELU()
 
     def forward(self, x, *edge_info):
-        x = self.conv1(x, *edge_info)
-        x = self.act(x)
-        x = self.conv2(x, *edge_info)
-
+        for conv in self.convs[:-1]:
+            x = conv(x, *edge_info)  # Size: `hidden size`
+            x = self.act(x)  # ReLU
+        x = self.convs[-1](x, *edge_info)  # Size: `num_classes`
         return x
 
 
 class GATSingleLayer(torch.nn.Module):
     def __init__(self, num_node_features, features_per_head, num_classes,
+                 num_layers,
                  gat_layer=GATConv,
                  num_heads=8, bias=True, bias_init=torch.nn.init.zeros_):
         del num_classes
+        del num_layers
         super().__init__()
         if gat_layer == CuGraphGATConv:
             additional_kwargs = {}
