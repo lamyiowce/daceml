@@ -1,4 +1,5 @@
 import pandas as pd
+from scipy import stats
 
 from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
     DATA_FOLDER, DEFAULT_LABEL_MAP, make_plot
@@ -154,7 +155,7 @@ def plot_gcn_schemes():
 
 
 def plot_gcn_thesis():
-    drop_names = ['torch_edge_list']
+    drop_names = ['torch_edge_list', 'dace_csc_coo_adapt_cached-0.9']
     data = {
         "OGB Arxiv": [
             '25.07.07.19-pyg-gcn-ogbn-arxiv-222314.csv',
@@ -177,10 +178,14 @@ def plot_gcn_thesis():
         "Citeseer": [
             '25.07.07.32-pyg-gcn-citeseer-222314.csv',
             '25.07.07.32-pyg-gcn-citeseer-222314.csv',
+            '25.07.13.31-gcn-citeseer-222570.csv',
+            '27.07.07.41-gcn-citeseer-224007.csv',
         ],
         "Pubmed": [
             '25.07.07.28-pyg-gcn-pubmed-222314.csv',
             '25.07.07.28-pyg-gcn-pubmed-222314.csv',
+            '25.07.13.08-gcn-pubmed-222570.csv',
+            '27.07.07.36-gcn-pubmed-224007.csv',
         ],
         "Flickr": [
             '25.07.07.18-gcn-flickr-222313.csv',
@@ -188,17 +193,55 @@ def plot_gcn_thesis():
             '25.07.07.35-pyg-gcn-flickr-222314.csv',
         ],
         "Reddit": [
-            '25.07.07.46-gcn-reddit-222313.csv',
-            '25.07.07.39-pyg-gcn-reddit-222314.csv',
-            '25.07.12.46-gcn-reddit-222571.csv',
+            # '25.07.07.46-gcn-reddit-222313.csv',
+            # '25.07.07.39-pyg-gcn-reddit-222314.csv',
+            # '25.07.12.46-gcn-reddit-222571.csv',
         ]
     }
 
+    speedup_log = open('speedup_log_gcn.txt', 'w')
+
+    all_speedups = {'fwd': [], 'bwd': []}
     for name, datalist in data.items():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
             plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name,
                           plot_title=f"GCN, {name}", drop_names=drop_names, skip_timestamp=True)
+
+            dataset_speedups = {'fwd': [], 'bwd': []}
+            for pass_name, data in [('fwd', df), ('bwd', bwd_df)]:
+                torch_df = data[data['Name'].str.contains('torch')]
+                dace_df = data[data['Name'].str.contains('dace')]
+
+                for size in data['Size'].unique():
+                    torch_time = torch_df[torch_df['Size'] == size]['Median'].min()
+                    dace_time = dace_df[dace_df['Size'] == size]['Median'].min()
+                    dataset_speedups[pass_name].append(torch_time / dace_time)
+                    print(f"{pass_name}: {name}, {size}: {torch_time / dace_time}")
+                    speedup_log.write(f"{pass_name}: {name}, {size}: {torch_time / dace_time}\n")
+
+            # Compute geomean speedup for this dataset.
+            for pass_name, speedups in dataset_speedups.items():
+                print(f"{name} {pass_name} geomean: {stats.gmean(speedups)}")
+                speedup_log.write(f"{name} {pass_name} geomean: {stats.gmean(speedups)}\n")
+                print(f"{name} {pass_name} max: {max(speedups)}")
+                speedup_log.write(f"{pass_name} max: {max(speedups)}\n")
+                print(f"{name} {pass_name} min: {min(speedups)}")
+                speedup_log.write(f"{pass_name} min: {min(speedups)}\n")
+
+            all_speedups['fwd'] += dataset_speedups['fwd']
+            all_speedups['bwd'] += dataset_speedups['bwd']
+
+    # Compute geomean, max and min speedup.
+    for pass_name, speedups in all_speedups.items():
+        print(f"ALL DATASETS {pass_name} geomean: {stats.gmean(speedups)}")
+        speedup_log.write(f"{pass_name} geomean: {stats.gmean(speedups)}\n")
+        print(f"ALL DATASETS {pass_name} max: {max(speedups)}")
+        speedup_log.write(f"{pass_name} max: {max(speedups)}\n")
+        print(f"ALL DATASETS {pass_name} min: {min(speedups)}")
+        speedup_log.write(f"{pass_name} min: {min(speedups)}\n")
+
+
 
     # for name, datalist in data.items():
     #     if len(datalist) > 0:

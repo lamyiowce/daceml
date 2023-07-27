@@ -96,12 +96,10 @@ def prep_df(full_df, column):
     full_df = full_df.drop_duplicates(subset=['Size', 'Model', 'Name', 'Num Features', 'Num Layers'])
     df = full_df.pivot(index=column, columns='Name', values='Median')
     std_df = full_df.pivot(index=column, columns='Name', values='Stdev')
-    print(df)
     sorted_cols = sorted(df.columns,
                          key=lambda x: ('torch' in x, 'edge_list' in x))
     df = df.reindex(sorted_cols, axis=1)
     std_df = std_df.reindex(sorted_cols, axis=1)
-    print(df)
     return df, std_df
 
 
