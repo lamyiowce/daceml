@@ -3,7 +3,7 @@ import dataclasses
 import dace
 import pandas as pd
 
-from examples.gnn_benchmark.report.modeling import measurable_ops
+from examples.gnn_benchmark.report.modeling import measurable_ops, measurable_layers
 from examples.gnn_benchmark.report.modeling.measurable_gat import GATConvCSR, GATConvCOO
 from examples.gnn_benchmark.report.modeling.measurable_layers import GCNConvCSR, \
     GCNConvCSRAdapt, BackwardGCNConvCSR, BackwardGCNConvCSRAdapt, GCNConvCOO, GCNConvCOOAdapt, \
@@ -88,12 +88,38 @@ def compute_matmuls(layer_name, hidden_sizes, datasets, mm_ops, filename):
     df.to_csv(filename, index=False)
 
 
+def compare_fused_spmm_sddmm(hidden_sizes, datasets, filename):
+    # model, impl_name, dataset, hidden_size, val_dtype, idx_dtype
+    output = []
+    for dataset in datasets:
+        for hidden_size in hidden_sizes:
+            fused = measurable_ops.FusedCooSpmmSddmm(N=dataset.num_nodes,
+                                                     M=hidden_size,
+                                                     nnz=dataset.num_edges, val_dtype=dace.float32,
+                                                     idx_dtype=dace.int32)
+
+            sddmm = measurable_ops.CooSddmm(N=dataset.num_nodes, M=hidden_size,
+                                            nnz=dataset.num_edges, val_dtype=dace.float32,
+                                            idx_dtype=dace.int32)
+            spmm = measurable_ops.Coomm(N=dataset.num_nodes, M=dataset.num_nodes, F=hidden_size,
+                                          nnz=dataset.num_edges, val_dtype=dace.float32,
+                                          idx_dtype=dace.int32)
+            not_fused = measurable_layers.CompositeOp([sddmm, spmm])
+
+            print(f"{dataset.name}, {hidden_size}: {fused}")
+            print(f"{dataset.name}, {hidden_size}: {not_fused}")
+
+
+
 def main():
     # Estimate the number of FLOPS and lower bound of memory movement for GAT
     # and GCN with typical sizes.
     datasets = [CoraStats, ArxivStats]
 
+    compare_fused_spmm_sddmm([8, 16, 32, 64, 128, 256, 512, 1024, 2048], datasets, '')
+
     matmuls = [measurable_ops.Csrmm, measurable_ops.Cscmm, measurable_ops.Coomm]
+
     compute_matmuls('basic', [64], datasets,
                     matmuls, 'basic-operators.csv')
 
@@ -103,30 +129,31 @@ def main():
     backward_gcn_layers = [BackwardGCNConvCSR, BackwardGCNConvCSRAdapt, BackwardGCNConvCOO,
                            BackwardGCNConvCOOAdapt, BackwardGCNConvCSC, BackwardGCNConvCSCAdapt]
 
-    compute_all('gcn_single_layer', hidden_sizes, datasets, gcn_layers,
-                'gcn-numbers.csv', val_dtype=dace.float32,
-                idx_dtype=dace.int32,
-                do_bias=True)
 
-    compute_all('gcn_single_layer', hidden_sizes, datasets,
-                backward_gcn_layers, 'gcn-numbers-bwd.csv',
-                val_dtype=dace.float32,
-                idx_dtype=dace.int32,
-                do_bias=True,
-                compute_input_grad=True)
-
-    gat_layers = [GATConvCSR, GATConvCOO]
-    compute_all('gat_single_layer', hidden_sizes, datasets, gat_layers,
-                'gat-8_heads-numbers.csv', val_dtype=dace.float32,
-                idx_dtype=dace.int32,
-                heads=8,
-                do_bias=True)
-
-    compute_all('gat_single_layer', hidden_sizes, datasets, gat_layers,
-                'gat-1_heads-numbers.csv', val_dtype=dace.float32,
-                idx_dtype=dace.int32,
-                heads=1,
-                do_bias=True)
+    # compute_all('gcn_single_layer', hidden_sizes, datasets, gcn_layers,
+    #             'gcn-numbers.csv', val_dtype=dace.float32,
+    #             idx_dtype=dace.int32,
+    #             do_bias=True)
+    #
+    # compute_all('gcn_single_layer', hidden_sizes, datasets,
+    #             backward_gcn_layers, 'gcn-numbers-bwd.csv',
+    #             val_dtype=dace.float32,
+    #             idx_dtype=dace.int32,
+    #             do_bias=True,
+    #             compute_input_grad=True)
+    #
+    # gat_layers = [GATConvCSR, GATConvCOO]
+    # compute_all('gat_single_layer', hidden_sizes, datasets, gat_layers,
+    #             'gat-8_heads-numbers.csv', val_dtype=dace.float32,
+    #             idx_dtype=dace.int32,
+    #             heads=8,
+    #             do_bias=True)
+    #
+    # compute_all('gat_single_layer', hidden_sizes, datasets, gat_layers,
+    #             'gat-1_heads-numbers.csv', val_dtype=dace.float32,
+    #             idx_dtype=dace.int32,
+    #             heads=1,
+    #             do_bias=True)
 
 
 if __name__ == '__main__':

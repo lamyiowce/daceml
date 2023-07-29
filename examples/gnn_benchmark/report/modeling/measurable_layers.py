@@ -8,6 +8,8 @@ from examples.gnn_benchmark.report.modeling.measurable_ops import MeasurableOp, 
 
 class CompositeOp(MeasurableOp):
     subops: List[MeasurableOp] = []
+    def __init__(self, oplist: List[MeasurableOp]):
+        self.subops = oplist
 
     def flops(self):
         return sum([op.flops() for op in self.subops])
