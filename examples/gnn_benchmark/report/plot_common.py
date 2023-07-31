@@ -10,15 +10,17 @@ DEFAULT_LABEL_MAP = {
     'torch_edge_list': 'Torch Edge List',
     'torch_dgnn': 'Torch DGNN-GAT',
     'dace_csr': 'DaCe CSR',
-    'dace_csr_adapt': 'DaCe CSR (adapt MM order)',
+    'dace_csr_adapt': 'DaCe CSR, adapt MM order',
     'dace_coo': 'DaCe COO',
-    'dace_coo_adapt': 'DaCe COO (adapt MM order)',
+    'dace_coo_adapt': 'DaCe COO, adapt MM order',
     'dace_csc': 'DaCe CSC',
     'dace_csc_adapt': 'DaCe CSC (adapt MM order)',
     'dace_csr_coo_adapt': 'DaCe CSR/COO adapt, CSR 50%',
     'dace_csr_coo_adapt-0.99': 'DaCe CSR/COO adapt, CSR 99%',
     'dace_csr_coo': 'DaCe CSR/COO, CSR 50%',
-    'dace_coo_cached': 'DaCe COO (cached)',
+    'dace_coo_cached': 'DaCe COO, cached',
+    'dace_coo_cached:coo_cached_feat_only': 'DaCe COO, cached features',
+    'dace_coo_cached_feat_and_alpha': 'DaCe COO, cached features, node attention',
     'dace_coo_adapt_cached': 'DaCe COO (adapt, cached)',
     'dace_coo_stable_cached:coo_cached': 'DaCe COO (cached)',
     'dace_coo_stable:coo': 'DaCe COO',
@@ -94,7 +96,7 @@ def get_colors(names: pd.Series):
     return names.map(color_dict)
 
 
-def prep_df(full_df, column):
+def prep_df(full_df, column, col_order=None):
     if 'Num Layers' in full_df.columns:
         dupl_cols = ['Size', 'Model', 'Name', 'Num Features', 'Num Layers']
     else:
@@ -102,17 +104,21 @@ def prep_df(full_df, column):
     full_df = full_df.drop_duplicates(subset=dupl_cols)
     df = full_df.pivot(index=column, columns='Name', values='Median')
     std_df = full_df.pivot(index=column, columns='Name', values='Stdev')
-    sorted_cols = sorted(df.columns,
-                         key=lambda x: ('torch' in x, 'edge_list' in x))
-    df = df.reindex(sorted_cols, axis=1)
-    std_df = std_df.reindex(sorted_cols, axis=1)
+    if col_order is not None:
+        df = df.reindex(col_order, axis=1)
+        std_df = std_df.reindex(col_order, axis=1)
+    else:
+        sorted_cols = sorted(df.columns,
+                             key=lambda x: ('torch' in x, 'edge_list' in x))
+        df = df.reindex(sorted_cols, axis=1)
+        std_df = std_df.reindex(sorted_cols, axis=1)
     return df, std_df
 
 
 def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_outside=False,
-              skip_timestamp=False, xlabel=None, color_map=None):
+              skip_timestamp=False, xlabel=None, color_map=None, col_order=None):
     plt.rcParams.update({'font.size': 13})
-    df, std_df = prep_df(full_df, column=plot_column)
+    df, std_df = prep_df(full_df, column=plot_column, col_order=col_order)
     colors = color_map or get_colors(df.columns)
     bar_width = 0.85
     figsize = (1.5 + len(df) * 0.9, 6.)
@@ -121,7 +127,7 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
                      xlabel=xlabel or COLUMN_PRETTY_NAMES[plot_column], color=colors,
                      yerr=std_df, label='Forward', width=bar_width)
     else:
-        bwd_df, bwd_std_df = prep_df(bwd_df, plot_column)
+        bwd_df, bwd_std_df = prep_df(bwd_df, plot_column, col_order=col_order)
         if len(bwd_df.columns) != len(df.columns):
             print('Warning: bwd_df and df have different lengths')
             print('Differing columns: ', set(bwd_df.columns) ^ set(df.columns))

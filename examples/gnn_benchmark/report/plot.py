@@ -285,7 +285,9 @@ def plot_gcn_thesis():
 
 
 def plot_gat_bwd():
-    drop_names = ['torch_edge_list']
+    drop_torch_names = ['torch_edge_list', 'torch_dgnn', 'torch_dgnn_compiled', 'torch_edge_list_compiled', 'torch_csr']
+    drop_dace_names = ['torch_edge_list', 'dace_coo', 'dace_coo_cached_feat_and_alpha', 'dace_coo_cached:coo_cached_feat_only']
+    col_order = ['dace_coo', 'dace_coo_cached:coo_cached_feat_only', 'dace_coo_cached_feat_and_alpha', 'dace_coo_cached']
     sizes = [8, 16, 32, 64, 128]
 
     data = {
@@ -293,29 +295,30 @@ def plot_gat_bwd():
             '27.07.12.18-pyg-gat-ogbn-arxiv-224204.csv',
             '27.07.12.45-pyg-gat-ogbn-arxiv-224205.csv',
             '27.07.12.18-pyg-gat-ogbn-arxiv-224204.csv',
-            '27.07.14.32-gat-ogbn-arxiv-224283.csv',
+            '31.07.16.48-gat-ogbn-arxiv-227723.csv',
 
         ],
         "Cora": [
             '27.07.12.23-pyg-gat-cora-224204.csv',
             '27.07.12.52-pyg-gat-cora-224205.csv',
-            '27.07.14.33-gat-cora-224284.csv',
+            '31.07.15.58-gat-cora-227723.csv',
         ],
         "Citeseer": [
             '27.07.13.00-pyg-gat-citeseer-224205.csv',
-            '27.07.14.57-gat-citeseer-224284.csv',
+            '31.07.15.59-gat-citeseer-227724.csv',
         ],
         "Pubmed": [
             '27.07.13.45-pyg-gat-pubmed-224242.csv',
             '27.07.13.41-pyg-gat-pubmed-224239.csv',
             '27.07.12.26-pyg-gat-pubmed-224204.csv',
             '27.07.12.55-pyg-gat-pubmed-224205.csv',
+            '31.07.15.56-gat-pubmed-227722.csv',
         ],
         "Flickr": [
             '27.07.13.46-pyg-gat-flickr-224242.csv',
             '27.07.13.04-pyg-gat-flickr-224205.csv',
             '27.07.12.33-pyg-gat-flickr-224204.csv',
-            '27.07.14.33-gat-flickr-224285.csv',
+            '31.07.16.47-gat-flickr-227722.csv',
         ],
         "Reddit": [
             '27.07.13.10-pyg-gat-reddit-224205.csv',
@@ -326,8 +329,10 @@ def plot_gat_bwd():
     for name, datalist in data.items():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
+            plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes, col_order=col_order,
+                          plot_title=f"GAT COMPARISON, {name}", drop_names=drop_torch_names, skip_timestamp=True)
             plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
-                          plot_title=f"GAT, {name}", drop_names=drop_names, skip_timestamp=True)
+                          plot_title=f"GAT BASELINES, {name}", drop_names=drop_dace_names, skip_timestamp=True)
 
 
 
@@ -486,7 +491,7 @@ def plot_stream_comparison():
 
 def plot_backward(tag, plot_title, plot_column='Size', labels=None, df=None, bwd_df=None,
                   filter_y=None, drop_names=None, include_only_names=None, color_map=None,
-                  legend_outside=False, skip_timestamp=False, xlabel=None):
+                  legend_outside=False, skip_timestamp=False, xlabel=None, col_order=None):
     if df is None:
         df = pd.read_csv(DATA_FOLDER / (tag + '.csv'), comment='#')
     if filter_y is not None:
@@ -514,11 +519,12 @@ def plot_backward(tag, plot_title, plot_column='Size', labels=None, df=None, bwd
             bwd_df = bwd_df[bwd_df['Name'].isin(include_only_names)]
 
         make_plot(df, f"{plot_title}:  BWD + FWD", label_map=labels, plot_column=plot_column,
-                  bwd_df=bwd_df, xlabel=xlabel,
+                  bwd_df=bwd_df, xlabel=xlabel, col_order=col_order,
                   legend_outside=legend_outside, skip_timestamp=skip_timestamp, color_map=color_map)
     else:
         make_plot(df, f"{plot_title}: forward pass", label_map=labels, plot_column=plot_column,
-                  skip_timestamp=skip_timestamp, xlabel=xlabel, color_map=color_map)
+                  skip_timestamp=skip_timestamp, xlabel=xlabel, color_map=color_map,
+                  col_order=col_order)
 
 
 def plot_adapt_matmul_order():
