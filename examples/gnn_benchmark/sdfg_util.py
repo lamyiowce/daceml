@@ -269,10 +269,15 @@ def adjust_block_size(default_block_size, node, total_size):
         # Block sizes of form [64, 8, -1] or [-1, 8, 8] or [40, -1, 8]
         new_block_sizes[new_block_sizes.index(-1)] = remaining_size
     elif num_free == 2:
-        # Block sizes of form [64, -1, -1] or [-1, -1, 8] or [-1, 7, -1]
-        # Set the first dim to remaining, last to 1
-        new_block_sizes[new_block_sizes.index(-1)] = remaining_size
-        new_block_sizes[new_block_sizes.index(-1)] = 1
+        if len(map_sizes) == 2:
+            # Both dims bigger than block size, set to default.
+            # We assume the default block size is [64, 8, 1]
+            new_block_sizes = default_block_size
+        else:
+            # Block sizes of form [64, -1, -1] or [-1, -1, 8] or [-1, 7, -1]
+            # Set the first dim to remaining, last to 1
+            new_block_sizes[new_block_sizes.index(-1)] = remaining_size
+            new_block_sizes[new_block_sizes.index(-1)] = 1
     elif num_free == 3:
         # [-1, -1, -1], just use the default (array is big enough).
         new_block_sizes = default_block_size
