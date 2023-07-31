@@ -1,4 +1,5 @@
 import pandas as pd
+from matplotlib import pyplot as plt
 from scipy import stats
 
 from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
@@ -10,11 +11,11 @@ def main():
     # plot_gcn_schemes()
 
     # 18.07 Thesis
-    plot_gcn_thesis()
+    # plot_gcn_thesis()
     # plot_compare_cutoffs()
 
     # 06.07 plot GAT bwd
-    # plot_gat_bwd()
+    plot_gat_bwd()
 
     # # 16.06 plot GAT forward single layer.
     # plot_gat_single_layer()
@@ -201,14 +202,16 @@ def plot_gcn_thesis():
 
     speedup_log = open('speedup_log_gcn.txt', 'w')
 
-    all_speedups = {'fwd': [], 'bwd': []}
+    all_speedups = {'fwd': [], 'bwd': [], 'formats_fwd': [], 'formats_bwd': []}
+    per_dataset_format_speedups_fwd = {}
+    per_dataset_format_speedups_bwd = {}
     for name, datalist in data.items():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
             plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name,
                           plot_title=f"GCN, {name}", drop_names=drop_names, skip_timestamp=True)
 
-            dataset_speedups = {'fwd': [], 'bwd': []}
+            dataset_speedups = {'fwd': [], 'bwd': [], 'formats_fwd': [], 'formats_bwd': []}
             for pass_name, data in [('fwd', df), ('bwd', bwd_df)]:
                 torch_df = data[data['Name'].str.contains('torch')]
                 dace_df = data[data['Name'].str.contains('dace')]
@@ -216,6 +219,8 @@ def plot_gcn_thesis():
                 for size in data['Size'].unique():
                     torch_time = torch_df[torch_df['Size'] == size]['Median'].min()
                     dace_time = dace_df[dace_df['Size'] == size]['Median'].min()
+                    dace_max_time = dace_df[dace_df['Size'] == size]['Median'].max()
+                    dataset_speedups[f'formats_{pass_name}'].append(dace_max_time / dace_time)
                     dataset_speedups[pass_name].append(torch_time / dace_time)
                     print(f"{pass_name}: {name}, {size}: {torch_time / dace_time}")
                     speedup_log.write(f"{pass_name}: {name}, {size}: {torch_time / dace_time}\n")
@@ -229,8 +234,12 @@ def plot_gcn_thesis():
                 print(f"{name} {pass_name} min: {min(speedups)}")
                 speedup_log.write(f"{pass_name} min: {min(speedups)}\n")
 
+            per_dataset_format_speedups_fwd[name] = dataset_speedups['formats_fwd']
+            per_dataset_format_speedups_bwd[name] = dataset_speedups['formats_bwd']
             all_speedups['fwd'] += dataset_speedups['fwd']
             all_speedups['bwd'] += dataset_speedups['bwd']
+            all_speedups['formats_fwd'] += dataset_speedups['formats_fwd']
+            all_speedups['formats_bwd'] += dataset_speedups['formats_bwd']
 
     # Compute geomean, max and min speedup.
     for pass_name, speedups in all_speedups.items():
@@ -240,6 +249,30 @@ def plot_gcn_thesis():
         speedup_log.write(f"{pass_name} max: {max(speedups)}\n")
         print(f"ALL DATASETS {pass_name} min: {min(speedups)}")
         speedup_log.write(f"{pass_name} min: {min(speedups)}\n")
+
+    dataset_to_size = {
+        'Cora': 2708,
+        'Citeseer': 3327,
+        'Pubmed': 19717,
+        'Flickr': 89250,
+        'Reddit': 232965,
+        'OGB Arxiv': 169343,
+    }
+    dataset_to_num_edges = {
+        'Cora': 5278,
+        'Citeseer': 4732,
+        'Pubmed': 44338,
+        'Flickr': 899756,
+        'Reddit': 114615892,
+        'OGB Arxiv': 1166243,
+    }
+    for pass_name, speedups in [('fwd', per_dataset_format_speedups_fwd), ('bwd', per_dataset_format_speedups_bwd)]:
+        df = pd.DataFrame(speedups)
+        df.rename(columns=dataset_to_num_edges, inplace=True)
+        df.plot()
+        plt.title(f"GCN {pass_name} speedup per dataset")
+        plt.show()
+
 
 
 
@@ -252,32 +285,50 @@ def plot_gcn_thesis():
 
 
 def plot_gat_bwd():
-    drop_names = ['torch_csr', 'torch_edge_list']
-    arxiv_df, arxiv_bwd_df = read_many_dfs(
-        filenames=[
-            # '18.05.14.46-pyg-gat-ogbn-arxiv-198393.csv',
-            '06.06.16.48-pyg-gat-ogbn-arxiv-203173.csv',
-            # "06.07.15.21-gat-ogbn-arxiv-206508.csv",
-            '15.07.15.54-gat-ogbn-arxiv-214176.csv',
+    drop_names = ['torch_edge_list']
+    sizes = [8, 16, 32, 64, 128]
+
+    data = {
+        "OGB Arxiv": [
+            '27.07.12.18-pyg-gat-ogbn-arxiv-224204.csv',
+            '27.07.12.45-pyg-gat-ogbn-arxiv-224205.csv',
+            '27.07.12.18-pyg-gat-ogbn-arxiv-224204.csv',
+            '27.07.14.32-gat-ogbn-arxiv-224283.csv',
+
         ],
-        backward=True
-    )
-    plot_backward(df=arxiv_df, bwd_df=arxiv_bwd_df, tag='gat-ogbn-arxiv',
-                  plot_title="GAT, OGB Arxiv", filter_y=[8, 16, 32, 64, 128],
-                  drop_names=drop_names)
-    cora_df, cora_bwd_df = read_many_dfs(
-        filenames=[
-            # '18.05.14.43-pyg-gat-cora-198393.csv',
-            #        '18.05.14.59-pyg-gat-cora-198400.csv',
-            '06.06.16.41-pyg-gat-cora-203173.csv',
-            # "06.07.15.09-gat-cora-206508.csv",
-            '15.07.15.30-gat-cora-214176.csv'
+        "Cora": [
+            '27.07.12.23-pyg-gat-cora-224204.csv',
+            '27.07.12.52-pyg-gat-cora-224205.csv',
+            '27.07.14.33-gat-cora-224284.csv',
         ],
-        backward=True
-    )
-    plot_backward(df=cora_df, bwd_df=cora_bwd_df, tag='gat-cora',
-                  plot_title="GAT, Cora", filter_y=[8, 16, 32, 64, 128],
-                  drop_names=drop_names)
+        "Citeseer": [
+            '27.07.13.00-pyg-gat-citeseer-224205.csv',
+            '27.07.14.57-gat-citeseer-224284.csv',
+        ],
+        "Pubmed": [
+            '27.07.13.45-pyg-gat-pubmed-224242.csv',
+            '27.07.13.41-pyg-gat-pubmed-224239.csv',
+            '27.07.12.26-pyg-gat-pubmed-224204.csv',
+            '27.07.12.55-pyg-gat-pubmed-224205.csv',
+        ],
+        "Flickr": [
+            '27.07.13.46-pyg-gat-flickr-224242.csv',
+            '27.07.13.04-pyg-gat-flickr-224205.csv',
+            '27.07.12.33-pyg-gat-flickr-224204.csv',
+            '27.07.14.33-gat-flickr-224285.csv',
+        ],
+        "Reddit": [
+            '27.07.13.10-pyg-gat-reddit-224205.csv',
+
+        ]
+    }
+
+    for name, datalist in data.items():
+        if len(datalist) > 0:
+            df, bwd_df = read_many_dfs(filenames=datalist)
+            plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
+                          plot_title=f"GAT, {name}", drop_names=drop_names, skip_timestamp=True)
+
 
 
 def plot_compare_cutoffs():

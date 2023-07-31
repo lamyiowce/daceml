@@ -20,6 +20,8 @@ DEFAULT_LABEL_MAP = {
     'dace_csr_coo': 'DaCe CSR/COO, CSR 50%',
     'dace_coo_cached': 'DaCe COO (cached)',
     'dace_coo_adapt_cached': 'DaCe COO (adapt, cached)',
+    'dace_coo_stable_cached:coo_cached': 'DaCe COO (cached)',
+    'dace_coo_stable:coo': 'DaCe COO',
     'dace_csc_cached': 'DaCe CSC (cached)',
     'dace_csc_adapt_cached': 'DaCe CSC (adapt, cached)',
 }
@@ -93,7 +95,11 @@ def get_colors(names: pd.Series):
 
 
 def prep_df(full_df, column):
-    full_df = full_df.drop_duplicates(subset=['Size', 'Model', 'Name', 'Num Features', 'Num Layers'])
+    if 'Num Layers' in full_df.columns:
+        dupl_cols = ['Size', 'Model', 'Name', 'Num Features', 'Num Layers']
+    else:
+        dupl_cols = ['Size', 'Model', 'Name']
+    full_df = full_df.drop_duplicates(subset=dupl_cols)
     df = full_df.pivot(index=column, columns='Name', values='Median')
     std_df = full_df.pivot(index=column, columns='Name', values='Stdev')
     sorted_cols = sorted(df.columns,
@@ -183,7 +189,7 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     if legend_outside:
         plt.legend(labels, loc='center left', bbox_to_anchor=(1, 0.5))
     else:
-        plt.legend(labels, loc='upper left' if 'gcn' in name.lower() else 'lower right')
+        plt.legend(labels, loc='upper left')
 
     plt.tight_layout()
     # put today's date in the filename
@@ -197,4 +203,5 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     plt.savefig(path, bbox_inches='tight')
 
     plt.title(name.upper())
+    plt.tight_layout()
     plt.show()
