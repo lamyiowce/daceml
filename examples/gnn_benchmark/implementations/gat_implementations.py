@@ -470,11 +470,6 @@ class GATConvCOO(GATConvBase):
                     # # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
                     e[i] = e_tmp
-
-                    # # TODO: This is a workaround. With no schedule type, the results are incorrect
-                    #  on CPU with autoopt.
-                    # for i in dace.map[0:num_entries]@dace.dtypes.ScheduleType.Sequential:
-                    # col = columns[i]
                     softmax_max[col] = max(e[i], softmax_max[col])
 
                 for j in dace.map[0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
