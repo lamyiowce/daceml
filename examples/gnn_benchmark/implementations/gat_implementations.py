@@ -705,6 +705,7 @@ class GATConvCOOCached(GATConvBase):
                     row = rows[i]
                     col = columns[i]
                     e_tmp = alpha_src[h, row] + alpha_dst[h, col]
+                    is_pos_C_vals[h, i] = e_tmp > 0
                     # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
                     e[h, i] = e_tmp

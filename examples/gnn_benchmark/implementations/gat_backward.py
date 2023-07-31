@@ -124,17 +124,12 @@ class GATConvBackwardCOO(BackwardImplementation):
                     dr[row] += dC_val
                     dl[col] += dC_val
 
-                out_reshaped_dH_prime[:] = np.zeros((N, F_out), dtype=val_dtype)
+                for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
+                    out_reshaped_dH_prime[i, k] = dl[i] * att_dst[0, 0, k] + dr[i] * att_src[0, 0, k]
 
                 coomm(A_rows=rows, A_cols=columns, A_vals=e, B=output_grad, C=out_reshaped_dH_prime,
                       beta=1.0,
                       transA=False)
-
-                for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
-                    out_reshaped_dH_prime[i, k] += dl[i] * att_dst[0, 0, k]
-
-                for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
-                    out_reshaped_dH_prime[i, k] += dr[i] * att_src[0, 0, k]
 
                 lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime,
                                                      node_features)  # F_out x F_in
@@ -253,28 +248,10 @@ class GATConvBackwardCOO(BackwardImplementation):
                 lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime,
                                                      node_features)
 
-                # att_src_grad[:] = 0
-                # att_dst_grad[:] = 0
-                # for h, k, n in dace.map[0:heads, 0:F_out, 0:N]:
-                #     att_dst_grad[0, h, k] += dl[n, h] * features[n, h, k]
-                #     att_src_grad[0, h, k] += dr[n, h] * features[n, h, k]
-
                 for h in dace.map[0:heads]:
                     att_src_grad[0, h, :] = dr[h] @ features_perm[h]  # N times N x F_out = F_out
                     # att_src_grad[0, h, :] = np.einsum('nf,n->f', features_perm[h], dr[h]) # h x n x f_out times h x n = h x f_out
-
                     att_dst_grad[0, h, :] = dl[h] @ features_perm[h]
-                # att_dst_grad[:] = np.einsum('nhf,nh->hf', features, dl)  # F_out
-
-                # for h, k in dace.map[0:heads, 0:F_out]:
-                #     att_dst_grad[0, h, k] = 0
-                #     for n in dace.map[0:N]:
-                #         att_dst_grad[0, h, k] += dl[n, h] * features[n, h, k]
-                #
-                # for h, k in dace.map[0:heads, 0:F_out]:
-                #     att_src_grad[0, h, k] = 0
-                #     for n in dace.map[0:N]:
-                #         att_src_grad[0, h, k] += dr[n, h] * features[n, h, k]
                 bias_grad[:] = np.reshape(np.sum(output_grad, axis=0), (heads * F_out,))
 
         if compute_grad_for_node_features:
@@ -287,7 +264,8 @@ class GATConvBackwardCOO(BackwardImplementation):
                                    att_src, att_dst, att_src_grad, att_dst_grad,
                                    lin_srcDOTweight_grad, bias_grad, output_grad,
                                    dH_prime_reshaped)
-                node_features_grad[:] = dH_prime_reshaped @ lin_srcDOTweight  # N x F_in
+                dace.libraries.blas.gemm(A=dH_prime_reshaped, B=lin_srcDOTweight, C=node_features_grad, beta=0.0,
+                                         trans_b=False, alpha=1.0)
         else:
             def backward_fn(node_features, rows, columns, lin_srcDOTweight,
                             att_src, att_dst, att_src_grad, att_dst_grad,
@@ -398,6 +376,7 @@ class GATConvBackwardCOOCached(BackwardImplementation):
 
                 for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
                     out_reshaped_dH_prime[i, k] = dl[i] * att_dst[0, 0, k] + dr[i] * att_src[0, 0, k]
+
                 coomm(A_rows=rows, A_cols=columns, A_vals=e, B=output_grad, C=out_reshaped_dH_prime,
                       beta=1.0,
                       transA=False)
@@ -478,7 +457,8 @@ class GATConvBackwardCOOCached(BackwardImplementation):
                                    att_src, att_dst, att_src_grad, att_dst_grad,
                                    lin_srcDOTweight_grad, bias_grad, output_grad,
                                    dH_prime_reshaped, e, is_pos_C_vals, features_saved)
-                node_features_grad[:] = dH_prime_reshaped @ lin_srcDOTweight  # N x F_in
+                dace.libraries.blas.gemm(A=dH_prime_reshaped, B=lin_srcDOTweight, C=node_features_grad, beta=0.0,
+                                         trans_b=False, alpha=1.0)
         else:
             def backward_fn(node_features, rows, columns, lin_srcDOTweight,
                             att_src, att_dst, att_src_grad, att_dst_grad,
@@ -703,6 +683,7 @@ class GATConvBackwardCOOCached(BackwardImplementation):
 
         return result_node, result
 
+
 @autoregister_params(op="torch_geometric.nn.conv.gat_conv.GATConv",
                      name="csr_cached")
 class GATConvBackwardCSRCached(BackwardImplementation):
@@ -830,11 +811,11 @@ class GATConvBackwardCSRCached(BackwardImplementation):
 
                 for h in dace.map[0:heads] @ dace.dtypes.ScheduleType.Sequential:
                     for row in dace.map[0:N] @ dace.dtypes.ScheduleType.Sequential:
-                        for inner_i in dace.map[rowptrs[row]:rowptrs[row + 1]]  @ dace.dtypes.ScheduleType.Sequential:
+                        for inner_i in dace.map[rowptrs[row]:rowptrs[row + 1]] @ dace.dtypes.ScheduleType.Sequential:
                             for k in dace.map[0:F_out]:
-                              col = columns[inner_i]
-                              d_alpha_vals[h, inner_i] += output_grad_heads[col, h, k] * features_saved[
-                                  h, row, k]
+                                col = columns[inner_i]
+                                d_alpha_vals[h, inner_i] += output_grad_heads[col, h, k] * features_saved[
+                                    h, row, k]
 
                 dot_prods = np.zeros((N, heads), dtype=val_dtype)
                 for h, i in dace.map[0:heads, 0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
