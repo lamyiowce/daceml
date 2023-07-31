@@ -146,8 +146,8 @@ class GATConvSemesterThesis(GATConvBase):
 
 
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
-                   name="csr_stable")
-class GATConvCSRStable(GATConvBase):
+                   name="csr")
+class GATConvCSR(GATConvBase):
     graph_format = sparse.CsrGraph
     input_spec = {
         "node_features": SpecialInputType.VAL_DTYPE,
@@ -244,8 +244,8 @@ class GATConvCSRStable(GATConvBase):
 
 
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
-                   name="csr_stable_cached")
-class GATConvCSRStableCached(GATConvBase):
+                   name="csr_cached")
+class GATConvCSRCached(GATConvBase):
     graph_format = sparse.CsrGraph
     input_spec = {
         "node_features": SpecialInputType.VAL_DTYPE,
@@ -425,8 +425,8 @@ class GATConvCSRStableCached(GATConvBase):
 
 
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
-                   name="coo_stable")
-class GATConvCOOStable(GATConvBase):
+                   name="coo")
+class GATConvCOO(GATConvBase):
     graph_format = sparse.CooGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
@@ -558,8 +558,8 @@ class GATConvCOOStable(GATConvBase):
 
 
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
-                   name="coo_stable_cached")
-class GATConvCOOStableCached(GATConvBase):
+                   name="coo_cached")
+class GATConvCOOCached(GATConvBase):
     graph_format = sparse.CooGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
@@ -741,8 +741,8 @@ class GATConvCOOStableCached(GATConvBase):
 
 
 @op_implementation(op="torch_geometric.nn.conv.gat_conv.GATConv",
-                   name="coo_stable_cached_altspmm")
-class GATConvCOOStableCachedAltSpmm(GATConvBase):
+                   name="coo_cached_altspmm")
+class GATConvCOOCachedAltSpmm(GATConvBase):
     graph_format = sparse.CooGraph
     input_spec: Dict[str, dace.dtypes.typeclass] = {
         'node_features': common.SpecialInputType.VAL_DTYPE,
@@ -982,7 +982,7 @@ class GATConvCSC(GATConvBase):
                     # Calculate attention weights.
                     e = np.empty((num_entries,), dtype=dtype)
                     softmax_sum = np.zeros((N,), dtype=dtype)
-
+                    raise NotImplementedError("THIS IS NOT STABLE!")
                     for l in dace.map[0:N]:
                         for v in dace.map[colptrs[l]:colptrs[l + 1]]:
                             # Calculating e_l->colv
