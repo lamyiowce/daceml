@@ -73,6 +73,7 @@ class GATConvBackwardCOO(BackwardImplementation):
                 C_vals = np.empty((num_entries,), dtype=dace.bool)
                 e = np.empty((num_entries,), dtype=val_dtype)
                 softmax_sum = np.zeros((N,), dtype=val_dtype)
+                softmax_max = np.ones((N,), dtype=val_dtype) * -np.inf
 
                 for i in dace.map[0:num_entries]:
                     row = rows[i]
@@ -81,14 +82,13 @@ class GATConvBackwardCOO(BackwardImplementation):
                     C_vals[i] = e_tmp > 0
                     # # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
-                    e_tmp = np.exp(e_tmp)
                     e[i] = e_tmp
+                    softmax_max[col] = max(e[i], softmax_max[col])
 
-                    # # TODO: This is a workaround. With no schedule type, the results are incorrect
-                    #  on CPU with autoopt.
-                    # for i in dace.map[0:num_entries]@dace.dtypes.ScheduleType.Sequential:
-                    # col = columns[i]
-                    softmax_sum[col] += e[i]
+                for j in dace.map[0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                    col = columns[j]
+                    e[j] = np.exp(e[j] - softmax_max[col])
+                    softmax_sum[col] += e[j]
 
                 # Softmax normalization.
                 for j in dace.map[0:num_entries]:
@@ -162,18 +162,23 @@ class GATConvBackwardCOO(BackwardImplementation):
                 # Calculate attention weights.
                 e = np.empty((heads, num_entries), dtype=val_dtype)
                 softmax_sum = np.zeros((N, heads), dtype=val_dtype)
-                C_vals = np.empty((heads, num_entries), dtype=dace.bool)
+                is_pos_C_vals = np.empty((heads, num_entries), dtype=dace.bool)
+                softmax_max = np.ones((N, heads), dtype=val_dtype) * -np.inf
 
                 for h, i in dace.map[0:heads, 0:num_entries]:
                     row = rows[i]
                     col = columns[i]
                     e_tmp = alpha_src[h, row] + alpha_dst[h, col]
-                    C_vals[h, i] = e_tmp > 0
+                    is_pos_C_vals[h, i] = e_tmp > 0
                     # # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
-                    e_tmp = np.exp(e_tmp)
                     e[h, i] = e_tmp
-                    softmax_sum[col, h] += e[h, i]
+                    softmax_max[col, h] = max(e[h, i], softmax_max[col, h])
+
+                for h, j in dace.map[0:heads, 0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                    col = columns[j]
+                    e[h, j] = np.exp(e[h, j] - softmax_max[col, h])
+                    softmax_sum[col, h] += e[h, j]
 
                 # Softmax normalization.
                 for h, j in dace.map[0:heads, 0:num_entries]:
@@ -221,9 +226,9 @@ class GATConvBackwardCOO(BackwardImplementation):
                     dE_val[:] = (d_alpha_vals[h, i] - dot_prods[col, h]) * e[h, i]
 
                     dC_val = dace.define_local_scalar(val_dtype)
-                    # dC_val[:] = dE_val * (C_vals[h, i] > 0) + dE_val * (
-                    #         C_vals[h, i] <= 0) * neg_slope
-                    dC_val[:] = dE_val * (neg_slope + one_min_neg_slope * C_vals[h, i])
+                    # dC_val[:] = dE_val * (is_pos_C_vals[h, i] > 0) + dE_val * (
+                    #         is_pos_C_vals[h, i] <= 0) * neg_slope
+                    dC_val[:] = dE_val * (neg_slope + one_min_neg_slope * is_pos_C_vals[h, i])
                     dr[h, row] += dC_val
                     dl[h, col] += dC_val
 
