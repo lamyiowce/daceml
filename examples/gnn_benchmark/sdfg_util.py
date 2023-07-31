@@ -246,9 +246,11 @@ def flatten_blocks_for_1d_maps(sdfg: dace.SDFG, verbose=False):
 def adjust_block_size(default_block_size, node, total_size):
     new_block_sizes = []
     remaining_size = total_size
+    map_sizes = []
     for map_range, block_dim in zip(reversed(node.map.range), default_block_size):
         start, end, step = map_range
         range_len = (end - start + 1) // step
+        map_sizes.append(range_len)
         if block_dim > range_len:
             new_block_sizes.append(max(1, range_len))
             remaining_size = max(1, remaining_size // range_len)
@@ -256,8 +258,13 @@ def adjust_block_size(default_block_size, node, total_size):
             new_block_sizes.append(-1)
     new_block_sizes = new_block_sizes + [-1] * 3
     new_block_sizes = new_block_sizes[:3]
-
+    print(node)
+    print("Map range, Block sizes:", map_sizes, new_block_sizes)
     num_free = new_block_sizes.count(-1)
+
+    if len(map_sizes) == 1:
+        # If the map has only one dim, set it to remaining size
+        new_block_sizes = [total_size, 1, 1]
     if num_free == 1:
         # Block sizes of form [64, 8, -1] or [-1, 8, 8] or [40, -1, 8]
         new_block_sizes[new_block_sizes.index(-1)] = remaining_size
@@ -268,7 +275,8 @@ def adjust_block_size(default_block_size, node, total_size):
         new_block_sizes[new_block_sizes.index(-1)] = 1
     elif num_free == 3:
         # [-1, -1, -1], just use the default (array is big enough).
-        return default_block_size
+        new_block_sizes = default_block_size
+    print("New block sizes:", new_block_sizes)
     return new_block_sizes
 
 
