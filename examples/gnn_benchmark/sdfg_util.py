@@ -256,7 +256,7 @@ def adjust_block_size(default_block_size, node, total_size):
             remaining_size = max(1, remaining_size // range_len)
         else:
             new_block_sizes.append(-1)
-    new_block_sizes = new_block_sizes + [-1] * 3
+    new_block_sizes = new_block_sizes + [1] * 3
     new_block_sizes = new_block_sizes[:3]
     print(node)
     print("Map range, Block sizes:", map_sizes, new_block_sizes)
