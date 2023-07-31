@@ -20,20 +20,47 @@ export LIBRARY_PATH=/users/jbazinsk/miniconda3/envs/torch2/lib/:$LIBRARY_PATH
 do_test=
 
 model=gat
-datasets="cora ogbn-arxiv"
-modes="edge_list edge_list_compiled dgnn dgnn_compiled csr"
-hidden_sizes="8 16 32 64 128 256"
+datasets="pubmed flickr"
+modes="dgnn_compiled dgnn"
+hidden_sizes="8 128"
+input_sizes="" # 128 is computed anyway.
+
 
 echo "Running model " $model
 for dataset in $datasets; do
   echo "Running dataset " $dataset
+
+  # No input grad.
   outfile=./$(date +%d.%m.%H.%M)-pyg-$model-$dataset-$SLURM_JOB_ID.csv
+  common_args="--mode benchmark --data $dataset --outfile $outfile --model $model --backward"
   for hidden in $hidden_sizes; do
     echo "Hidden " $hidden
     for m in $modes; do
-      $do_test python torch_v2.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --backward --torch $m
+      $do_test python torch_v2.py $common_args --hidden $hidden --backward --torch $m
     done
   done
+#  for input_size in $input_sizes; do
+#    echo "Input size " $input_size
+#    for m in $modes; do
+#      $do_test python torch_v2.py $common_args --hidden 128 --force-num-features $input_size --torch $m
+#    done
+#  done
+
+  # With input grad.
+#  outfile=./$(date +%d.%m.%H.%M)-pyg-$model-$dataset-input-grad-$SLURM_JOB_ID.csv
+#  common_args="--mode benchmark --data $dataset --outfile $outfile --model $model --backward --input-grad"
+#  for hidden in $hidden_sizes; do
+#    echo "Hidden " $hidden
+#    for m in $modes; do
+#      $do_test python torch_v2.py $common_args --hidden $hidden --backward --torch $m
+#    done
+#  done
+#  for input_size in $input_sizes; do
+#    echo "Input size " $input_size
+#    for m in $modes; do
+#      $do_test python torch_v2.py $common_args --hidden 128 --force-num-features $input_size --torch $m
+#    done
+#  done
 done
 
 echo "Done :)"
