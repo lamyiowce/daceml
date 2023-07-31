@@ -1437,20 +1437,37 @@ class GATConvCOOStableCachedAltSpmm(GATConvBase):
                     colj = columns[j]
                     e[j, h] = e[j, h] / softmax_sum[colj, h]
 
-                output_perm = np.zeros((heads, N, num_out_features),
-                                       dtype=dtype)  # H x N x F'
-
-
-                for i, h, k in dace.map[0:num_entries, 0:heads, 0:num_out_features] @ dace.dtypes.ScheduleType.Sequential:
-                    col = columns[i]
-                    row = rows[i]
-                    mult = e[i, h] * features_saved[h, row, k]
-                    output_perm[h, col, k] += mult
-
+                output_reshaped = np.reshape(output, (N, heads, num_out_features))
                 for j, i, k in dace.map[0:heads, 0:N, 0:num_out_features]:
-                    output[i, j * num_out_features + k] = (
-                            output_perm[j, i, k]
-                            + bias[j * num_out_features + k])
+                    output_reshaped[i, j, k] = bias[j * num_out_features + k]
+
+                max_grid_size = 65535
+                num_entries_round = 0
+                if num_entries > max_grid_size:
+                    num_entries_round = max_grid_size * (num_entries // max_grid_size)
+                    for seq in range(0, num_entries_round, max_grid_size):
+                        # for inner_i, h, k in dace.map[seq:seq+max_grid_size, 0:heads, 0:F_out]:
+                        for inner_i, h, k in dace.map[0:num_entries, 0:heads, 0:num_out_features]:
+                            col = columns[inner_i]
+                            row = rows[inner_i]
+                            mult = e[inner_i, h] * features[row, h, k]
+                            output_reshaped[col, h, k] += mult
+
+                for inner_i, h, k in dace.map[num_entries_round:num_entries, 0:heads, 0:num_out_features]:
+                    col = columns[inner_i]
+                    row = rows[inner_i]
+                    mult = e[inner_i, h] * features[row, h, k]
+                    output_reshaped[col, h, k] += mult
+
+                # output_perm = np.zeros((heads, N, num_out_features),
+                #                        dtype=dtype)  # H x N x F'
+
+                # for i, h, k in dace.map[0:num_entries, 0:heads, 0:num_out_features] @ dace.dtypes.ScheduleType.Sequential:
+                #     col = columns[i]
+                #     row = rows[i]
+                #     mult = e[i, h] * features[row, h, k]
+                #     output_reshaped[col, h, k] += mult
+
 
         if do_bias:
             return gat_op
