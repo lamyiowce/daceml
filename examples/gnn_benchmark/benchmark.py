@@ -23,6 +23,7 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
                  hidden_size: int,
                  in_features_size: int,
                  num_layers: int,
+                 measure_overhead: bool = False,
                  outfile: Optional[pathlib.Path] = None,
                  small: bool = False):
     from examples.gnn_benchmark.performance_measurement import \
@@ -41,20 +42,20 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
 
     ### Forward pass.
 
-    def run_with_inputs(model, inputs):
+    def forward_fn(model, inputs):
         return model(*inputs)
 
     for torch_name, torch_model, torch_inputs in torch_experiments:
         torch_model.eval()
         funcs.append(
-            functools.partial(run_with_inputs, torch_model, torch_inputs))
+            functools.partial(forward_fn, torch_model, torch_inputs))
         func_names.append(torch_name)
 
     for impl_spec, experiment_info in experiment_infos.items():
         model = experiment_info.model_eval
         inputs = experiment_info.data.to_input_list()
 
-        funcs.append(functools.partial(run_with_inputs, model, inputs))
+        funcs.append(functools.partial(forward_fn, model, inputs))
         func_names.append(dace_tag + '_' + impl_spec)
 
     print(f"---> Benchmarking the forward pass...")
@@ -84,17 +85,35 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
             loss = loss_fn(pred, targets)
             loss.backward()
 
+        forward_funcs = []
         backward_funcs = []
 
         for torch_name, torch_model, torch_inputs in torch_experiments:
             torch_model.train()
             backward_funcs.append(
                 functools.partial(backward_fn, torch_model, torch_inputs))
+            forward_funcs.append(
+                functools.partial(forward_fn, torch_model, torch_inputs))
 
         for experiment_info in experiment_infos.values():
             model = experiment_info.model_train
             inputs = experiment_info.data.to_input_list()
             backward_funcs.append(functools.partial(backward_fn, model, inputs))
+            forward_funcs.append(functools.partial(forward_fn, model, inputs))
+
+        if measure_overhead:
+            print(f"---> Benchmarking the TRAINING overhead...")
+            times = measure_performance(forward_funcs,
+                                        func_names=func_names,
+                                        warmups=5 if not small else 2,
+                                        num_iters=5 if not small else 2,
+                                        timing_iters=20 if not small else 3)
+            print_time_statistics(times, func_names)
+            print()
+            if outfile is not None:
+                path = outfile.with_name(outfile.stem + "-fwd-overhead.csv")
+                write_stats_to_file(func_names, times, model_name, hidden_size, in_features_size,
+                                    num_layers, path)
 
         print(f"---> Benchmarking the BACKWARD pass...")
         times = measure_performance(backward_funcs,

@@ -77,6 +77,7 @@ def main():
     parser.add_argument('--idx-dtype', type=str, default='int32')
     parser.add_argument('--val-dtype', type=str, default='float32')
     parser.add_argument('--no-gen-code', action='store_true')
+    parser.add_argument('--measure-overhead', action='store_true')
     parser.add_argument('--torch', choices=['both', 'csr', 'edge_list', 'none'], default='both')
     parser.add_argument('--tag', type=str, default=None)
     args = parser.parse_args()
@@ -194,7 +195,8 @@ def main():
                      small=args.mode == 'benchmark_small',
                      torch_experiments=torch_experiments,
                      num_layers=args.num_layers,
-                     in_features_size=num_node_features
+                     in_features_size=num_node_features,
+                     measure_overhead=args.measure_overhead,
                      )
     elif args.mode == 'torch_profile':
         torch_profile(dace_models,
