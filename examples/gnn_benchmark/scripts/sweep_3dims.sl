@@ -24,14 +24,17 @@ export DACE_default_build_folder=./.dacecache-$SLURM_JOB_ID
 export DACE_compiler_cuda_default_block_size=64,8,1
 export DACE_compiler_cuda_max_concurrent_streams=-1
 model=gcn_single_layer
-formats="coo_adapt csc_adapt coo_adapt_cached csc_adapt_cached"
+formats="csc csc_alt csc_adapt csc_cached csc_adapt_cached"
 #formats="csr_coo_adapt-0.01 csr_coo_adapt-0.10 csr_coo_adapt-0.25 csr_coo_adapt-0.50 csr_coo_adapt-0.75 csr_coo_adapt-0.9 csr_coo_adapt-0.99 csr_coo_adapt-0.999"
 #formats="csc_coo_adapt-0.01 csc_coo_adapt-0.10 csc_coo_adapt-0.25 csc_coo_adapt-0.50 csc_coo_adapt-0.75 csc_coo_adapt-0.9 csc_coo_adapt-0.99 csc_coo_adapt-0.999"
 backward=--backward
 datasets="ogbn-arxiv"
+input_grad=
 
-input_sizes="8 16 32 64 128 256 512 1024"
-hidden_sizes="8 16 32 64 128 256 512 1024"
+input_sizes="1024"
+#input_sizes=""
+#hidden_sizes="64 128 256"
+hidden_sizes=""
 layers="2 3 4 5"
 echo "Running model " $model
 for dataset in $datasets; do
@@ -41,23 +44,23 @@ for dataset in $datasets; do
     echo "Hidden " $hidden
     rm -rf $DACE_default_build_folder
     for format in $formats; do
-      $do_test python main.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl $format --torch none $backward
+      $do_test python main.py --mode benchmark --data $dataset --hidden $hidden --outfile $outfile --model $model --impl $format --torch none $backward $input_grad
     done
   done
   for input_size in $input_sizes; do
     echo "Input size " $input_size
     rm -rf $DACE_default_build_folder
     for format in $formats; do
-      $do_test python main.py --force-num-features $input_size --mode benchmark --data $dataset --hidden 256 --outfile $outfile --model $model --impl $format --torch none $backward
+      $do_test python main.py --force-num-features $input_size --mode benchmark --data $dataset --hidden 128 --outfile $outfile --model $model --impl $format --torch none $backward $input_grad
     done
   done
-  for num_layers in $layers; do
-    echo "Layers " $num_layers
-    rm -rf $DACE_default_build_folder
-    for format in $formats; do
-      $do_test python main.py --num-layers $num_layers --mode benchmark --data $dataset --hidden 256 --outfile $outfile --model $model --impl $format --torch none $backward
-    done
-  done
+#  for num_layers in $layers; do
+#    echo "Layers " $num_layers
+#    rm -rf $DACE_default_build_folder
+#    for format in $formats; do
+#      $do_test python main.py --num-layers $num_layers --mode benchmark --data $dataset --hidden 256 --outfile $outfile --model $model --impl $format --torch none $backward
+#    done
+#  done
 done
 
 echo "Done :)"
