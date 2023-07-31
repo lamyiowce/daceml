@@ -534,7 +534,7 @@ class GATConvBackwardCOOCachedFeatOnly(BackwardImplementation):
             """
 
             if heads == 1:
-                ## RECOMPUTE attentino weights.
+                ## RECOMPUTE attention weights.
                 alpha_src = features_saved @ att_src[0, 0]
                 alpha_dst = features_saved @ att_dst[0, 0]
 
@@ -693,29 +693,256 @@ class GATConvBackwardCOOCachedFeatOnly(BackwardImplementation):
             def backward_fn(node_features, rows, columns, lin_srcDOTweight,
                             att_src, att_dst, att_src_grad, att_dst_grad,
                             lin_srcDOTweight_grad, bias_grad, output_grad,
-                            node_features_grad, e, is_pos_C_vals, features_saved):
+                            node_features_grad, features_saved):
                 dH_prime_reshaped = np.empty((N, heads * F_out), dtype=val_dtype)
                 basic_gat_backward(node_features, rows, columns, lin_srcDOTweight,
                                    att_src, att_dst, att_src_grad, att_dst_grad,
                                    lin_srcDOTweight_grad, bias_grad, output_grad,
-                                   dH_prime_reshaped, e, is_pos_C_vals, features_saved)
+                                   dH_prime_reshaped, features_saved)
                 dace.libraries.blas.gemm(A=dH_prime_reshaped, B=lin_srcDOTweight, C=node_features_grad, beta=0.0,
                                          trans_b=False, alpha=1.0)
         else:
             def backward_fn(node_features, rows, columns, lin_srcDOTweight,
                             att_src, att_dst, att_src_grad, att_dst_grad,
-                            lin_srcDOTweight_grad, bias_grad, output_grad, e, is_pos_C_vals,
+                            lin_srcDOTweight_grad, bias_grad, output_grad,
                             features_saved):
                 dH_prime_reshaped = np.empty((N, heads * F_out), dtype=val_dtype)
                 basic_gat_backward(node_features, rows, columns, lin_srcDOTweight,
                                    att_src, att_dst, att_src_grad, att_dst_grad,
                                    lin_srcDOTweight_grad, bias_grad, output_grad,
-                                   dH_prime_reshaped, e, is_pos_C_vals, features_saved)
+                                   dH_prime_reshaped, features_saved)
 
         result_node, result = autodiff_utils.backward_program_for_node(
             backward_fn, context, forward_node)
 
         connect_output_from_forward(forward_node, result_node, context, 'features_saved')
+
+        return result_node, result
+
+
+@autoregister_params(op="torch_geometric.nn.conv.gat_conv.GATConv",
+                     name="coo_cached_feat_and_alpha")
+class GATConvBackwardCOOCachedFeatAndAlpha(BackwardImplementation):
+    @staticmethod
+    def backward(
+            forward_node: nd.Node, context: BackwardContext,
+            given_gradients: List[Optional[str]],
+            required_gradients: List[Optional[str]]
+    ) -> Tuple[Union[nd.Node, dace.SDFG], BackwardResult]:
+        output_shape = autodiff_utils.forward_out_desc_with_name(
+            forward_node, context, "output").shape
+
+        N, _ = output_shape
+        node_features_desc = autodiff_utils.forward_in_desc_with_name(
+            forward_node, context, "node_features")
+        F_in = node_features_desc.shape[1]
+
+        row_shape = autodiff_utils.forward_in_desc_with_name(
+            forward_node, context, "rows").shape
+        num_entries = row_shape[0]
+
+        negative_slope = forward_node.module.negative_slope
+        one_min_neg_slope = 1 - negative_slope
+        heads = forward_node.module.heads
+        F_out = forward_node.module.out_channels
+
+        val_dtype = node_features_desc.dtype
+        compute_grad_for_node_features = 'node_features' in required_gradients
+
+        @dace.program
+        def basic_gat_backward(node_features, rows, columns, lin_srcDOTweight,
+                               att_src, att_dst, att_src_grad, att_dst_grad,
+                               lin_srcDOTweight_grad, bias_grad, output_grad,
+                               out_reshaped_dH_prime, features_saved, alpha_src, alpha_dst):
+            """
+            node_features: input features, N x M
+            rows: rows, K
+            columns: col, K
+            edge_vals: values, K
+            linDOTweight: F x M
+            bias: F
+            output: N x F
+
+            node_features_grad: N x M
+            linDOTweight_grad: F x M
+            output_grad: N x F
+            """
+
+            if heads == 1:
+                # Calculate attention weights.
+                is_pos_C_vals = np.empty((num_entries,), dtype=dace.bool)
+                e = np.empty((num_entries,), dtype=val_dtype)
+                softmax_sum = np.zeros((N,), dtype=val_dtype)
+
+                for i in dace.map[0:num_entries]:
+                    row = rows[i]
+                    col = columns[i]
+                    e_tmp = alpha_src[row] + alpha_dst[col]
+                    is_pos_C_vals[i] = e_tmp > 0
+                    # # LeakyReLU
+                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                    e_tmp = np.exp(e_tmp)
+                    e[i] = e_tmp
+
+                    softmax_sum[col] += e[i]
+
+                # Softmax normalization.
+                for j in dace.map[0:num_entries]:
+                    colj = columns[j]
+                    e[j] = e[j] / softmax_sum[colj]
+
+                ### COMPUTE THE GRADIENTS ###
+                d_alpha_vals = np.zeros((num_entries,), dtype=val_dtype)
+
+                for k, i in dace.map[0:F_out, 0:num_entries]:
+                    col = columns[i]
+                    row = rows[i]
+                    d_alpha_vals[i] += output_grad[col, k] * features_saved[row, k]
+
+                dot_prods = np.zeros((N,), dtype=val_dtype)
+                for i in dace.map[0:num_entries]:
+                    col = columns[i]
+                    dot_prods[col] += e[i] * d_alpha_vals[i]
+
+                dl = np.zeros((N,), dtype=val_dtype)
+                dr = np.zeros((N,), dtype=val_dtype)
+                neg_slope = dace.define_local_scalar(val_dtype)
+                neg_slope[:] = negative_slope
+                for i in dace.map[0:num_entries]:
+                    col = columns[i]
+                    row = rows[i]
+                    dE_val = dace.define_local_scalar(val_dtype)
+                    dE_val[:] = (d_alpha_vals[i] - dot_prods[col]) * e[i]
+                    dC_val = dace.define_local_scalar(val_dtype)
+                    # dC_val[:] = dE_val * (C_vals[i] > 0) + dE_val * (
+                    #         C_vals[i] <= 0) * neg_slope
+                    dC_val[:] = dE_val * (neg_slope + one_min_neg_slope * is_pos_C_vals[i])
+                    dr[row] += dC_val
+                    dl[col] += dC_val
+
+                for i, k in dace.map[0:N, 0:F_out] @ dace.dtypes.ScheduleType.Sequential:
+                    out_reshaped_dH_prime[i, k] = dl[i] * att_dst[0, 0, k] + dr[i] * att_src[0, 0, k]
+
+                coomm(A_rows=rows, A_cols=columns, A_vals=e, B=output_grad, C=out_reshaped_dH_prime,
+                      beta=1.0,
+                      transA=False)
+
+                lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime,
+                                                     node_features)  # F_out x F_in
+                att_dst_grad[:] = dl @ features_saved  # F_out
+                att_src_grad[:] = dr @ features_saved  # F_out
+                bias_grad[:] = np.sum(output_grad, axis=0)
+            else:
+                # Calculate attention weights.
+                e = np.empty((heads, num_entries), dtype=val_dtype)
+                softmax_sum = np.zeros((N, heads), dtype=val_dtype)
+                is_pos_C_vals = np.empty((heads, num_entries), dtype=dace.bool)
+
+                for h, i in dace.map[0:heads, 0:num_entries]:
+                    row = rows[i]
+                    col = columns[i]
+                    e_tmp = alpha_src[h, row] + alpha_dst[h, col]
+                    is_pos_C_vals[h, i] = e_tmp > 0
+                    # # LeakyReLU
+                    e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
+                    e_tmp = np.exp(e_tmp)
+                    e[h, i] = e_tmp
+                    softmax_sum[col, h] += e[h, i]
+
+                # Softmax normalization.
+                for h, j in dace.map[0:heads, 0:num_entries]:
+                    colj = columns[j]
+                    e[h, j] = e[h, j] / softmax_sum[colj, h]
+
+                ### COMPUTE THE GRADIENTS ###
+                output_grad_heads = np.reshape(output_grad, (N, heads, F_out))
+
+                # SDDMM
+                d_alpha_vals = np.empty((heads, num_entries), dtype=val_dtype)
+
+                for h, i in dace.map[0:heads, 0:num_entries]:
+                    d_alpha_vals[h, i] = 0
+
+                for h, k, inner_i in dace.map[0:heads, 0:F_out, 0:num_entries]:
+                    col = columns[inner_i]
+                    row = rows[inner_i]
+                    # d_alpha_vals[h, inner_i] += output_grad_heads[col, h, k] * features[row, h, k]
+                    d_alpha_vals[h, inner_i] += output_grad_heads[col, h, k] * features_saved[h, row, k]
+
+                dot_prods = np.zeros((N, heads), dtype=val_dtype)
+                for h, i in dace.map[0:heads, 0:num_entries]:
+                    col = columns[i]
+                    dot_prods[col, h] += e[h, i] * d_alpha_vals[h, i]
+
+                dl = np.zeros((heads, N), dtype=val_dtype)
+                dr = np.zeros((heads, N), dtype=val_dtype)
+                neg_slope = dace.define_local_scalar(val_dtype)
+                neg_slope[:] = negative_slope
+                for h, i in dace.map[0:heads, 0:num_entries]:
+                    col = columns[i]
+                    row = rows[i]
+                    dE_val = dace.define_local_scalar(val_dtype)
+                    dE_val[:] = (d_alpha_vals[h, i] - dot_prods[col, h]) * e[h, i]
+                    dC_val = dace.define_local_scalar(val_dtype)
+                    dC_val[:] = dE_val * (neg_slope + one_min_neg_slope * is_pos_C_vals[h, i])
+                    dr[h, row] += dC_val
+                    dl[h, col] += dC_val
+
+                dH_prime_perm = np.zeros((heads, N, F_out), dtype=val_dtype)
+
+                output_grad_perm = np.transpose(output_grad_heads, (1, 0, 2))
+                for h in range(heads):
+                    coomm(A_rows=rows, A_cols=columns, A_vals=e[h], B=output_grad_perm[h],
+                          C=dH_prime_perm[h],
+                          beta=1.0, transA=False)
+
+                dH_prime = np.empty((N, heads, F_out), dtype=val_dtype)
+                for h, i, k in dace.map[0:heads, 0:N,
+                               0:F_out] @ dace.dtypes.ScheduleType.Sequential:
+                    dH_prime[i, h, k] = dH_prime_perm[h, i, k] + dl[h, i] * att_dst[0, h, k] + dr[
+                        h, i] * att_src[0, h, k]
+
+                out_reshaped_dH_prime[:] = np.reshape(dH_prime, (N, heads * F_out))
+                # This has to be np.einsum('nf,nm->fm', out_reshaped_dH_prime, node_features),
+                # not np.einsum('nm,nf->fm', node_features, out_reshaped_dH_prime), because
+                # the latter is bugged for f = m.
+                lin_srcDOTweight_grad[:] = np.einsum('nf,nm->fm', out_reshaped_dH_prime,
+                                                     node_features)
+
+                for h in dace.map[0:heads]:
+                    att_src_grad[0, h, :] = dr[h] @ features_saved[h]  # N times N x F_out = F_out
+                    att_dst_grad[0, h, :] = dl[h] @ features_saved[h]
+                bias_grad[:] = np.reshape(np.sum(output_grad, axis=0), (heads * F_out,))
+
+        if compute_grad_for_node_features:
+            def backward_fn(node_features, rows, columns, lin_srcDOTweight,
+                            att_src, att_dst, att_src_grad, att_dst_grad,
+                            lin_srcDOTweight_grad, bias_grad, output_grad,
+                            node_features_grad, features_saved, alpha_src, alpha_dst):
+                dH_prime_reshaped = np.empty((N, heads * F_out), dtype=val_dtype)
+                basic_gat_backward(node_features, rows, columns, lin_srcDOTweight,
+                                   att_src, att_dst, att_src_grad, att_dst_grad,
+                                   lin_srcDOTweight_grad, bias_grad, output_grad,
+                                   dH_prime_reshaped, features_saved, alpha_src, alpha_dst)
+                dace.libraries.blas.gemm(A=dH_prime_reshaped, B=lin_srcDOTweight, C=node_features_grad, beta=0.0,
+                                         trans_b=False, alpha=1.0)
+        else:
+            def backward_fn(node_features, rows, columns, lin_srcDOTweight,
+                            att_src, att_dst, att_src_grad, att_dst_grad,
+                            lin_srcDOTweight_grad, bias_grad, output_grad,
+                            features_saved, alpha_src, alpha_dst):
+                dH_prime_reshaped = np.empty((N, heads * F_out), dtype=val_dtype)
+                basic_gat_backward(node_features, rows, columns, lin_srcDOTweight,
+                                   att_src, att_dst, att_src_grad, att_dst_grad,
+                                   lin_srcDOTweight_grad, bias_grad, output_grad,
+                                   dH_prime_reshaped, features_saved, alpha_src, alpha_dst)
+
+        result_node, result = autodiff_utils.backward_program_for_node(
+            backward_fn, context, forward_node)
+
+        connect_output_from_forward(forward_node, result_node, context, 'features_saved')
+        connect_output_from_forward(forward_node, result_node, context, 'alpha_src')
+        connect_output_from_forward(forward_node, result_node, context, 'alpha_dst')
 
         return result_node, result
 
