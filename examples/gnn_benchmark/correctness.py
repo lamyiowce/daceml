@@ -151,6 +151,9 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
                     torch.cuda.nvtx.range_push(
                         name + ' backward correctness (pred)')
                     torch.cuda.synchronize()
+                if reference_input_features.requires_grad:
+                    args[0].grad = None
+
                 dace_pred = model(*args)
                 if USE_GPU:
                     torch.cuda.nvtx.range_pop()
