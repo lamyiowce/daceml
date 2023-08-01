@@ -37,6 +37,10 @@ DEFAULT_LABEL_MAP.update(
      DEFAULT_LABEL_MAP.items() if
      'torch' in key})
 
+DEFAULT_LABEL_MAP.update(
+    {name[5:]: val for name, val in DEFAULT_LABEL_MAP.items() if
+     name.startswith('dace_')})
+
 COLUMN_PRETTY_NAMES = {
     'Size': 'Hidden size',
     'Num Features': 'Input features size',
@@ -137,7 +141,7 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
                          yerr=bwd_std_df,
                          label='Backward',
                          width=bar_width,
-                         edgecolor=(1.0,1.0,1.0,0.4),
+                         edgecolor=(1.0, 1.0, 1.0, 0.4),
                          error_kw=dict(ecolor='gray', lw=1, capsize=1, capthick=1))
         df.plot(kind='bar',
                 ylabel='Runtime [ms]',
@@ -168,7 +172,6 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     default_label_map.update(label_map or {})
     labels = [default_label_map.get(name, name) for name in df.columns]
 
-
     # ax.legend(legend_handles[::-1], labels[::-1])
 
     plt.xticks(rotation=0)
@@ -183,7 +186,8 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
                 label_type = 'edge'
             # Set text size.
             # Make the labels appear on top z.
-            ax.bar_label(container, fmt="%.2f", padding=padding, fontsize=7, zorder=10, rotation=90, label_type=label_type)
+            ax.bar_label(container, fmt="%.2f", padding=padding, fontsize=7, zorder=10, rotation=90,
+                         label_type=label_type)
 
     bars = ax.patches
     patterns = ('\\\\\\\\\\', '/////', '|||||', '....', 'xxxx', '++++')
