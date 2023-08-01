@@ -9,23 +9,17 @@ from examples.gnn_benchmark.sdfg_util import get_total_memory, pretty_print_byte
 
 
 def check_memory(dace_experiments: Dict[str, ExperimentInfo], outfile: Path = None):
-    headers = ['Model', 'Forward', 'Forward transients', 'Forward non transients',
-               'Forward with grads', 'Forward with grads transients',
-               'Forward with grads non transients',
-               'Backward', 'Backward transients', 'Backward non transients']
+    headers = ['Model', 'Forward', 'Forward with grads', 'Backward']
     rows = []
     for name, exp_info in dace_experiments.items():
         model_fwd = exp_info.model_eval
         model_bwd = exp_info.model_train
-        fwd_mem, fwd_transient = get_total_memory(model_fwd.sdfg) if model_fwd is not None else (0, 0)
-        fwd_with_grad_mem, fwd_with_grad_transient = get_total_memory(
+        fwd_mem, _ = get_total_memory(model_fwd.sdfg) if model_fwd is not None else (0, 0)
+        fwd_with_grad_mem, _ = get_total_memory(
             model_bwd.forward_sdfg) if model_bwd is not None else (0, 0)
-        bwd_mem, bwd_transient = get_total_memory(
+        bwd_mem, _ = get_total_memory(
             model_bwd.backward_sdfg) if model_bwd is not None else (0, 0)
-        rows.append([name, fwd_mem, fwd_transient, fwd_mem - fwd_transient,
-                     fwd_with_grad_mem, fwd_with_grad_transient,
-                     fwd_with_grad_mem - fwd_with_grad_transient,
-                     bwd_mem, bwd_transient, bwd_mem - bwd_transient])
+        rows.append([name, fwd_mem, fwd_with_grad_mem, bwd_mem])
 
     print("MEMORY USAGE")
     print(tabulate.tabulate(
