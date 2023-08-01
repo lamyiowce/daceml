@@ -8,10 +8,10 @@ from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
 
 def main():
     # 23.07
-    # plot_gcn_schemes()
+    plot_gcn_schemes()
 
     # 18.07 Thesis
-    # plot_gcn_thesis()
+    plot_gcn_thesis()
     # plot_compare_cutoffs()
 
     # 06.07 plot GAT bwd
@@ -287,8 +287,15 @@ def plot_gcn_thesis():
 def plot_gat_bwd():
     drop_torch_names = ['torch_edge_list', 'torch_dgnn', 'torch_dgnn_compiled', 'torch_edge_list_compiled', 'torch_csr']
     drop_dace_names = ['torch_edge_list', 'dace_coo', 'dace_coo_cached_feat_and_alpha', 'dace_coo_cached:coo_cached_feat_only']
-    col_order = ['dace_coo', 'dace_coo_cached:coo_cached_feat_only', 'dace_coo_cached_feat_and_alpha', 'dace_coo_cached']
-    sizes = [8, 16, 32, 64, 128]
+    col_order = ['dace_coo_cached', 'dace_coo_cached_feat_and_alpha', 'dace_coo_cached:coo_cached_feat_only', 'dace_coo']
+    labels = {
+        'dace_coo_cached': 'Full caching',
+        'dace_coo_cached_feat_and_alpha': 'Cache features and node attention',
+        'dace_coo_cached:coo_cached_feat_only': 'Cache only features',
+        'dace_coo': 'No caching',
+    }
+
+    sizes = None #[8, 16, 32, 64, 128]
 
     data = {
         "OGB Arxiv": [
@@ -296,7 +303,6 @@ def plot_gat_bwd():
             '27.07.12.45-pyg-gat-ogbn-arxiv-224205.csv',
             '27.07.12.18-pyg-gat-ogbn-arxiv-224204.csv',
             '31.07.16.48-gat-ogbn-arxiv-227723.csv',
-
         ],
         "Cora": [
             '27.07.12.23-pyg-gat-cora-224204.csv',
@@ -320,19 +326,19 @@ def plot_gat_bwd():
             '27.07.12.33-pyg-gat-flickr-224204.csv',
             '31.07.16.47-gat-flickr-227722.csv',
         ],
-        "Reddit": [
-            '27.07.13.10-pyg-gat-reddit-224205.csv',
-
-        ]
+        # "Reddit": [
+        #     '27.07.13.10-pyg-gat-reddit-224205.csv',
+        #
+        # ]
     }
 
     for name, datalist in data.items():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
             plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes, col_order=col_order,
-                          plot_title=f"GAT COMPARISON, {name}", drop_names=drop_torch_names, skip_timestamp=True)
+                          plot_title=f"GAT COMPARISON, {name}", drop_names=drop_torch_names, skip_timestamp=True, labels=labels)
             plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
-                          plot_title=f"GAT BASELINES, {name}", drop_names=drop_dace_names, skip_timestamp=True)
+                          plot_title=f"GAT BASELINES, {name}", drop_names=drop_dace_names, skip_timestamp=True, labels=labels)
 
 
 

@@ -125,7 +125,7 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     df, std_df = prep_df(full_df, column=plot_column, col_order=col_order)
     colors = color_map or get_colors(df.columns)
     bar_width = 0.85
-    figsize = (1.5 + len(df) * 0.9, 6.)
+    figsize = (1.5 + len(df) * 0.9, 6)
     if bwd_df is None:
         ax = df.plot(figsize=figsize, kind='bar', ylabel='Runtime [ms]',
                      xlabel=xlabel or COLUMN_PRETTY_NAMES[plot_column], color=colors,
@@ -157,9 +157,9 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     ax.set_axisbelow(True)
     ax.yaxis.grid(color='lightgray', linestyle='--')
     if bwd_df is not None and bwd_std_df is not None:
-        ax.set_ylim(ymax=max((bwd_df + bwd_std_df).max().max() * 1.09, 0.9))
+        ax.set_ylim(ymax=max((bwd_df + bwd_std_df).max().max() * 1.1, 0.9))
     else:
-        ax.set_ylim(ymax=max((df + std_df).max().max() * 1.09, 0.9))
+        ax.set_ylim(ymax=max((df + std_df).max().max() * 1.1, 0.9))
     ax.set_ylabel("Runtime [ms]")
     ax.set_xlabel(xlabel or COLUMN_PRETTY_NAMES[plot_column])
     # plt.title(name.upper())
@@ -181,12 +181,15 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
             if container.patches[0].get_facecolor()[-1] < 1.0:
                 padding = 6
                 label_type = 'center'
+                replace_text = ''
             else:
-                padding = 6
+                padding = 6 if 'flickr' not in name.lower() else 8.5
                 label_type = 'edge'
+                replace_text = 'OOM'
             # Set text size.
-            # Make the labels appear on top z.
-            ax.bar_label(container, fmt="%.2f", padding=padding, fontsize=7, zorder=10, rotation=90,
+            # Make the labels appear  on top z.
+            ax.bar_label(container, fmt=lambda x: f"{x:.2f}" if x > 0 else replace_text,
+                         padding=padding, fontsize=7, zorder=10, rotation=90,
                          label_type=label_type)
 
     bars = ax.patches
