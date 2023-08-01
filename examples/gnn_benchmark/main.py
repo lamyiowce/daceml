@@ -66,6 +66,7 @@ def main():
     parser.add_argument('--no-bias', action='store_true')
     parser.add_argument('--threadblock-dynamic', action='store_true')
     parser.add_argument('--backward', action='store_true')
+    parser.add_argument('--skip-forward', action='store_true')
     parser.add_argument('--input-grad', action='store_true')
     parser.add_argument('--model', choices=model_dict.keys(), required=True)
     parser.add_argument('--hidden', type=int, default=None, required=True)
@@ -237,6 +238,7 @@ def create_experiments(args, torch_model):
                                                               device=device,
                                                               gen_code=not args.no_gen_code,
                                                               backward=args.backward,
+                                                              skip_forward=args.skip_forward,
                                                               compute_input_grad=args.input_grad)
         info = ExperimentInfo(impl_name=impl_name,
                               bwd_impl_name=bwd_impl_name,

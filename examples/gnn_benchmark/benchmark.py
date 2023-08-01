@@ -51,30 +51,35 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
             functools.partial(forward_fn, torch_model, torch_inputs))
         func_names.append(torch_name)
 
+    benchmark_forward = True
     for impl_spec, experiment_info in experiment_infos.items():
-        model = experiment_info.model_eval
-        inputs = experiment_info.data.to_input_list()
-
-        funcs.append(functools.partial(forward_fn, model, inputs))
         func_names.append(dace_tag + '_' + impl_spec)
+        if experiment_info.model_eval is not None:
+            model = experiment_info.model_eval
+            inputs = experiment_info.data.to_input_list()
 
-    print(f"---> Benchmarking the forward pass...")
-    with torch.no_grad():
-        grad_test = funcs[0]()
-        assert grad_test.grad_fn is None
-        times = measure_performance(funcs,
-                                    func_names=func_names,
-                                    warmups=10 if not small else 2,
-                                    num_iters=10 if not small else 2,
-                                    timing_iters=100 if not small else 3)
-    print()
-    print(f"\n------ {model_name.upper()} {hidden_size} FORWARD RUNTIME [ms] ------")
-    print_time_statistics(times, func_names)
-    print()
+            funcs.append(functools.partial(forward_fn, model, inputs))
+        else:
+            benchmark_forward = False
 
-    if outfile is not None:
-        write_stats_to_file(func_names, times, model_name, hidden_size, in_features_size,
-                            num_layers, outfile)
+    if benchmark_forward:
+        print(f"---> Benchmarking the forward pass...")
+        with torch.no_grad():
+            grad_test = funcs[0]()
+            assert grad_test.grad_fn is None
+            times = measure_performance(funcs,
+                                        func_names=func_names,
+                                        warmups=10 if not small else 2,
+                                        num_iters=10 if not small else 2,
+                                        timing_iters=100 if not small else 3)
+        print()
+        print(f"\n------ {model_name.upper()} {hidden_size} FORWARD RUNTIME [ms] ------")
+        print_time_statistics(times, func_names)
+        print()
+
+        if outfile is not None:
+            write_stats_to_file(func_names, times, model_name, hidden_size, in_features_size,
+                                num_layers, outfile)
 
     ### Backward pass.
     if backward:
@@ -102,7 +107,7 @@ def do_benchmark(experiment_infos: Dict[str, ExperimentInfo],
             forward_funcs.append(functools.partial(forward_fn, model, inputs))
 
         if measure_overhead:
-            print(f"---> Benchmarking the TRAINING overhead...")
+            print(f"---> Benchmarking the forward with gradients...")
             times = measure_performance(forward_funcs,
                                         func_names=func_names,
                                         warmups=5 if not small else 2,

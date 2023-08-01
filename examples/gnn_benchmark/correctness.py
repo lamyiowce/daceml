@@ -120,7 +120,6 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
 
         for name, experiment_info in dace_models.items():
             print(f"---> Checking correctness for {name}...")
-            model = experiment_info.model_eval
             args = experiment_info.data.to_input_list()
             for i, array in enumerate(args):
                 assert array.is_contiguous(), f"{i}th input not contiguous!"
@@ -128,25 +127,28 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
                                            experiment_info.gnn_type,
                                            experiment_info.idx_dtype,
                                            experiment_info.val_dtype)
+            if experiment_info.model_eval is not None:
+                model = experiment_info.model_eval
+                print(f"==== Checking correctness for {name} forward pass ====")
+                if USE_GPU:
+                    torch.cuda.nvtx.range_push(name + ' forward correctness')
+                    torch.cuda.synchronize()
+                dace_pred = model(*args)
+                if USE_GPU:
+                    torch.cuda.synchronize()
+                    torch.cuda.nvtx.range_pop()
 
-            if USE_GPU:
-                torch.cuda.nvtx.range_push(name + ' forward correctness')
-                torch.cuda.synchronize()
-            dace_pred = model(*args)
-            if USE_GPU:
-                torch.cuda.synchronize()
-                torch.cuda.nvtx.range_pop()
-
-            if reference_pred is not None:
-                experiment_info.correct = check_equal(dace_pred,
-                                                      reference_pred,
-                                                      name_result=f"Forward predictions for DaCe {name}",
-                                                      name_expected=reference_name)
-            else:
-                print(
-                    f"Not checking correctness for {name} because no torch prediction was computed.")
+                if reference_pred is not None:
+                    experiment_info.correct = check_equal(dace_pred,
+                                                          reference_pred,
+                                                          name_result=f"Forward predictions for DaCe {name}",
+                                                          name_expected=reference_name)
+                else:
+                    print(
+                        f"Not checking correctness for {name} because no torch prediction was computed.")
 
             if backward:
+                print(f"==== Checking correctness for {name} forward with grads pass ====")
                 model = experiment_info.model_train
                 if USE_GPU:
                     torch.cuda.nvtx.range_push(
@@ -162,6 +164,7 @@ def check_correctness(dace_models: Dict[str, 'ExperimentInfo'],
                     torch.cuda.nvtx.range_push(
                         name + ' backward correctness (grad)')
                     torch.cuda.synchronize()
+                print(f"==== Checking correctness for {name} backward pass ====")
                 backward_func(dace_pred)
                 if USE_GPU:
                     torch.cuda.nvtx.range_pop()

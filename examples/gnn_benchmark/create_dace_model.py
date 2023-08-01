@@ -21,6 +21,7 @@ def create_dace_model(model: torch.nn.Module,
                       device: torch.device,
                       backward: bool,
                       compute_input_grad: bool,
+                      skip_forward: bool,
                       gen_code: bool = True,
                       ) -> Tuple[dace.DaceModule, dace.DaceModule]:
     sdfg_name = f"{model.__class__.__name__}_{sdfg_tag}"
@@ -31,18 +32,21 @@ def create_dace_model(model: torch.nn.Module,
     if compute_input_grad:
         # Compute input grad for input features only.
         inputs_to_skip = inputs_to_skip[1:]
-    dace_model_eval = DaceModule(copy.deepcopy(model),
-                                 sdfg_name=sdfg_name + "_eval",
-                                 backward=False,
-                                 regenerate_code=gen_code,
-                                 inputs_to_skip=inputs_to_skip).to(device)
-    add_hooks(dace_model_eval, backward=False, device=device, do_opt=do_opt,
-              implementation_name=implementation_name,
-              backward_implementation_name=backward_implementation_name,
-              persistent_mem=persistent_mem,
-              threadblock_dynamic=threadblock_dynamic)
 
-    dace_model_train = None
+    dace_model_eval, dace_model_train = None, None
+
+    if not skip_forward:
+        dace_model_eval = DaceModule(copy.deepcopy(model),
+                                     sdfg_name=sdfg_name + "_eval",
+                                     backward=False,
+                                     regenerate_code=gen_code,
+                                     inputs_to_skip=inputs_to_skip).to(device)
+        add_hooks(dace_model_eval, backward=False, device=device, do_opt=do_opt,
+                  implementation_name=implementation_name,
+                  backward_implementation_name=backward_implementation_name,
+                  persistent_mem=persistent_mem,
+                  threadblock_dynamic=threadblock_dynamic)
+
     if backward:
         dace_model_train = DaceModule(copy.deepcopy(model),
                                       sdfg_name=sdfg_name + "_train",
