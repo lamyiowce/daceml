@@ -432,67 +432,54 @@ class GCNConvBackwardCSCAdaptCached(BackwardImplementation):
 
         compute_grad_for_node_features = 'node_features' in required_gradients
 
-        def gcn_backward(node_features, colptrs, rows, edge_vals,
-                         linDOTweight,
-                         linDOTweight_grad, bias_grad,
-                         output_grad, AX_cached):
-            """
-            node_features: input features, N x M
-            rowptrs: row pointers (CSR format), N+1
-            columns: col, num_entries
-            edge_vals: values, num_entries
-            linDOTweight: F x M
-            bias: F
-            output: N x F
-
-            node_features_grad: N x F_in
-            linDOTweight_grad: F_out x F_in
-            output_grad: N x F_out
-            """
-
-            # Compute the values of the gradient of weights and node_features.
-            # The gradient of the bias is just the sum of the output gradient.
-            # The gradient of the adjacency matrix is not computed.
-
-            # Compute the gradient of the GCN layer.
+        using_cached = False
+        if not compute_grad_for_node_features:
             if 2 * F_out >= F_in:
-                # Grad W = Grad Y.t @ (A.t @ X)
-                bias_grad[:] = np.sum(output_grad, axis=0)
-                linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, AX_cached)
-            else:
-                # Grad W = (A @ Grad Y).t @ X
-                temp = dace.define_local((N, F_out), dtype=val_dtype)
-                csrmm(colptrs, rows, edge_vals, output_grad,
-                      temp, transA=True)
-                bias_grad[:] = np.sum(output_grad, axis=0)
-                linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
+                using_cached = True
 
-        def gcn_backward_with_node_features(node_features, colptrs, rows,
-                                            edge_vals,
-                                            linDOTweight, node_features_grad,
-                                            linDOTweight_grad, bias_grad,
-                                            output_grad, AX_cached):
+                def gcn_backward(linDOTweight_grad, bias_grad,
+                                 output_grad, AX_cached):
+                    # Compute the gradient of the GCN layer.
+                    # Grad W = Grad Y.t @ (A.t @ X)
+                    bias_grad[:] = np.sum(output_grad, axis=0)
+                    linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, AX_cached)
+            else:
+                def gcn_backward(node_features, colptrs, rows, edge_vals,
+                                 linDOTweight_grad, bias_grad,
+                                 output_grad):
+                    # Grad W = (A @ Grad Y).t @ X
+                    temp = dace.define_local((N, F_out), dtype=val_dtype)
+                    csrmm(colptrs, rows, edge_vals, output_grad,
+                          temp, transA=True)
+                    bias_grad[:] = np.sum(output_grad, axis=0)
+                    linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
+        else:
             if F_out >= F_in:
-                # Grad X = A @ (Grad Y @ W)
-                temp = dace.define_local((N, F_in), dtype=val_dtype)
-                temp[:] = output_grad @ linDOTweight
-                csrmm(colptrs, rows, edge_vals, temp,
-                      node_features_grad, transA=True)
-                # Grad W = Grad Y.t @ (A.t @ X) = Grad Y.t @ AX cached
-                linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, AX_cached)
+                def gcn_backward(colptrs, rows, edge_vals, linDOTweight, node_features_grad,
+                                 linDOTweight_grad, bias_grad, output_grad, AX_cached):
+                    # Grad X = A @ (Grad Y @ W)
+                    temp = dace.define_local((N, F_in), dtype=val_dtype)
+                    temp[:] = output_grad @ linDOTweight
+                    csrmm(colptrs, rows, edge_vals, temp,
+                          node_features_grad, transA=True)
+                    # Grad W = Grad Y.t @ (A.t @ X) = Grad Y.t @ AX cached
+                    linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, AX_cached)
+                    bias_grad[:] = np.sum(output_grad, axis=0)
             else:
-                # Grad X = (A @ Grad Y) @ W
-                temp = dace.define_local((N, F_out), dtype=val_dtype)
-                csrmm(colptrs, rows, edge_vals, output_grad, temp, transA=True)
-                node_features_grad[:] = temp @ linDOTweight
-                # Grad W = (A @ Grad Y).t @ X
-                linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
-            bias_grad[:] = np.sum(output_grad, axis=0)
+                def gcn_backward(node_features, colptrs, rows, edge_vals, linDOTweight,
+                                 node_features_grad, linDOTweight_grad, bias_grad, output_grad):
+                    # Grad X = (A @ Grad Y) @ W
+                    temp = dace.define_local((N, F_out), dtype=val_dtype)
+                    csrmm(colptrs, rows, edge_vals, output_grad, temp, transA=True)
+                    node_features_grad[:] = temp @ linDOTweight
+                    # Grad W = (A @ Grad Y).t @ X
+                    linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
+                    bias_grad[:] = np.sum(output_grad, axis=0)
 
-        result_node, result = autodiff_utils.backward_program_for_node(
-            gcn_backward_with_node_features if compute_grad_for_node_features else gcn_backward,
-            context, forward_node)
-        connect_output_from_forward(forward_node, result_node, context, "AX_cached")
+        result_node, result = autodiff_utils.backward_program_for_node(gcn_backward, context,
+                                                                       forward_node)
+        if using_cached:
+            connect_output_from_forward(forward_node, result_node, context, "AX_cached")
 
         return result_node, result
 
@@ -539,7 +526,7 @@ class GCNConvBackwardCSCCached(BackwardImplementation):
         def gcn_backward_with_node_features(colptrs, rows,
                                             edge_vals,
                                             linDOTweight, node_features_grad,
-                                             linDOTweight_grad, bias_grad,
+                                            linDOTweight_grad, bias_grad,
                                             output_grad, AX_cached):
             # Grad X = A @ (Grad Y @ W)
             temp = dace.define_local((N, F_in), dtype=val_dtype)
