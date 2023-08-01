@@ -179,7 +179,7 @@ def main():
                       targets=targets,
                       backward=args.backward)
 
-    check_memory(dace_models, outfile=args.outfile)
+    check_memory(dace_models, model_name=args.model, hidden_size=args.hidden, outfile=args.outfile)
 
     if args.mode == 'benchmark' or args.mode == 'benchmark_small':
         dace_tag = "dace"
