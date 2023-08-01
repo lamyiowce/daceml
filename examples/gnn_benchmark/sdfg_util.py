@@ -109,7 +109,8 @@ def change_storage(sdfg: dace.SDFG, array_name: str, new_storage=dace.StorageTyp
                         and arr.storage != new_storage):
                     if expected_shape is None or arr.shape == expected_shape:
                         if re.fullmatch(array_name, dnode.data):
-                            print(f"  Setting storage for {dnode} to {new_storage} from {arr.storage}.")
+                            print(
+                                f"  Setting storage for {dnode} to {new_storage} from {arr.storage}.")
                             arr.storage = new_storage
                             if arr.lifetime == dace.dtypes.AllocationLifetime.Persistent:
                                 print(
@@ -209,6 +210,7 @@ def get_tb_maps_recursive(subgraph):
 
 
 def flatten_blocks_for_1d_maps(sdfg: dace.SDFG, verbose=False):
+    verbose = verbose or Config.get_bool('debugprint')
     default_block_size = [int(b) for b in
                           Config.get('compiler', 'cuda', 'default_block_size').split(',')]
     total_size = functools.reduce(lambda a, b: a * b, default_block_size)
@@ -243,7 +245,9 @@ def flatten_blocks_for_1d_maps(sdfg: dace.SDFG, verbose=False):
                 print("🧱  Keeping block size: ", node.map, node.map.gpu_block_size)
 
 
-def adjust_block_size(default_block_size, node, total_size):
+def adjust_block_size(default_block_size, node, total_size, verbose=False):
+    verbose = verbose or Config.get_bool('debugprint')
+
     new_block_sizes = []
     remaining_size = total_size
     map_sizes = []
@@ -258,8 +262,9 @@ def adjust_block_size(default_block_size, node, total_size):
             new_block_sizes.append(-1)
     new_block_sizes = new_block_sizes + [1] * 3
     new_block_sizes = new_block_sizes[:3]
-    print(node)
-    print("Map range, Block sizes:", map_sizes, new_block_sizes)
+    if verbose:
+        print(node)
+        print("Map range, Block sizes:", map_sizes, new_block_sizes)
     num_free = new_block_sizes.count(-1)
 
     if len(map_sizes) == 1:
@@ -281,7 +286,8 @@ def adjust_block_size(default_block_size, node, total_size):
     elif num_free == 3:
         # [-1, -1, -1], just use the default (array is big enough).
         new_block_sizes = default_block_size
-    print("New block sizes:", new_block_sizes)
+    if verbose:
+        print("New block sizes:", new_block_sizes)
     return new_block_sizes
 
 
@@ -305,3 +311,32 @@ def change_map_schedule(sdfg: dace.SDFG,
                         f"⏲  Keeping schedule: {node.map}: {node.schedule} (expected params: {expected_params})")
             elif verbose:
                 print("⏲  Keeping schedule: ", node.map, node.schedule)
+
+
+def pretty_print_bytes(num_bytes: int):
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    elif num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.2f} KB"
+    elif num_bytes < 1024 * 1024 * 1024:
+        return f"{num_bytes / (1024 * 1024):.2f} MB"
+    else:
+        return f"{num_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+
+def get_total_memory(sdfg: dace.SDFG, verbose: bool = True):
+    verbose = verbose or Config.get_bool('debugprint')
+    total = 0
+    total_transient_size = 0
+
+    if verbose:
+        print("Memory use for sdfg: ", sdfg.name)
+    for name, array in sdfg.arrays.items():
+        array_bytes = int(array.total_size) * array.dtype.bytes
+        total += array_bytes
+        if array.transient:
+            total_transient_size += array_bytes
+        if verbose:
+            print(
+                f"  {name}: {pretty_print_bytes(array_bytes)}   Transient: {array.transient} {array.shape} {array.dtype} {array.storage} {array.lifetime}")
+    return total, total_transient_size

@@ -13,6 +13,7 @@ import examples.gnn_benchmark.torch_util
 from daceml import onnx as donnx
 from examples.gnn_benchmark import models, torch_util
 from examples.gnn_benchmark.benchmark import do_benchmark
+from examples.gnn_benchmark.check_memory import check_memory
 from examples.gnn_benchmark.common import get_loss_and_targets
 from examples.gnn_benchmark.correctness import check_correctness
 from examples.gnn_benchmark.data_optimizer import optimize_data
@@ -162,16 +163,23 @@ def main():
 
     loss_fn, targets = get_loss_and_targets(args.model, args.val_dtype, data, num_classes)
 
+    if use_gpu:
+        print(torch.cuda.memory_summary())
     if not torch_experiments:
         print("No torch, deleting torch data var.")
         del data
         gc.collect()
+        if use_gpu:
+            torch.cuda.empty_cache()
+            print(torch.cuda.memory_summary())
 
     check_correctness(dace_models,
                       torch_experiments=torch_experiments,
                       loss_fn=loss_fn,
                       targets=targets,
                       backward=args.backward)
+
+    check_memory(dace_models, outfile=args.outfile)
 
     if args.mode == 'benchmark' or args.mode == 'benchmark_small':
         dace_tag = "dace"
