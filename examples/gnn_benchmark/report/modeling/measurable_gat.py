@@ -161,31 +161,33 @@ class GATConvCOO(CompositeOp):
                 AddBias(shape=(num_nodes, F_out), axis=1, val_dtype=val_dtype)
             ]
         else:
-            self.subops: List[MeasurableOp] = [
-                                                  # Compute H'
-                                                  Matmul(N=num_nodes, M=F_in, F=heads * F_out,
-                                                         val_dtype=val_dtype),
-                                                  # Permute features.
-                                                  Permute(shape=(num_nodes, heads, F_out),
-                                                          val_dtype=val_dtype),
-                                                  # Compute alpha_src, alpha_dst.
-                                                  BatchedMatmul(B=heads, N=num_nodes, M=F_out, F=1,
-                                                                val_dtype=val_dtype),
-                                                  BatchedMatmul(B=heads, N=num_nodes, M=F_out, F=1,
-                                                                val_dtype=val_dtype),
+            compute_attention_weights: List[MeasurableOp] = [
+                # Compute H'
+                Matmul(N=num_nodes, M=F_in, F=heads * F_out,
+                       val_dtype=val_dtype),
+                # Permute features.
+                Permute(shape=(num_nodes, heads, F_out),
+                        val_dtype=val_dtype),
+                # Compute alpha_src, alpha_dst.
+                BatchedMatmul(B=heads, N=num_nodes, M=F_out, F=1,
+                              val_dtype=val_dtype),
+                BatchedMatmul(B=heads, N=num_nodes, M=F_out, F=1,
+                              val_dtype=val_dtype),
 
-                                                  # Compute atttention weights.
-                                                  GATConvCOOAttentionWeights(num_nodes=num_nodes,
-                                                                             heads=heads,
-                                                                             num_entries=num_entries,
-                                                                             val_dtype=val_dtype,
-                                                                             idx_dtype=idx_dtype),
-                                              ] + [
-                                                  # Compute output.
-                                                  Coomm(N=num_nodes, M=num_nodes, F=F_out,
-                                                        nnz=num_entries,
-                                                        val_dtype=val_dtype, idx_dtype=idx_dtype),
-                                              ] * self.heads + [
-                                                  PermuteAndAddBias(shape=(num_nodes, heads, F_out),
-                                                                    axis=-1, val_dtype=val_dtype)
-                                              ]
+                # Compute atttention weights.
+                GATConvCOOAttentionWeights(num_nodes=num_nodes,
+                                           heads=heads,
+                                           num_entries=num_entries,
+                                           val_dtype=val_dtype,
+                                           idx_dtype=idx_dtype),
+            ]
+            one_spmm: MeasurableOp = Coomm(N=num_nodes, M=num_nodes, F=F_out,
+                                           nnz=num_entries,
+                                           val_dtype=val_dtype, idx_dtype=idx_dtype)
+            compute_output: List[MeasurableOp] = [one_spmm] * self.heads + [
+                PermuteAndAddBias(shape=(num_nodes, heads, F_out),
+                                  axis=-1, val_dtype=val_dtype),
+            ]
+            self.subops = compute_attention_weights + compute_output
+
+
