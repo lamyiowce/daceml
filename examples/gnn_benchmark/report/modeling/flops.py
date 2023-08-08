@@ -65,7 +65,7 @@ def compute_matmuls(layer_name, hidden_sizes, datasets, mm_ops, filename):
         for hidden_size in hidden_sizes:
             for mm_op in mm_ops:
                 layer = mm_op(N=dataset.num_nodes,
-                              M=dataset.num_features,
+                              M=dataset.num_nodes,
                               F=hidden_size,
                               nnz=dataset.num_edges, val_dtype=dace.float32,
                               idx_dtype=dace.int32)
@@ -93,21 +93,20 @@ def compare_fused_spmm_sddmm(hidden_sizes, datasets, filename):
     output = []
     for dataset in datasets:
         for hidden_size in hidden_sizes:
-            fused = measurable_ops.FusedCooSpmmSddmm(N=dataset.num_nodes,
-                                                     M=hidden_size,
-                                                     nnz=dataset.num_edges, val_dtype=dace.float32,
-                                                     idx_dtype=dace.int32)
+            for sddmm_class in [measurable_ops.CsrSddmm, measurable_ops.CooSddmm]:
+            # fused = measurable_ops.FusedCooSpmmSddmm(N=dataset.num_nodes,
+            #                                          M=hidden_size,
+            #                                          nnz=dataset.num_edges, val_dtype=dace.float32,
+            #                                          idx_dtype=dace.int32)
 
-            sddmm = measurable_ops.CooSddmm(N=dataset.num_nodes, M=hidden_size,
-                                            nnz=dataset.num_edges, val_dtype=dace.float32,
-                                            idx_dtype=dace.int32)
-            spmm = measurable_ops.Coomm(N=dataset.num_nodes, M=dataset.num_nodes, F=hidden_size,
-                                          nnz=dataset.num_edges, val_dtype=dace.float32,
-                                          idx_dtype=dace.int32)
-            not_fused = measurable_layers.CompositeOp([sddmm, spmm])
+                sddmm = sddmm_class(N=dataset.num_nodes, M=hidden_size,
+                                                nnz=dataset.num_edges, val_dtype=dace.float32,
+                                                idx_dtype=dace.int32)
+            # spmm = measurable_ops.Coomm(N=dataset.num_nodes, M=dataset.num_nodes, F=hidden_size,
+            #                               nnz=dataset.num_edges, val_dtype=dace.float32,
+            #                               idx_dtype=dace.int32)
 
-            print(f"{dataset.name}, {hidden_size}: {fused}")
-            print(f"{dataset.name}, {hidden_size}: {not_fused}")
+                print(f"{dataset.name}, {hidden_size}: {sddmm}")
 
 
 
@@ -116,12 +115,14 @@ def main():
     # and GCN with typical sizes.
     datasets = [CoraStats, ArxivStats]
 
-    compare_fused_spmm_sddmm([8, 16, 32, 64, 128, 256, 512, 1024, 2048], datasets, '')
+    compare_fused_spmm_sddmm([64, 128, 1024], datasets, '')
 
     matmuls = [measurable_ops.Csrmm, measurable_ops.Cscmm, measurable_ops.Coomm]
 
     compute_matmuls('basic', [64], datasets,
                     matmuls, 'basic-operators.csv')
+
+
 
     hidden_sizes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048]
     gcn_layers = [GCNConvCSR, GCNConvCSRAdapt, GCNConvCOO, GCNConvCOOAdapt, GCNConvCSC,

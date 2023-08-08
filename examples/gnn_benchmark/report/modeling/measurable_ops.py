@@ -278,10 +278,40 @@ class CooSddmm(MeasurableOp):
 
     def min_memory(self):
         # Load: B, C, each row/column is read multiple times, output matrix
-        val_count = self.nnz * self.M * WRITE_FACTOR + 2 * self.nnz * self.M + self.nnz
+        val_count = self.nnz * WRITE_FACTOR + 2 * self.nnz * self.M + self.nnz
         val_bytes = val_count * self.val_bytes
         # Load: column indices, row indices.
         idx_bytes = 2 * self.nnz * self.idx_bytes
+        return val_bytes + idx_bytes
+
+
+
+class CsrSddmm(MeasurableOp):
+    # A = np.sddmm(A, B, C), where A is a CSR matrix N x N, and B is a dense N x M matrix,
+    # and C is a dense M x N matrix.
+    # for i in dace.map[0:N]:
+    #     for j, k in dace.map[rowptrs[i]:rowprs[i+1], 0:K]:
+    #     col = columns[j]
+    #     row = i
+    #     D[j] += e[j] * B[col, k] * F[row, k]
+    def __init__(self, N: int, M: int, nnz: int,
+                 val_dtype: dace.dtypes.typeclass,
+                 idx_dtype: dace.dtypes.typeclass):
+        self.N = N
+        self.M = M
+        self.nnz = nnz
+        self.val_bytes = val_dtype.bytes
+        self.idx_bytes = idx_dtype.bytes
+
+    def flops(self):
+        return 3 * self.nnz * self.M
+
+    def min_memory(self):
+        # Load: B, C, each row/column is read multiple times, output matrix
+        val_count = self.nnz * WRITE_FACTOR + 2 * self.nnz * self.M + self.nnz
+        val_bytes = val_count * self.val_bytes
+        # Load: column indices, row indices.
+        idx_bytes = (self.nnz + self.N + 1) * self.idx_bytes
         return val_bytes + idx_bytes
 
 
@@ -312,10 +342,39 @@ class FusedCooSpmmSddmm(MeasurableOp):
 
     def min_memory(self):
         # Load: B, C, F, each row/column is read multiple times
-        dense_mem = self.nnz * self.M * WRITE_FACTOR + 2 * self.nnz * self.M
+        dense_mem = self.nnz * WRITE_FACTOR + 2 * self.nnz * self.M
         # Load A, write D
         sparse_mem = self.nnz + WRITE_FACTOR * self.nnz
         val_bytes = (dense_mem + sparse_mem) * self.val_bytes
+        # Load: column indices, row indices.
+        idx_bytes = 2 * self.nnz * self.idx_bytes
+        return val_bytes + idx_bytes
+
+
+class MultiheadCooSddmm(MeasurableOp):
+    # A = np.sddmm(A, B, C), where A is a COO matrix N x N, and B is a dense N x M matrix,
+    # and C is a dense M x N matrix.
+    # for k, i in dace.map[0:K, 0:num_entries]:
+    #     col = columns[i]
+    #     row = rows[i]
+    #     D[i] += e[i] * B[col, k] * F[row, k]
+    def __init__(self, N: int, M: int, nnz: int, heads: int,
+                 val_dtype: dace.dtypes.typeclass,
+                 idx_dtype: dace.dtypes.typeclass):
+        self.N = N
+        self.M = M
+        self.nnz = nnz
+        self.heads = heads
+        self.val_bytes = val_dtype.bytes
+        self.idx_bytes = idx_dtype.bytes
+
+    def flops(self):
+        return 3 * self.nnz * self.M * self.heads
+
+    def min_memory(self):
+        # Load: B, C, each row/column is read multiple times, output matrix
+        val_count = self.heads * (self.nnz * WRITE_FACTOR + 2 * self.nnz * self.M + self.nnz)
+        val_bytes = val_count * self.val_bytes
         # Load: column indices, row indices.
         idx_bytes = 2 * self.nnz * self.idx_bytes
         return val_bytes + idx_bytes
