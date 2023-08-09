@@ -181,6 +181,77 @@ class GCNConvBackwardCSRAdapt(BackwardImplementation):
 
 
 @autoregister_params(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
+                     name="csr_adapt_cached")
+class GCNConvBackwardCSRAdaptCached(BackwardImplementation):
+    @staticmethod
+    def backward(
+            forward_node: nd.Node, context: BackwardContext,
+            given_gradients: List[Optional[str]],
+            required_gradients: List[Optional[str]]
+    ) -> Tuple[Union[nd.Node, dace.SDFG], BackwardResult]:
+        output_shape = autodiff_utils.forward_out_desc_with_name(
+            forward_node, context, "output").shape
+
+        N, F_out = output_shape
+        node_features_desc = autodiff_utils.forward_in_desc_with_name(
+            forward_node, context, "node_features")
+        F_in = node_features_desc.shape[1]
+        val_dtype = node_features_desc.dtype
+
+        compute_grad_for_node_features = 'node_features' in required_gradients
+
+        using_cached = False
+        if not compute_grad_for_node_features:
+            if 2 * F_out >= F_in:
+                using_cached = True
+
+                def gcn_backward(linDOTweight_grad, bias_grad,
+                                 output_grad, AX_cached):
+                    # Compute the gradient of the GCN layer.
+                    # Grad W = Grad Y.t @ (A.t @ X)
+                    bias_grad[:] = np.sum(output_grad, axis=0)
+                    linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, AX_cached)
+            else:
+                def gcn_backward(node_features, rowptrs, columns, edge_vals,
+                                 linDOTweight_grad, bias_grad,
+                                 output_grad):
+                    # Grad W = (A @ Grad Y).t @ X
+                    temp = dace.define_local((N, F_out), dtype=val_dtype)
+                    csrmm(rowptrs, columns, edge_vals, output_grad,
+                          temp, transA=False)
+                    bias_grad[:] = np.sum(output_grad, axis=0)
+                    linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
+        else:
+            if F_out >= F_in:
+                def gcn_backward(rowptrs, columns, edge_vals, linDOTweight, node_features_grad,
+                                 linDOTweight_grad, bias_grad, output_grad, AX_cached):
+                    # Grad X = A @ (Grad Y @ W)
+                    temp = dace.define_local((N, F_in), dtype=val_dtype)
+                    temp[:] = output_grad @ linDOTweight
+                    csrmm(rowptrs, columns, edge_vals, temp,
+                          node_features_grad, transA=True)
+                    # Grad W = Grad Y.t @ (A.t @ X) = Grad Y.t @ AX cached
+                    linDOTweight_grad[:] = np.einsum('ji,jk->ik', output_grad, AX_cached)
+                    bias_grad[:] = np.sum(output_grad, axis=0)
+            else:
+                def gcn_backward(node_features, rowptrs, columns, edge_vals, linDOTweight,
+                                 node_features_grad, linDOTweight_grad, bias_grad, output_grad):
+                    # Grad X = (A @ Grad Y) @ W
+                    temp = dace.define_local((N, F_out), dtype=val_dtype)
+                    csrmm(rowptrs, columns, edge_vals, output_grad, temp, transA=True)
+                    node_features_grad[:] = temp @ linDOTweight
+                    # Grad W = (A @ Grad Y).t @ X
+                    linDOTweight_grad[:] = np.einsum('nf,nm->fm', temp, node_features)
+                    bias_grad[:] = np.sum(output_grad, axis=0)
+
+        result_node, result = autodiff_utils.backward_program_for_node(gcn_backward, context,
+                                                                       forward_node)
+        if using_cached:
+            connect_output_from_forward(forward_node, result_node, context, "AX_cached")
+
+        return result_node, result
+
+@autoregister_params(op="torch_geometric.nn.conv.gcn_conv.GCNConv",
                      name="csc")
 class GCNConvBackwardCSC(BackwardImplementation):
     @staticmethod
