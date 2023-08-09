@@ -136,11 +136,22 @@ def check_coalescence(data, name):
     print("Sorted" if sorted else "Not sorted")
 
 
+
+def get_max_row_size(dataset):
+    edge_index = dataset.edge_index
+    row_sizes = np.zeros((dataset.x.shape[0]))
+    for i in range(edge_index.shape[1]):
+        row_sizes[edge_index[0, i]] += 1
+    mx = max(row_sizes)
+    return mx, dataset.num_edges / (dataset.num_nodes * mx)
+
 if __name__ == '__main__':
     # visualize_datasets()
-    check_coalescence(get_dataset('cora', 'cpu'), 'cora')
-    check_coalescence(get_dataset('ogbn-arxiv', 'cpu'), 'ogbn-arxiv')
-    check_coalescence(get_dataset('citeseer', 'cpu'), 'citeseer')
-    check_coalescence(get_dataset('pubmed', 'cpu'), 'pubmed')
-    check_coalescence(get_dataset('flickr', 'cpu'), 'flickr')
-    check_coalescence(get_dataset('reddit', 'cpu'), 'reddit')
+    print(get_max_row_size(get_dataset('cora', 'cpu')))
+    print(get_max_row_size(get_dataset('ogbn-arxiv', 'cpu')))
+    # check_coalescence(get_dataset('cora', 'cpu'), 'cora')
+    # check_coalescence(get_dataset('ogbn-arxiv', 'cpu'), 'ogbn-arxiv')
+    # check_coalescence(get_dataset('citeseer', 'cpu'), 'citeseer')
+    # check_coalescence(get_dataset('pubmed', 'cpu'), 'pubmed')
+    # check_coalescence(get_dataset('flickr', 'cpu'), 'flickr')
+    # check_coalescence(get_dataset('reddit', 'cpu'), 'reddit')
