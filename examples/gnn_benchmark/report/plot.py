@@ -1,17 +1,18 @@
+import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from scipy import stats
 
 from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
-    DATA_FOLDER, DEFAULT_LABEL_MAP, make_plot
+    DATA_FOLDER, DEFAULT_LABEL_MAP, make_plot, PLOT_FOLDER
 
 
 def main():
     # 23.07
-    plot_gcn_schemes()
+    # plot_gcn_schemes()
 
     # 18.07 Thesis
-    plot_gcn_thesis()
+    # plot_gcn_thesis()
     # plot_compare_cutoffs()
 
     # 06.07 plot GAT bwd
@@ -144,7 +145,7 @@ def plot_gcn_schemes():
                               include_only_names=subset,
                               labels=labels,
                               skip_timestamp=True,
-                              xlabel='Output features size')
+                              xlabel='Output feature size')
 
                 # plot_backward(df=df[df['Size'] == 128],
                 #               bwd_df=bwd_df[bwd_df['Size'] == 128], tag='GCN ' + name,
@@ -193,11 +194,12 @@ def plot_gcn_thesis():
             '25.07.12.21-gcn-flickr-222571.csv',
             '25.07.07.35-pyg-gcn-flickr-222314.csv',
         ],
-        "Reddit": [
-            # '25.07.07.46-gcn-reddit-222313.csv',
-            # '25.07.07.39-pyg-gcn-reddit-222314.csv',
-            # '25.07.12.46-gcn-reddit-222571.csv',
-        ]
+        # "Reddit": [
+        #     '25.07.07.46-gcn-reddit-222313.csv',
+        #     '25.07.07.39-pyg-gcn-reddit-222314.csv',
+        #     '25.07.12.46-gcn-reddit-222571.csv',
+        #     '04.08.14.46-gcn-reddit-233538.csv',
+        # ]
     }
 
     speedup_log = open('speedup_log_gcn.txt', 'w')
@@ -208,7 +210,7 @@ def plot_gcn_thesis():
     for name, datalist in data.items():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
-            plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name,
+            plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name, figsize=(12, 3.8),
                           plot_title=f"GCN, {name}", drop_names=drop_names, skip_timestamp=True)
 
             dataset_speedups = {'fwd': [], 'bwd': [], 'formats_fwd': [], 'formats_bwd': []}
@@ -221,6 +223,7 @@ def plot_gcn_thesis():
                     dace_time = dace_df[dace_df['Size'] == size]['Median'].min()
                     dace_max_time = dace_df[dace_df['Size'] == size]['Median'].max()
                     dataset_speedups[f'formats_{pass_name}'].append(dace_max_time / dace_time)
+                    print(f"{pass_name}: {name}, {size}: {dace_max_time / dace_time}")
                     dataset_speedups[pass_name].append(torch_time / dace_time)
                     print(f"{pass_name}: {name}, {size}: {torch_time / dace_time}")
                     speedup_log.write(f"{pass_name}: {name}, {size}: {torch_time / dace_time}\n")
@@ -266,15 +269,13 @@ def plot_gcn_thesis():
         'Reddit': 114615892,
         'OGB Arxiv': 1166243,
     }
-    for pass_name, speedups in [('fwd', per_dataset_format_speedups_fwd), ('bwd', per_dataset_format_speedups_bwd)]:
-        df = pd.DataFrame(speedups)
-        df.rename(columns=dataset_to_num_edges, inplace=True)
-        df.plot()
-        plt.title(f"GCN {pass_name} speedup per dataset")
-        plt.show()
-
-
-
+    # for pass_name, speedups in [('fwd', per_dataset_format_speedups_fwd),
+    #                             ('bwd', per_dataset_format_speedups_bwd)]:
+    #     df = pd.DataFrame(speedups)
+    #     df.rename(columns=dataset_to_num_edges, inplace=True)
+    #     df.plot()
+    #     plt.title(f"GCN {pass_name} speedup per dataset")
+    #     plt.show()
 
     # for name, datalist in data.items():
     #     if len(datalist) > 0:
@@ -285,45 +286,62 @@ def plot_gcn_thesis():
 
 
 def plot_gat_bwd():
-    drop_torch_names = ['torch_edge_list', 'torch_dgnn', 'torch_dgnn_compiled', 'torch_edge_list_compiled', 'torch_csr']
-    drop_dace_names = ['torch_edge_list', 'dace_coo', 'dace_coo_cached_feat_and_alpha', 'dace_coo_cached:coo_cached_feat_only']
-    col_order = ['dace_coo_cached', 'dace_coo_cached_feat_and_alpha', 'dace_coo_cached:coo_cached_feat_only', 'dace_coo']
-    labels = {
-        'dace_coo_cached': 'Full caching',
+    drop_torch_names = ['torch_edge_list', 'torch_dgnn', 'torch_dgnn_compiled',
+                        'torch_edge_list_compiled', 'torch_csr']
+    drop_dace_names = ['torch_edge_list', 'dace_coo', 'dace_coo_cached_feat_and_alpha',
+                       'dace_coo_cached:coo_cached_feat_only']
+    col_order = ['dace_coo_cached', 'dace_coo_cached_feat_and_alpha',
+                 'dace_coo_cached:coo_cached_feat_only', 'dace_coo']
+    labels_compare = {
+        'dace_coo_cached': 'Cache features, edge weights and mask',
         'dace_coo_cached_feat_and_alpha': 'Cache features and node attention',
         'dace_coo_cached:coo_cached_feat_only': 'Cache only features',
         'dace_coo': 'No caching',
     }
 
-    sizes = None #[8, 16, 32, 64, 128]
+    labels_baselines = {
+        'dace_coo_cached': 'DaCe COO, full caching',
+        # 'dace_coo_cached_feat_and_alpha': 'Cache features and node attention',
+        # 'dace_coo_cached:coo_cached_feat_only': 'Cache only features',
+        # 'dace_coo': 'No caching',
+    }
+
+    sizes = [8, 16, 32, 64, 128]
 
     data = {
         "OGB Arxiv": [
+            '04.08.21.26-pyg-gat-ogbn-arxiv-233721.csv',
             '27.07.12.18-pyg-gat-ogbn-arxiv-224204.csv',
             '27.07.12.45-pyg-gat-ogbn-arxiv-224205.csv',
             '27.07.12.18-pyg-gat-ogbn-arxiv-224204.csv',
+            '04.08.08.57-gat-ogbn-arxiv-233383.csv',
             '31.07.16.48-gat-ogbn-arxiv-227723.csv',
         ],
         "Cora": [
             '27.07.12.23-pyg-gat-cora-224204.csv',
             '27.07.12.52-pyg-gat-cora-224205.csv',
+            '04.08.08.37-gat-cora-233383.csv',
             '31.07.15.58-gat-cora-227723.csv',
         ],
         "Citeseer": [
             '27.07.13.00-pyg-gat-citeseer-224205.csv',
+            '04.08.08.37-gat-citeseer-233384.csv',
             '31.07.15.59-gat-citeseer-227724.csv',
         ],
         "Pubmed": [
+            '04.08.21.28-pyg-gat-pubmed-233721.csv',
             '27.07.13.45-pyg-gat-pubmed-224242.csv',
             '27.07.13.41-pyg-gat-pubmed-224239.csv',
             '27.07.12.26-pyg-gat-pubmed-224204.csv',
             '27.07.12.55-pyg-gat-pubmed-224205.csv',
+            '04.08.08.37-gat-pubmed-233382.csv',
             '31.07.15.56-gat-pubmed-227722.csv',
         ],
         "Flickr": [
             '27.07.13.46-pyg-gat-flickr-224242.csv',
             '27.07.13.04-pyg-gat-flickr-224205.csv',
             '27.07.12.33-pyg-gat-flickr-224204.csv',
+            '04.08.08.58-gat-flickr-233382.csv',
             '31.07.16.47-gat-flickr-227722.csv',
         ],
         # "Reddit": [
@@ -335,11 +353,105 @@ def plot_gat_bwd():
     for name, datalist in data.items():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
-            plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes, col_order=col_order,
-                          plot_title=f"GAT COMPARISON, {name}", drop_names=drop_torch_names, skip_timestamp=True, labels=labels)
             plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
-                          plot_title=f"GAT BASELINES, {name}", drop_names=drop_dace_names, skip_timestamp=True, labels=labels)
+                          col_order=col_order,
+                          plot_title=f"GAT COMPARISON, {name}", drop_names=drop_torch_names,
+                          skip_timestamp=True, labels=labels_compare, figsize=(7, 6))
+            plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
+                          plot_title=f"GAT BASELINES, {name}", drop_names=drop_dace_names,
+                          skip_timestamp=True, labels=labels_baselines, figsize=(7, 6))
 
+    speedup_log = open('speedup_log_gat.txt', 'w')
+
+    all_speedups = {'fwd': [], 'bwd': []}
+    plot_improvements = {}
+    per_dataset_dace_speedups = {}
+    for name, datalist in data.items():
+        if len(datalist) > 0:
+            df, bwd_df = read_many_dfs(filenames=datalist)
+            df = df[df['Size'].isin(sizes)]
+            bwd_df = bwd_df[bwd_df['Size'].isin(sizes)]
+
+            dataset_speedups = {'fwd': [], 'bwd': []}
+            for pass_name, data in [('fwd', df), ('bwd', bwd_df)]:
+                torch_df = data[data['Name'].str.contains('torch')]
+                dace_df = data[data['Name'].str.contains('dace')]
+
+                for size in sorted(data['Size'].unique()):
+                    torch_time = torch_df[torch_df['Size'] == size]['Median'].min()
+                    dace_no_caching_time = \
+                    dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == 'dace_coo')][
+                        'Median'].iloc[0]
+                    for dace_name in ['dace_coo', 'dace_coo_cached',
+                                      'dace_coo_cached_feat_and_alpha',
+                                      'dace_coo_cached:coo_cached_feat_only']:
+                        dace_time = \
+                        dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == dace_name)][
+                            'Median'].iloc[0]
+                        if f'{pass_name}_{dace_name}' not in dataset_speedups:
+                            dataset_speedups[f'{pass_name}_{dace_name}'] = []
+                        dataset_speedups[f'{pass_name}_{dace_name}'].append(
+                            dace_no_caching_time / dace_time)
+                        print(
+                            f"{pass_name}_{dace_name}: {name}, {size}: {dace_no_caching_time / dace_time}")
+                        speedup_log.write(
+                            f"{pass_name}_{dace_name}: {name}, {size}: {dace_no_caching_time / dace_time}\n")
+                    dace_full_caching_time = \
+                    dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == 'dace_coo_cached')][
+                        'Median'].iloc[0]
+
+                    dataset_speedups[pass_name].append(torch_time / dace_full_caching_time)
+                    print(f"{pass_name}: {name}, {size}: {torch_time / dace_full_caching_time}")
+                    speedup_log.write(
+                        f"{pass_name}: {name}, {size}: {torch_time / dace_full_caching_time}\n")
+
+            # Compute geomean speedup for this dataset.
+            for pass_name, speedups in dataset_speedups.items():
+                print(f"{name} {pass_name} geomean: {stats.gmean(speedups)}")
+                speedup_log.write(f"{name} {pass_name} geomean: {stats.gmean(speedups)}\n")
+                if 'bwd_dace' in pass_name:
+                    if name not in plot_improvements:
+                        plot_improvements[name] = {}
+                    plot_improvements[name][pass_name[4:]] = stats.gmean(speedups)
+                print(f"{name} {pass_name} max: {max(speedups)}")
+                speedup_log.write(f"{pass_name} max: {max(speedups)}\n")
+                print(f"{name} {pass_name} min: {min(speedups)}")
+                speedup_log.write(f"{pass_name} min: {min(speedups)}\n")
+
+            per_dataset_dace_speedups[name] = dataset_speedups
+            for k, vals in dataset_speedups.items():
+                if k not in all_speedups:
+                    all_speedups[k] = []
+                all_speedups[k] += vals
+
+    # Compute geomean, max and min speedup.
+    for pass_name, speedups in all_speedups.items():
+        print(f"ALL DATASETS {pass_name} geomean: {stats.gmean(speedups)}")
+        speedup_log.write(f"{pass_name} geomean: {stats.gmean(speedups)}\n")
+        print(f"ALL DATASETS {pass_name} max: {max(speedups)}")
+        speedup_log.write(f"{pass_name} max: {max(speedups)}\n")
+        print(f"ALL DATASETS {pass_name} min: {min(speedups)}")
+        speedup_log.write(f"{pass_name} min: {min(speedups)}\n")
+
+    print(plot_improvements)
+    df = pd.DataFrame(plot_improvements)
+    df = df.reindex(reversed(col_order), axis=0)
+    df.rename(index=labels_compare, inplace=True)
+
+    df.plot(alpha=0.7, marker='o', markersize=5, linewidth=1.5, linestyle='--', figsize=(6, 3.5))
+    df.apply(stats.gmean, axis=1).plot(alpha=0.7, color='black', marker='x', markersize=5,
+                                       linewidth=1, label='Geomean')
+    plt.yticks(np.arange(1.0, 1.4, 0.05))
+    plt.xticks([0, 1, 2, 3], ['None', 'Features', 'Features and\nnode attention',
+                              'Features, edge\nweights and mask'], rotation=0)
+
+    plt.ylabel('Speedup')
+    plt.xlabel('Cached values')
+    plt.grid(axis='y', linestyle='--', linewidth=0.5, alpha=0.5)
+    plt.legend(loc='upper left')
+    plt.tight_layout()
+    plt.savefig(PLOT_FOLDER / 'thesis' / 'gat_cache_speedup.pdf')
+    plt.show()
 
 
 def plot_compare_cutoffs():
@@ -497,7 +609,8 @@ def plot_stream_comparison():
 
 def plot_backward(tag, plot_title, plot_column='Size', labels=None, df=None, bwd_df=None,
                   filter_y=None, drop_names=None, include_only_names=None, color_map=None,
-                  legend_outside=False, skip_timestamp=False, xlabel=None, col_order=None):
+                  legend_outside=False, skip_timestamp=False, xlabel=None, col_order=None,
+                  **kwargs):
     if df is None:
         df = pd.read_csv(DATA_FOLDER / (tag + '.csv'), comment='#')
     if filter_y is not None:
@@ -526,11 +639,12 @@ def plot_backward(tag, plot_title, plot_column='Size', labels=None, df=None, bwd
 
         make_plot(df, f"{plot_title}:  BWD + FWD", label_map=labels, plot_column=plot_column,
                   bwd_df=bwd_df, xlabel=xlabel, col_order=col_order,
-                  legend_outside=legend_outside, skip_timestamp=skip_timestamp, color_map=color_map)
+                  legend_outside=legend_outside, skip_timestamp=skip_timestamp, color_map=color_map,
+                  **kwargs)
     else:
         make_plot(df, f"{plot_title}: forward pass", label_map=labels, plot_column=plot_column,
                   skip_timestamp=skip_timestamp, xlabel=xlabel, color_map=color_map,
-                  col_order=col_order)
+                  col_order=col_order, **kwargs)
 
 
 def plot_adapt_matmul_order():
