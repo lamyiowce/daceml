@@ -17,12 +17,13 @@ class DatasetStats:
     num_nodes: int
     num_edges: int
     num_features: int
+    max_row_size: int
 
 
 CoraStats = DatasetStats(name='cora', num_nodes=2708, num_edges=10556,
-                         num_features=1433)
+                         num_features=1433, max_row_size=168)
 ArxivStats = DatasetStats(name='arxiv', num_nodes=169343, num_edges=1166243,
-                          num_features=128)
+                          num_features=128, max_row_size=436)
 
 
 def compute_all(layer_name, hidden_sizes, datasets, layers, filename,
@@ -64,11 +65,14 @@ def compute_matmuls(layer_name, hidden_sizes, datasets, mm_ops, filename):
     for dataset in datasets:
         for hidden_size in hidden_sizes:
             for mm_op in mm_ops:
+                kwargs = {}
+                if mm_op == measurable_ops.EllpackSpmm:
+                    kwargs = {'max_row_size': dataset.max_row_size}
                 layer = mm_op(N=dataset.num_nodes,
                               M=dataset.num_nodes,
                               F=hidden_size,
                               nnz=dataset.num_edges, val_dtype=dace.float32,
-                              idx_dtype=dace.int32)
+                              idx_dtype=dace.int32, **kwargs)
                 print(f"{dataset.name}, {hidden_size}: {layer}")
 
                 op_name = layer.__class__.__name__
@@ -93,15 +97,17 @@ def compare_fused_spmm_sddmm(hidden_sizes, datasets, filename):
     output = []
     for dataset in datasets:
         for hidden_size in hidden_sizes:
-            for sddmm_class in [measurable_ops.CsrSddmm, measurable_ops.CooSddmm]:
+            for sddmm_class in [measurable_ops.CsrSddmm, measurable_ops.CooSddmm, measurable_ops.EllpackSddmm]:
             # fused = measurable_ops.FusedCooSpmmSddmm(N=dataset.num_nodes,
             #                                          M=hidden_size,
             #                                          nnz=dataset.num_edges, val_dtype=dace.float32,
             #                                          idx_dtype=dace.int32)
-
+                kwargs = {}
+                if sddmm_class == measurable_ops.EllpackSddmm:
+                    kwargs = {'max_row_size': dataset.max_row_size}
                 sddmm = sddmm_class(N=dataset.num_nodes, M=hidden_size,
                                                 nnz=dataset.num_edges, val_dtype=dace.float32,
-                                                idx_dtype=dace.int32)
+                                                idx_dtype=dace.int32, **kwargs)
             # spmm = measurable_ops.Coomm(N=dataset.num_nodes, M=dataset.num_nodes, F=hidden_size,
             #                               nnz=dataset.num_edges, val_dtype=dace.float32,
             #                               idx_dtype=dace.int32)
@@ -117,7 +123,7 @@ def main():
 
     compare_fused_spmm_sddmm([64, 128, 1024], datasets, '')
 
-    matmuls = [measurable_ops.Csrmm, measurable_ops.Cscmm, measurable_ops.Coomm]
+    matmuls = [measurable_ops.Csrmm, measurable_ops.Cscmm, measurable_ops.Coomm, measurable_ops.EllpackSpmm]
 
     compute_matmuls('basic', [64], datasets,
                     matmuls, 'basic-operators.csv')
