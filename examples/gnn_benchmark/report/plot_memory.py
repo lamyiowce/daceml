@@ -44,21 +44,27 @@ def plot_gcn_memory():
 
 
 def plot_gat_memory():
-    datalist = ['01.08.13.57-gat-ogbn-arxiv-228542-memory.csv']
+    # datalist = ['04.08.08.57-gat-ogbn-arxiv-233383-memory.csv']
+    # datalist = ['01.08.13.57-gat-ogbn-arxiv-228542-memory.csv']
+    datalist = ['04.08.10.18-gat-ogbn-arxiv-233429-memory.csv']
     df, _ = read_many_dfs(datalist, backward=False)
+    df.drop_duplicates(subset=['Name', 'Size'], inplace=True)
 
     label_map = {
-        'dace_coo_cached': 'Full caching',
-        'dace_coo_cached_feat_and_alpha': 'Cache features and node attention',
-        'dace_coo_cached:coo_cached_feat_only': 'Cache only features',
-        'dace_coo': 'No caching',
+        'coo_cached': 'Cache features, edge mask, edge weights',
+        'coo_cached_feat_and_alpha': 'Cache features and node attention',
+        'coo_cached:coo_cached_feat_only': 'Cache only features',
+        'coo': 'No caching',
     }
 
     for col in ['Forward', 'Forward with grads', 'Backward']:
         df[col] = df[col] / 1024 / 1024  # TO MB
 
     name = 'GAT Memory Usage'
-    make_memory_plot(df, label_map, name, columns=['Forward', 'Backward'])
+    order = ['coo_cached', 'coo_cached_feat_and_alpha', 'coo_cached:coo_cached_feat_only', 'coo']
+    # df.sort_values(by="Name", key=lambda column: column.map(lambda e: order.index(e)), inplace=True)
+    make_memory_plot(df, label_map, name, columns=['Forward with grads', 'Backward'], order=order,
+                     sizes=[8, 16, 32, 64, 128])
 
 
 def pretty_print_megabytes(num_megabytes: int):
@@ -68,13 +74,16 @@ def pretty_print_megabytes(num_megabytes: int):
         return f"{num_megabytes / 1024:.2f} GB"
 
 
-def make_memory_plot(df, label_map, name, columns):
+def make_memory_plot(df, label_map, name, columns, order=None, sizes=None):
+    if sizes is not None:
+        df = df[df['Size'].isin(sizes)]
     plt.rcParams.update({'font.size': 12})
     figsize = (8, 8)
     plt.rcParams['figure.figsize'] = figsize
     fig, axs = plt.subplots(nrows=2)
     for ax, column in zip(axs, columns):
-        sns.barplot(data=df, x='Size', y=column, hue='Name', edgecolor=(1.0, 1.0, 1.0, 0.4),
+        sns.barplot(data=df, x='Size', y=column, hue='Name', hue_order=order,
+                    edgecolor=(1.0, 1.0, 1.0, 0.4),
                     palette=get_colors(df['Name']), ax=ax)
         ax.set_axisbelow(True)
         ax.set_ylim(ymax=max(df[column].max() * 1.2, 0.9))
@@ -98,8 +107,11 @@ def make_memory_plot(df, label_map, name, columns):
         handles, labels = ax.get_legend_handles_labels()
         labels = [label_map.get(name, name) for name in labels]
         ax.legend(handles, labels)
+        # Set yticks to powers of two
+        ax.set_yticks([i for i in range(0, max(df[column].max()), 1024)])
+        ax.set_yticklabels([pretty_print_megabytes(int(y)) for y in ax.get_yticks()])
         ax.set_xlabel('')
-        ax.set_title(column)
+        ax.set_title(column.split(' ')[0])
     plt.xlabel("Hidden size")
     plt.tight_layout()
     # put today's date in the filename
