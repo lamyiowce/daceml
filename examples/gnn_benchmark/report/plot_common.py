@@ -119,15 +119,20 @@ def prep_df(full_df, column, col_order=None):
     return df, std_df
 
 
-def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_outside=False,
-              skip_timestamp=False, xlabel=None, color_map=None, col_order=None, figsize=None):
-    plt.rcParams.update({'font.size': 13})
+def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_outside=False, subplot_name=None,
+              skip_timestamp=False, xlabel=None, color_map=None, col_order=None, figsize=None, ax=None):
+    plt.rcParams.update({'font.size': 11})
     df, std_df = prep_df(full_df, column=plot_column, col_order=col_order)
     colors = color_map or get_colors(df.columns)
     bar_width = 0.85
     figsize = figsize or (1.5 + len(df) * 0.9, 6)
+    do_saving = False
+    if ax is None:
+        do_saving = True
+        fig, ax = plt.subplots(figsize=figsize)
+
     if bwd_df is None:
-        ax = df.plot(figsize=figsize, kind='bar', ylabel='Runtime [ms]',
+        ax = df.plot(ax=ax, figsize=figsize, kind='bar', ylabel='Runtime [ms]',
                      xlabel=xlabel or COLUMN_PRETTY_NAMES[plot_column], color=colors,
                      yerr=std_df, label='Forward', width=bar_width)
     else:
@@ -135,14 +140,14 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
         if len(bwd_df.columns) != len(df.columns):
             print('Warning: bwd_df and df have different lengths')
             print('Differing columns: ', set(bwd_df.columns) ^ set(df.columns))
-        ax = bwd_df.plot(figsize=figsize,
-                         kind='bar',
-                         color=colors,
-                         yerr=bwd_std_df,
-                         label='Backward',
-                         width=bar_width,
-                         edgecolor=(1.0, 1.0, 1.0, 0.4),
-                         error_kw=dict(ecolor='gray', lw=1, capsize=1, capthick=1))
+        bwd_df.plot(ax=ax,
+                    kind='bar',
+                    color=colors,
+                    yerr=bwd_std_df,
+                    label='Backward',
+                    width=bar_width,
+                    edgecolor=(1.0, 1.0, 1.0, 0.4),
+                    error_kw=dict(ecolor='gray', lw=1, capsize=1, capthick=1))
         df.plot(kind='bar',
                 ylabel='Runtime [ms]',
                 xlabel=xlabel or COLUMN_PRETTY_NAMES[plot_column],
@@ -174,7 +179,7 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     ax.spines[['right', 'top']].set_visible(False)
     # ax.legend(legend_handles[::-1], labels[::-1])
 
-    plt.xticks(rotation=0)
+    # ax.set_xticks(ax.get_xticks(), rotation=0)
 
     for container in ax.containers:
         if hasattr(container, 'patches'):
@@ -202,21 +207,24 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
             bar.set_hatch(hatch)
 
     if legend_outside:
-        plt.legend(labels, loc='center left', bbox_to_anchor=(1, 0.5))
+        ax.legend(labels, loc='center left', bbox_to_anchor=(1, 0.5))
     else:
-        plt.legend(labels, loc='upper left')
+        ax.legend(labels, loc='upper left')
 
-    plt.tight_layout()
-    # put today's date in the filename
-    clean_name = name.replace(',', '').replace('+', '').replace('  ', ' ').replace(':', '')
+    if do_saving:
+        plt.tight_layout()
+        # put today's date in the filename
+        clean_name = name.replace(',', '').replace('+', '').replace('  ', ' ').replace(':', '')
 
-    if skip_timestamp:
-        path = PLOT_FOLDER / 'thesis' / f'{clean_name}.pdf'
+        if skip_timestamp:
+            path = PLOT_FOLDER / 'thesis' / f'{clean_name}.pdf'
+        else:
+            path = PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {clean_name}.pdf'
+
+        plt.savefig(path, bbox_inches='tight')
+
+        plt.title(name.upper())
+        plt.tight_layout()
+        plt.show()
     else:
-        path = PLOT_FOLDER / f'{pd.Timestamp.today().strftime("%m-%d")} {clean_name}.pdf'
-
-    plt.savefig(path, bbox_inches='tight')
-
-    plt.title(name.upper())
-    plt.tight_layout()
-    plt.show()
+        ax.set_ylabel(f'{subplot_name}\nRuntime [ms]')

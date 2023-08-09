@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, colors
 from scipy import stats
 
 from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
@@ -158,7 +158,7 @@ def plot_gcn_schemes():
 
 def plot_gcn_thesis():
     drop_names = ['torch_edge_list', 'dace_csc_coo_adapt_cached-0.9']
-    data = {
+    data_files = {
         "OGB Arxiv": [
             '25.07.07.19-pyg-gcn-ogbn-arxiv-222314.csv',
             # '21.07.12.51-pyg-gcn-ogbn-arxiv-219071.csv',
@@ -207,10 +207,16 @@ def plot_gcn_thesis():
     all_speedups = {'fwd': [], 'bwd': [], 'formats_fwd': [], 'formats_bwd': []}
     per_dataset_format_speedups_fwd = {}
     per_dataset_format_speedups_bwd = {}
-    for name, datalist in data.items():
+    compare_formats_fwd = {}
+    compare_formats_bwd = {}
+
+    fig, axs = plt.subplots(5, 1, figsize=(10, 14), sharex=True)
+
+    for ax, name in zip(np.reshape(axs, -1), ['Cora', 'Citeseer', 'Pubmed', 'Flickr', 'OGB Arxiv']):
+        datalist = data_files[name]
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
-            plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name, figsize=(12, 3.8),
+            plot_backward(df=df, bwd_df=bwd_df, ax=ax, tag='GCN ' + name, figsize=(12, 3.8), subplot_name=name,
                           plot_title=f"GCN, {name}", drop_names=drop_names, skip_timestamp=True)
 
             dataset_speedups = {'fwd': [], 'bwd': [], 'formats_fwd': [], 'formats_bwd': []}
@@ -222,8 +228,20 @@ def plot_gcn_thesis():
                     torch_time = torch_df[torch_df['Size'] == size]['Median'].min()
                     dace_time = dace_df[dace_df['Size'] == size]['Median'].min()
                     dace_max_time = dace_df[dace_df['Size'] == size]['Median'].max()
+
+                    coo = dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == 'dace_coo_adapt_cached')][
+                        'Median'].max()
+                    csc = dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == 'dace_csc_adapt_cached')][
+                        'Median'].min()
                     dataset_speedups[f'formats_{pass_name}'].append(dace_max_time / dace_time)
-                    print(f"{pass_name}: {name}, {size}: {dace_max_time / dace_time}")
+                    if size not in compare_formats_fwd:
+                        compare_formats_fwd[size] = {}
+                        compare_formats_bwd[size] = {}
+                    if pass_name == 'fwd':
+                        compare_formats_fwd[size][name] = (coo / csc)
+                    else:
+                        compare_formats_bwd[size][name] = (coo / csc)
+                    print(f"formats {pass_name}: {name}, {size}: {dace_max_time / dace_time}")
                     dataset_speedups[pass_name].append(torch_time / dace_time)
                     print(f"{pass_name}: {name}, {size}: {torch_time / dace_time}")
                     speedup_log.write(f"{pass_name}: {name}, {size}: {torch_time / dace_time}\n")
@@ -243,6 +261,11 @@ def plot_gcn_thesis():
             all_speedups['bwd'] += dataset_speedups['bwd']
             all_speedups['formats_fwd'] += dataset_speedups['formats_fwd']
             all_speedups['formats_bwd'] += dataset_speedups['formats_bwd']
+
+    # Save the plot.
+    plt.tight_layout()
+    plt.savefig(PLOT_FOLDER / 'thesis' / 'gcn_baselines.pdf', bbox_inches='tight')
+    plt.show()
 
     # Compute geomean, max and min speedup.
     for pass_name, speedups in all_speedups.items():
@@ -269,13 +292,54 @@ def plot_gcn_thesis():
         'Reddit': 114615892,
         'OGB Arxiv': 1166243,
     }
-    # for pass_name, speedups in [('fwd', per_dataset_format_speedups_fwd),
-    #                             ('bwd', per_dataset_format_speedups_bwd)]:
-    #     df = pd.DataFrame(speedups)
-    #     df.rename(columns=dataset_to_num_edges, inplace=True)
-    #     df.plot()
-    #     plt.title(f"GCN {pass_name} speedup per dataset")
-    #     plt.show()
+
+    # Set default figsize.
+    # plt.rcParams['figure.figsize'] = (44, 3.5)
+    # plt.figure(figsize=(, 3.5))
+    # fig, axs = plt.subplots(ncols=2, sharey='all')
+
+    # Create subplots
+    fig, axs = plt.subplots(ncols=2, sharey='all', figsize=(8, 3.5))
+    for pass_name, speedups, ax in [('Forward', compare_formats_fwd, axs[0]),
+                                    ('Forward + backward', compare_formats_bwd, axs[1])]:
+        df = pd.DataFrame(speedups)
+        df = df.transpose()
+        df.index = df.index.map(str)
+        # plt.plot(range(len(df.index)), df, label=df.columns,
+        #         linestyle='--', marker='x')
+        # plt.title(f"GCN {pass_name} speedup per size")
+        # plt.show()
+
+        df.plot(ax=ax, alpha=0.7, marker='o', markersize=5, linewidth=1.5, linestyle='--')
+        df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
+                                           linewidth=1, label='Geomean')
+        ax.plot([0, len(df.index)], [1, 1], color='black', linewidth=1, linestyle=':')
+        ax.set_xlim(-0.1, len(df.index) - 0.9)
+        ax.set_yticks(np.arange(0.8, 1.7, 0.1))
+        # plt.xticks([0, 1, 2, 3], ['None', 'Features', 'Features and\nnode attention',
+        #                           'Features, edge\nweights and mask'], rotation=0)
+        # Add Annotations COO faster, CSC faster above and below the 1.0 line
+        if 'backward' not in pass_name:
+            ax.annotate('CSC faster', xy=(6.4, 1.05),
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+            ax.annotate('COO faster', xy=(6.4, 0.95),  # xycoords='axes fraction',
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+        else:
+            ax.annotate('CSC faster', xy=(0.65, 1.06),
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+            ax.annotate('COO faster', xy=(0.65, 0.92),  # xycoords='axes fraction',
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+
+        ax.set_ylabel('Relative runtime COO to CSC')
+        ax.set_xlabel('Hidden size')
+        ax.set_title(pass_name)
+        ax.set_xticks(range(len(df.index)), df.index, minor=False)
+        ax.grid(axis='y', linestyle='--', linewidth=0.5, alpha=0.5)
+        ax.legend(loc='upper left')
+
+    fig.tight_layout()
+    plt.savefig(PLOT_FOLDER / 'thesis' / 'gcn_formats.pdf', bbox_inches='tight')
+    fig.show()
 
     # for name, datalist in data.items():
     #     if len(datalist) > 0:
@@ -353,19 +417,24 @@ def plot_gat_bwd():
     for name, datalist in data.items():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
-            plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
-                          col_order=col_order,
-                          plot_title=f"GAT COMPARISON, {name}", drop_names=drop_torch_names,
-                          skip_timestamp=True, labels=labels_compare, figsize=(7, 6))
-            plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
-                          plot_title=f"GAT BASELINES, {name}", drop_names=drop_dace_names,
-                          skip_timestamp=True, labels=labels_baselines, figsize=(7, 6))
+            # plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
+            #               col_order=col_order,
+            #               plot_title=f"GAT COMPARISON, {name}", drop_names=drop_torch_names,
+            #               skip_timestamp=True, labels=labels_compare, figsize=(7, 6))
+            # plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
+            #               plot_title=f"GAT BASELINES, {name}", drop_names=drop_dace_names,
+            #               skip_timestamp=True, labels=labels_baselines, figsize=(7, 6))
 
     speedup_log = open('speedup_log_gat.txt', 'w')
 
     all_speedups = {'fwd': [], 'bwd': []}
     plot_improvements = {}
     per_dataset_dace_speedups = {}
+
+    summary_fwd = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}}
+    # summary_fwd_std = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}}
+    summary_bwd = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}}
+    # summary_bwd_std = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}}
     for name, datalist in data.items():
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
@@ -380,14 +449,14 @@ def plot_gat_bwd():
                 for size in sorted(data['Size'].unique()):
                     torch_time = torch_df[torch_df['Size'] == size]['Median'].min()
                     dace_no_caching_time = \
-                    dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == 'dace_coo')][
-                        'Median'].iloc[0]
+                        dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == 'dace_coo')][
+                            'Median'].iloc[0]
                     for dace_name in ['dace_coo', 'dace_coo_cached',
                                       'dace_coo_cached_feat_and_alpha',
                                       'dace_coo_cached:coo_cached_feat_only']:
                         dace_time = \
-                        dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == dace_name)][
-                            'Median'].iloc[0]
+                            dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == dace_name)][
+                                'Median'].iloc[0]
                         if f'{pass_name}_{dace_name}' not in dataset_speedups:
                             dataset_speedups[f'{pass_name}_{dace_name}'] = []
                         dataset_speedups[f'{pass_name}_{dace_name}'].append(
@@ -397,9 +466,13 @@ def plot_gat_bwd():
                         speedup_log.write(
                             f"{pass_name}_{dace_name}: {name}, {size}: {dace_no_caching_time / dace_time}\n")
                     dace_full_caching_time = \
-                    dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == 'dace_coo_cached')][
-                        'Median'].iloc[0]
+                        dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == 'dace_coo_cached')][
+                            'Median'].iloc[0]
 
+                    if pass_name == 'fwd':
+                        summary_fwd[size][name] = torch_time / dace_full_caching_time
+                    elif pass_name == 'bwd':
+                        summary_bwd[size][name] = torch_time / dace_full_caching_time
                     dataset_speedups[pass_name].append(torch_time / dace_full_caching_time)
                     print(f"{pass_name}: {name}, {size}: {torch_time / dace_full_caching_time}")
                     speedup_log.write(
@@ -452,6 +525,49 @@ def plot_gat_bwd():
     plt.tight_layout()
     plt.savefig(PLOT_FOLDER / 'thesis' / 'gat_cache_speedup.pdf')
     plt.show()
+
+
+    fig, axs = plt.subplots(ncols=2, sharey='all', figsize=(8, 3.5))
+    for pass_name, speedups, ax in [('Forward', summary_fwd, axs[0]),
+                                    ('Forward + backward', summary_bwd, axs[1])]:
+        df = pd.DataFrame(speedups)
+        df = df.transpose()
+        df.index = df.index.map(str)
+        # plt.plot(range(len(df.index)), df, label=df.columns,
+        #         linestyle='--', marker='x')
+        # plt.title(f"GCN {pass_name} speedup per size")
+        # plt.show()
+
+        df.plot(ax=ax, alpha=0.7, marker='o', markersize=5, linewidth=1.5, linestyle='--')
+        df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
+                                           linewidth=1, label='Geomean')
+        ax.plot([0, len(df.index)], [1, 1], color='black', linewidth=1, linestyle=':')
+        ax.set_xlim(-0.1, len(df.index) - 0.9)
+        ax.set_yticks(np.arange(0.5, 3, 0.25))
+        # plt.xticks([0, 1, 2, 3], ['None', 'Features', 'Features and\nnode attention',
+        #                           'Features, edge\nweights and mask'], rotation=0)
+        # Add Annotations COO faster, CSC faster above and below the 1.0 line
+        if 'backward' not in pass_name:
+            ax.annotate('DaCe faster', xy=(6.4, 1.05),
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+            ax.annotate('PyTorch faster', xy=(6.4, 0.95),  # xycoords='axes fraction',
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+        else:
+            ax.annotate('DaCe faster', xy=(0.65, 1.06),
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+            ax.annotate('PyTorch faster', xy=(0.65, 0.92),  # xycoords='axes fraction',
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+
+        ax.set_ylabel('Relative runtime')
+        ax.set_xlabel('Hidden size')
+        ax.set_title(pass_name)
+        ax.set_xticks(range(len(df.index)), df.index, minor=False)
+        ax.grid(axis='y', linestyle='--', linewidth=0.5, alpha=0.5)
+        ax.legend(loc='upper right')
+
+    fig.tight_layout()
+    plt.savefig(PLOT_FOLDER / 'thesis' / 'gat_summary.pdf', bbox_inches='tight')
+    fig.show()
 
 
 def plot_compare_cutoffs():
