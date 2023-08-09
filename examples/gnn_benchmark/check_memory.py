@@ -24,7 +24,7 @@ def check_memory(dace_experiments: Dict[str, ExperimentInfo], model_name, hidden
     print("MEMORY USAGE")
     print(tabulate.tabulate(
         [[vals[0]] + [pretty_print_bytes(b) for b in vals[-3:]] for vals in rows],
-        headers=headers,
+        headers=[headers[0]] + headers[-3:],
         tablefmt='github'))
 
     if outfile is not None:
