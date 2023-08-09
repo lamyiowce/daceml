@@ -23,10 +23,11 @@ export DACE_compiler_cuda_max_concurrent_streams=-1
 export DACE_compiler_cuda_default_block_size=64,8,1
 
 model=gcn_single_layer
-formats="coo_cached coo_adapt csr_adapt csc_adapt csr_coo_adapt-0.99 csc_cached"
-datasets="cora ogbn-arxiv"
+#formats="coo_cached coo_adapt csr_adapt csc_adapt csr_coo_adapt-0.99 csc_cached"
+formats="csc csc_alt csc_adapt csc_adapt_cached"
+datasets="ogbn-arxiv"
 backward=--backward
-hidden_sizes="8 16 32 64 128 256"
+hidden_sizes="8 16 32 64 128 256 512 1024"
 
 echo "Running model " $model
 for dataset in $datasets; do

@@ -20,9 +20,9 @@ export LIBRARY_PATH=/users/jbazinsk/miniconda3/envs/torch2/lib/:$LIBRARY_PATH
 do_test=
 
 model=gat
-datasets="pubmed flickr"
-modes="dgnn_compiled dgnn"
-hidden_sizes="8 128"
+datasets="ogbn-arxiv pubmed"
+modes="csr dgnn_compiled"
+hidden_sizes="8 16"
 input_sizes="" # 128 is computed anyway.
 
 
