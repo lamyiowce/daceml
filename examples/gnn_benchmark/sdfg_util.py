@@ -326,17 +326,26 @@ def pretty_print_bytes(num_bytes: int):
 
 def get_total_memory(sdfg: dace.SDFG, verbose: bool = True):
     verbose = verbose or Config.get_bool('debugprint')
+
+    def get_memory_for_sdfg(sdfg):
+        my_total = 0
+        my_total_transient_size = 0
+        for name, array in sdfg.arrays.items():
+            array_bytes = int(array.total_size) * array.dtype.bytes
+            my_total += array_bytes
+            if array.transient:
+                my_total_transient_size += array_bytes
+            if verbose:
+                print(
+                    f"  {name}: {pretty_print_bytes(array_bytes)}   Transient: {array.transient} {array.shape} {array.dtype} {array.storage} {array.lifetime}")
+        return my_total, my_total_transient_size
+
     total = 0
     total_transient_size = 0
+    for subsdfg in sdfg.all_sdfgs_recursive():
+        subtotal, subtotal_transient_size = get_memory_for_sdfg(subsdfg)
+        total += subtotal
 
     if verbose:
         print("Memory use for sdfg: ", sdfg.name)
-    for name, array in sdfg.arrays.items():
-        array_bytes = int(array.total_size) * array.dtype.bytes
-        total += array_bytes
-        if array.transient:
-            total_transient_size += array_bytes
-        if verbose:
-            print(
-                f"  {name}: {pretty_print_bytes(array_bytes)}   Transient: {array.transient} {array.shape} {array.dtype} {array.storage} {array.lifetime}")
     return total, total_transient_size
