@@ -542,6 +542,7 @@ class GATConvBackwardCOOCachedFeatOnly(BackwardImplementation):
                 is_pos_C_vals = np.empty((num_entries,), dtype=dace.bool)
                 e = np.empty((num_entries,), dtype=val_dtype)
                 softmax_sum = np.zeros((N,), dtype=val_dtype)
+                softmax_max = np.ones((N,), dtype=val_dtype) * -np.inf
 
                 for i in dace.map[0:num_entries]:
                     row = rows[i]
@@ -550,10 +551,13 @@ class GATConvBackwardCOOCachedFeatOnly(BackwardImplementation):
                     is_pos_C_vals[i] = e_tmp > 0
                     # # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
-                    e_tmp = np.exp(e_tmp)
                     e[i] = e_tmp
+                    softmax_max[col] = max(e[i], softmax_max[col])
 
-                    softmax_sum[col] += e[i]
+                for j in dace.map[0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                    col = columns[j]
+                    e[j] = np.exp(e[j] - softmax_max[col])
+                    softmax_sum[col] += e[j]
 
                 # Softmax normalization.
                 for j in dace.map[0:num_entries]:
@@ -612,6 +616,7 @@ class GATConvBackwardCOOCachedFeatOnly(BackwardImplementation):
                 e = np.empty((heads, num_entries), dtype=val_dtype)
                 softmax_sum = np.zeros((N, heads), dtype=val_dtype)
                 is_pos_C_vals = np.empty((heads, num_entries), dtype=dace.bool)
+                softmax_max = np.ones((N, heads), dtype=val_dtype) * -np.inf
 
                 for h, i in dace.map[0:heads, 0:num_entries]:
                     row = rows[i]
@@ -620,9 +625,13 @@ class GATConvBackwardCOOCachedFeatOnly(BackwardImplementation):
                     is_pos_C_vals[h, i] = e_tmp > 0
                     # # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
-                    e_tmp = np.exp(e_tmp)
                     e[h, i] = e_tmp
-                    softmax_sum[col, h] += e[h, i]
+                    softmax_max[col, h] = max(e[h, i], softmax_max[col, h])
+
+                for h, j in dace.map[0:heads, 0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                    col = columns[j]
+                    e[h, j] = np.exp(e[h, j] - softmax_max[col, h])
+                    softmax_sum[col, h] += e[h, j]
 
                 # Softmax normalization.
                 for h, j in dace.map[0:heads, 0:num_entries]:
@@ -773,6 +782,7 @@ class GATConvBackwardCOOCachedFeatAndAlpha(BackwardImplementation):
                 is_pos_C_vals = np.empty((num_entries,), dtype=dace.bool)
                 e = np.empty((num_entries,), dtype=val_dtype)
                 softmax_sum = np.zeros((N,), dtype=val_dtype)
+                softmax_max = np.ones((N,), dtype=val_dtype) * -np.inf
 
                 for i in dace.map[0:num_entries]:
                     row = rows[i]
@@ -781,10 +791,13 @@ class GATConvBackwardCOOCachedFeatAndAlpha(BackwardImplementation):
                     is_pos_C_vals[i] = e_tmp > 0
                     # # LeakyReLU
                     e_tmp = np.maximum(negative_slope * e_tmp, e_tmp)
-                    e_tmp = np.exp(e_tmp)
                     e[i] = e_tmp
+                    softmax_max[col] = max(e[i], softmax_max[col])
 
-                    softmax_sum[col] += e[i]
+                for j in dace.map[0:num_entries] @ dace.dtypes.ScheduleType.Sequential:
+                    col = columns[j]
+                    e[j] = np.exp(e[j] - softmax_max[col])
+                    softmax_sum[col] += e[j]
 
                 # Softmax normalization.
                 for j in dace.map[0:num_entries]:
