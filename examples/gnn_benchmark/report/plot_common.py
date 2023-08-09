@@ -120,12 +120,12 @@ def prep_df(full_df, column, col_order=None):
 
 
 def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_outside=False,
-              skip_timestamp=False, xlabel=None, color_map=None, col_order=None):
+              skip_timestamp=False, xlabel=None, color_map=None, col_order=None, figsize=None):
     plt.rcParams.update({'font.size': 13})
     df, std_df = prep_df(full_df, column=plot_column, col_order=col_order)
     colors = color_map or get_colors(df.columns)
     bar_width = 0.85
-    figsize = (1.5 + len(df) * 0.9, 6)
+    figsize = figsize or (1.5 + len(df) * 0.9, 6)
     if bwd_df is None:
         ax = df.plot(figsize=figsize, kind='bar', ylabel='Runtime [ms]',
                      xlabel=xlabel or COLUMN_PRETTY_NAMES[plot_column], color=colors,
@@ -171,7 +171,7 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     }
     default_label_map.update(label_map or {})
     labels = [default_label_map.get(name, name) for name in df.columns]
-
+    ax.spines[['right', 'top']].set_visible(False)
     # ax.legend(legend_handles[::-1], labels[::-1])
 
     plt.xticks(rotation=0)
@@ -183,15 +183,17 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
                 label_type = 'center'
                 replace_text = ''
             else:
-                padding = 6 if 'flickr' not in name.lower() else 8.5
+                padding = 10
                 label_type = 'edge'
                 replace_text = 'OOM'
             # Set text size.
             # Make the labels appear  on top z.
-            ax.bar_label(container, fmt=lambda x: f"{x:.2f}" if x > 0 else replace_text,
+            ax.bar_label(container, fmt=lambda x: f"{x:.2f}".lstrip('0') if x > 0 else replace_text,
                          padding=padding, fontsize=7, zorder=10, rotation=90,
                          label_type=label_type)
-
+    # ax.relim()
+    # # update ax.viewLim using the new dataLim
+    # ax.autoscale_view()
     bars = ax.patches
     patterns = ('\\\\\\\\\\', '/////', '|||||', '....', 'xxxx', '++++')
     hatches = [p for p in patterns for i in range(len(df))]
