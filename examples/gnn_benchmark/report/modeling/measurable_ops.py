@@ -432,8 +432,20 @@ class MultiheadCooSddmm(MeasurableOp):
 
     def min_memory(self):
         # Load: B, C, each row/column is read multiple times, output matrix
-        val_count = self.heads * (self.nnz * WRITE_FACTOR + 2 * self.nnz * self.M + self.nnz)
+        val_count = self.heads * (self.nnz * WRITE_FACTOR + self.nnz * self.M + self.N * self.M + self.nnz)
         val_bytes = val_count * self.val_bytes
         # Load: column indices, row indices.
         idx_bytes = 2 * self.nnz * self.idx_bytes
         return val_bytes + idx_bytes
+
+
+class BatchedOp(MeasurableOp):
+    def __init__(self, op, batch_size):
+        self.op = op
+        self.batch_size = batch_size
+
+    def flops(self):
+        return self.op.flops() * self.batch_size
+
+    def min_memory(self):
+        return self.op.min_memory() * self.batch_size

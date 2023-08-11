@@ -6,6 +6,8 @@ from scipy import stats
 from examples.gnn_benchmark.report.plot_common import read_many_dfs, \
     DATA_FOLDER, DEFAULT_LABEL_MAP, make_plot, PLOT_FOLDER
 
+presentation = False
+
 
 def main():
     # 23.07
@@ -16,7 +18,7 @@ def main():
     # plot_compare_cutoffs()
 
     # 06.07 plot GAT bwd
-    # plot_gat_bwd()
+    plot_gat_bwd()
 
     # # 16.06 plot GAT forward single layer.
     # plot_gat_single_layer()
@@ -211,9 +213,9 @@ def plot_gcn_thesis():
     compare_formats_bwd = {}
 
     fig, axs = plt.subplots(5, 1, figsize=(10, 14), sharex=True)
-    summary_fwd = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}, 256:{}, 512:{}, 1024:{}}
+    summary_fwd = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}, 256: {}, 512: {}, 1024: {}}
     # summary_fwd_std = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}}
-    summary_bwd = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}, 256:{}, 512:{}, 1024:{}}
+    summary_bwd = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}, 256: {}, 512: {}, 1024: {}}
     # summary_bwd_std = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}}
     for ax, name in zip(np.reshape(axs, -1), ['Cora', 'Citeseer', 'Pubmed', 'Flickr', 'OGB Arxiv']):
         datalist = data_files[name]
@@ -317,10 +319,12 @@ def plot_gcn_thesis():
         #         linestyle='--', marker='x')
         # plt.title(f"GCN {pass_name} speedup per size")
         # plt.show()
-
-        df.plot(ax=ax, alpha=0.7, marker='o', markersize=5, linewidth=1.5, linestyle='--')
-        df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
-                                           linewidth=1, label='Geomean')
+        if presentation:
+            df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='-')
+        else:
+            df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='--')
+            df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
+                                               linewidth=1, label='Geomean')
         ax.plot([0, len(df.index)], [1, 1], color='black', linewidth=1, linestyle=':')
         ax.set_xlim(-0.1, len(df.index) - 0.9)
         ax.set_yticks(np.arange(0.8, 1.7, 0.1))
@@ -356,7 +360,6 @@ def plot_gcn_thesis():
     #                       plot_title=f"GCN, {name}", drop_names=drop_names,
     #                       sizes=[8, 32, 128, 512])
 
-
     fig, axs = plt.subplots(ncols=2, sharey='all', figsize=(8, 3.5))
     for pass_name, speedups, ax in [('Forward', summary_fwd, axs[0]),
                                     ('Forward + backward', summary_bwd, axs[1])]:
@@ -368,9 +371,12 @@ def plot_gcn_thesis():
         # plt.title(f"GCN {pass_name} speedup per size")
         # plt.show()
 
-        df.plot(ax=ax, alpha=0.7, marker='o', markersize=5, linewidth=1.5, linestyle='--')
-        df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
-                                           linewidth=1, label='Geomean')
+        if presentation:
+            df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='-')
+        else:
+            df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='--')
+            df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
+                                               linewidth=1, label='Geomean')
         ax.plot([0, len(df.index)], [1, 1], color='black', linewidth=1, linestyle=':')
         ax.set_xlim(-0.1, len(df.index) - 0.9)
         ax.set_yticks(np.arange(0.5, 3.5, 0.25))
@@ -580,7 +586,6 @@ def plot_gat_bwd():
     plt.savefig(PLOT_FOLDER / 'thesis' / 'gat_cache_speedup.pdf')
     plt.show()
 
-
     fig, axs = plt.subplots(ncols=2, sharey='all', figsize=(8, 3.5))
     for pass_name, speedups, ax in [('Forward', summary_fwd, axs[0]),
                                     ('Forward + backward', summary_bwd, axs[1])]:
@@ -592,9 +597,12 @@ def plot_gat_bwd():
         # plt.title(f"GCN {pass_name} speedup per size")
         # plt.show()
 
-        df.plot(ax=ax, alpha=0.7, marker='o', markersize=5, linewidth=1.5, linestyle='--')
-        df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
-                                           linewidth=1, label='Geomean')
+        if presentation:
+            df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='-')
+        else:
+            df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='--')
+            df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
+                                               linewidth=1, label='Geomean')
         ax.plot([0, len(df.index)], [1, 1], color='black', linewidth=1, linestyle=':')
         ax.set_xlim(-0.1, len(df.index) - 0.9)
         ax.set_yticks(np.arange(0.5, 3, 0.25))

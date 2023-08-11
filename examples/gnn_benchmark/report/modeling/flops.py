@@ -98,22 +98,48 @@ def compare_fused_spmm_sddmm(hidden_sizes, datasets, filename):
     for dataset in datasets:
         for hidden_size in hidden_sizes:
             for sddmm_class in [measurable_ops.CsrSddmm, measurable_ops.CooSddmm, measurable_ops.EllpackSddmm]:
-            # fused = measurable_ops.FusedCooSpmmSddmm(N=dataset.num_nodes,
-            #                                          M=hidden_size,
-            #                                          nnz=dataset.num_edges, val_dtype=dace.float32,
-            #                                          idx_dtype=dace.int32)
+                # fused = measurable_ops.FusedCooSpmmSddmm(N=dataset.num_nodes,
+                #                                          M=hidden_size,
+                #                                          nnz=dataset.num_edges, val_dtype=dace.float32,
+                #                                          idx_dtype=dace.int32)
                 kwargs = {}
                 if sddmm_class == measurable_ops.EllpackSddmm:
                     kwargs = {'max_row_size': dataset.max_row_size}
                 sddmm = sddmm_class(N=dataset.num_nodes, M=hidden_size,
-                                                nnz=dataset.num_edges, val_dtype=dace.float32,
-                                                idx_dtype=dace.int32, **kwargs)
-            # spmm = measurable_ops.Coomm(N=dataset.num_nodes, M=dataset.num_nodes, F=hidden_size,
-            #                               nnz=dataset.num_edges, val_dtype=dace.float32,
-            #                               idx_dtype=dace.int32)
+                                    nnz=dataset.num_edges, val_dtype=dace.float32,
+                                    idx_dtype=dace.int32, **kwargs)
+                # spmm = measurable_ops.Coomm(N=dataset.num_nodes, M=dataset.num_nodes, F=hidden_size,
+                #                               nnz=dataset.num_edges, val_dtype=dace.float32,
+                #                               idx_dtype=dace.int32)
 
                 print(f"{dataset.name}, {hidden_size}: {sddmm}")
 
+
+def compare_semibatched_spmm_sddmm(sizes, datasets, outfile):
+    batch_size = 8
+    for hidden_size in sizes:
+        for dataset in datasets:
+            batched_spmm = measurable_ops.BatchedOp(
+                measurable_ops.Coomm(N=dataset.num_nodes, M=dataset.num_nodes, F=hidden_size,
+                                     nnz=dataset.num_edges, val_dtype=dace.float32,
+                                     idx_dtype=dace.int32), batch_size)
+            semibatched_spmm = measurable_ops.SemibatchedCoomm(B=batch_size, N=dataset.num_nodes, M=dataset.num_nodes,
+                                                               F=hidden_size,
+                                                               nnz=dataset.num_edges, val_dtype=dace.float32,
+                                                               idx_dtype=dace.int32)
+            print(f"{dataset.name}, {hidden_size}:")
+            print(f"Batched: {batched_spmm}")
+            print(f"Semibatched: {semibatched_spmm}")
+
+            batched_sddmm = measurable_ops.BatchedOp(measurable_ops.CooSddmm(N=dataset.num_nodes, M=hidden_size,
+                                                                             nnz=dataset.num_edges,
+                                                                             val_dtype=dace.float32,
+                                                                             idx_dtype=dace.int32), batch_size)
+            semibatched_sddmm = measurable_ops.MultiheadCooSddmm(N=dataset.num_nodes, M=hidden_size,
+                                                                 nnz=dataset.num_edges, val_dtype=dace.float32,
+                                                                 idx_dtype=dace.int32, heads=batch_size)
+            print(f"Batched: {batched_sddmm}")
+            print(f"Semibatched: {semibatched_sddmm}")
 
 
 def main():
@@ -128,14 +154,13 @@ def main():
     compute_matmuls('basic', [64], datasets,
                     matmuls, 'basic-operators.csv')
 
-
+    compare_semibatched_spmm_sddmm([64, 128, 1024], datasets, 'semibatched-operators.csv')
 
     hidden_sizes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048]
     gcn_layers = [GCNConvCSR, GCNConvCSRAdapt, GCNConvCOO, GCNConvCOOAdapt, GCNConvCSC,
                   GCNConvCSCAdapt]
     backward_gcn_layers = [BackwardGCNConvCSR, BackwardGCNConvCSRAdapt, BackwardGCNConvCOO,
                            BackwardGCNConvCOOAdapt, BackwardGCNConvCSC, BackwardGCNConvCSCAdapt]
-
 
     # compute_all('gcn_single_layer', hidden_sizes, datasets, gcn_layers,
     #             'gcn-numbers.csv', val_dtype=dace.float32,
