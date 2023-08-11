@@ -12,11 +12,11 @@ def main():
     # plot_gcn_schemes()
 
     # 18.07 Thesis
-    # plot_gcn_thesis()
+    plot_gcn_thesis()
     # plot_compare_cutoffs()
 
     # 06.07 plot GAT bwd
-    plot_gat_bwd()
+    # plot_gat_bwd()
 
     # # 16.06 plot GAT forward single layer.
     # plot_gat_single_layer()
@@ -211,13 +211,16 @@ def plot_gcn_thesis():
     compare_formats_bwd = {}
 
     fig, axs = plt.subplots(5, 1, figsize=(10, 14), sharex=True)
-
+    summary_fwd = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}, 256:{}, 512:{}, 1024:{}}
+    # summary_fwd_std = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}}
+    summary_bwd = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}, 256:{}, 512:{}, 1024:{}}
+    # summary_bwd_std = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}}
     for ax, name in zip(np.reshape(axs, -1), ['Cora', 'Citeseer', 'Pubmed', 'Flickr', 'OGB Arxiv']):
         datalist = data_files[name]
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
-            plot_backward(df=df, bwd_df=bwd_df, ax=ax, tag='GCN ' + name, figsize=(12, 3.8), subplot_name=name,
-                          plot_title=f"GCN, {name}", drop_names=drop_names, skip_timestamp=True)
+            # plot_backward(df=df, bwd_df=bwd_df, ax=ax, tag='GCN ' + name, figsize=(12, 3.8), subplot_name=name,
+            #               plot_title=f"GCN, {name}", drop_names=drop_names, skip_timestamp=True)
 
             dataset_speedups = {'fwd': [], 'bwd': [], 'formats_fwd': [], 'formats_bwd': []}
             for pass_name, data in [('fwd', df), ('bwd', bwd_df)]:
@@ -241,6 +244,11 @@ def plot_gcn_thesis():
                         compare_formats_fwd[size][name] = (coo / csc)
                     else:
                         compare_formats_bwd[size][name] = (coo / csc)
+
+                    if pass_name == 'fwd':
+                        summary_fwd[size][name] = torch_time / dace_time
+                    elif pass_name == 'bwd':
+                        summary_bwd[size][name] = torch_time / dace_time
                     print(f"formats {pass_name}: {name}, {size}: {dace_max_time / dace_time}")
                     dataset_speedups[pass_name].append(torch_time / dace_time)
                     print(f"{pass_name}: {name}, {size}: {torch_time / dace_time}")
@@ -347,6 +355,52 @@ def plot_gcn_thesis():
     #         plot_backward(df=df, bwd_df=bwd_df, tag='GCN ' + name + ' short',
     #                       plot_title=f"GCN, {name}", drop_names=drop_names,
     #                       sizes=[8, 32, 128, 512])
+
+
+    fig, axs = plt.subplots(ncols=2, sharey='all', figsize=(8, 3.5))
+    for pass_name, speedups, ax in [('Forward', summary_fwd, axs[0]),
+                                    ('Forward + backward', summary_bwd, axs[1])]:
+        df = pd.DataFrame(speedups)
+        df = df.transpose()
+        df.index = df.index.map(str)
+        # plt.plot(range(len(df.index)), df, label=df.columns,
+        #         linestyle='--', marker='x')
+        # plt.title(f"GCN {pass_name} speedup per size")
+        # plt.show()
+
+        df.plot(ax=ax, alpha=0.7, marker='o', markersize=5, linewidth=1.5, linestyle='--')
+        df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
+                                           linewidth=1, label='Geomean')
+        ax.plot([0, len(df.index)], [1, 1], color='black', linewidth=1, linestyle=':')
+        ax.set_xlim(-0.1, len(df.index) - 0.9)
+        ax.set_yticks(np.arange(0.5, 3.5, 0.25))
+        # plt.xticks([0, 1, 2, 3], ['None', 'Features', 'Features and\nnode attention',
+        #                           'Features, edge\nweights and mask'], rotation=0)
+        # Add Annotations COO faster, CSC faster above and below the 1.0 line
+        if 'backward' not in pass_name:
+            ax.annotate('DaCe faster', xy=(0.66, 1.2),
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+            ax.annotate('PyTorch faster', xy=(0.8, 0.75),  # xycoords='axes fraction',
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+        else:
+            ax.annotate('DaCe faster', xy=(0.66, 1.06),
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+            ax.annotate('PyTorch faster', xy=(0.8, 0.92),  # xycoords='axes fraction',
+                        ha='center', va='center', fontsize=8, alpha=0.7)
+
+        ax.set_ylabel('Relative runtime')
+        ax.set_xlabel('Hidden size')
+        ax.set_title(pass_name)
+        ax.set_xticks(range(len(df.index)), df.index, minor=False)
+        ax.grid(axis='y', linestyle='--', linewidth=0.5, alpha=0.5)
+        if 'backward' in pass_name:
+            ax.legend(loc='upper left')
+        else:
+            ax.get_legend().remove()
+
+    fig.tight_layout()
+    plt.savefig(PLOT_FOLDER / 'thesis' / 'gcn_summary.pdf', bbox_inches='tight')
+    fig.show()
 
 
 def plot_gat_bwd():

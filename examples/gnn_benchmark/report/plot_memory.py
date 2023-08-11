@@ -115,8 +115,8 @@ def plot_gcn_caching_comparison():
     plt.xticks(range(len(speedup_df.index)), [str(x) for x in speedup_df.index])
     # ax.set_xticks([str(x) for x in mem_df.index])
     # Remove top border.
-    ax2.spines['top'].set_visible(False)
-    ax.spines['top'].set_visible(False)
+    # ax2.spines['top'].set_visible(False)
+    # ax.spines['top'].set_visible(False)
     # Add one legend for both.
     ax.set_xlabel('Output feature size')
     ax2.set_xlabel('Output feature size')
