@@ -6,7 +6,7 @@ from examples.gnn_benchmark.report.plot_common import read_many_dfs, PLOT_FOLDER
 
 def main():
     plot_gcn_memory()
-    # plot_gat_memory()
+    plot_gat_memory()
     plot_gcn_caching_comparison()
 
 
@@ -46,8 +46,8 @@ def plot_gcn_memory():
 
 def plot_gat_memory():
     # datalist = ['04.08.08.57-gat-ogbn-arxiv-233383-memory.csv']
-    # datalist = ['01.08.13.57-gat-ogbn-arxiv-228542-memory.csv']
-    datalist = ['04.08.10.18-gat-ogbn-arxiv-233429-memory.csv']
+    datalist = ['01.08.13.57-gat-ogbn-arxiv-228542-memory.csv']
+    # datalist = ['04.08.10.18-gat-ogbn-arxiv-233429-memory.csv']
     df, _ = read_many_dfs(datalist, backward=False)
     df.drop_duplicates(subset=['Name', 'Size'], inplace=True)
 
@@ -91,7 +91,7 @@ def plot_gcn_caching_comparison():
     speedup_df = df.pivot(index='Size', columns='Name', values='Median')
     speedup_df['dace_csc_adapt_cached'] = speedup_df['dace_csc_adapt'] / speedup_df['dace_csc_adapt_cached']
 
-    ax = plt.figure(figsize=(6, 3)).gca()
+    ax = plt.figure(figsize=(5, 2.5)).gca()
     # Plot speedup and memory use on the same plot.
 
     # Make the line a bit transparent but not the marker.
@@ -99,15 +99,15 @@ def plot_gcn_caching_comparison():
             linestyle='--', marker='x', markeredgecolor=colors.to_rgba('tab:orange', 1.0),
             color=colors.to_rgba('tab:orange', 0.5))
     # use left y axis for memory use.
-    ax.set_ylabel('Relative memory use')
+    ax.set_ylabel('Relative runtime\nRelative memory use')
     ax.set_ylim(0.0, 1.4)
 
     # Make twin axes aligned.
-    ax2 = ax.twinx()
-    ax2.set_ylabel('Speedup')
-    ax2.set_ylim(0.0, 1.4)
+    # ax2 = ax.twinx()
+    # ax2.set_ylabel('Speedup')
+    # ax2.set_ylim(0.0, 1.4)
 
-    ax2.plot(range(len(speedup_df.index)), speedup_df['dace_csc_adapt_cached'], label='Speedup', marker='o',
+    ax.plot(range(len(speedup_df.index)), speedup_df['dace_csc_adapt_cached'], label='Speedup', marker='o',
             linestyle=':', markeredgecolor=colors.to_rgba('tab:blue', 1.0),
             color=colors.to_rgba('tab:blue', 0.5))
     # ax.set_xscale('log')
@@ -116,13 +116,15 @@ def plot_gcn_caching_comparison():
     # ax.set_xticks([str(x) for x in mem_df.index])
     # Remove top border.
     # ax2.spines['top'].set_visible(False)
-    # ax.spines['top'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    # Remove right border.
+    ax.spines['right'].set_visible(False)
     # Add one legend for both.
     ax.set_xlabel('Output feature size')
-    ax2.set_xlabel('Output feature size')
-    lines_labels = [ax.get_legend_handles_labels() for ax in (ax, ax2)]
-    lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
-    plt.legend(lines, labels, loc='lower right')
+    # ax2.set_xlabel('Output feature size')
+    # lines_labels = [ax.get_legend_handles_labels() for ax in (ax, ax2)]
+    # lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
+    plt.legend(loc='lower right')
 
     plt.tight_layout()
     plt.savefig(PLOT_FOLDER / 'thesis' / 'gcn_caching_comparison.pdf', bbox_inches='tight')
