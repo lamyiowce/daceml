@@ -1,0 +1,11 @@
+Name,Model,Size,Forward,Forward with grads,Backward
+coo_cached:coo_cached_feat_only,gat,8,52085972,53427212,55671020
+coo_cached_feat_and_alpha,gat,8,52085972,53257076,55910564
+coo_cached:coo_cached_feat_only,gat,16,54739668,56932620,61829868
+coo_cached_feat_and_alpha,gat,16,54739668,56762484,62069412
+coo_cached:coo_cached_feat_only,gat,32,60047060,63943436,74147564
+coo_cached_feat_and_alpha,gat,32,60047060,63773300,74387108
+coo_cached:coo_cached_feat_only,gat,64,70661844,77965068,98782956
+coo_cached_feat_and_alpha,gat,64,70661844,77794932,99022500
+coo_cached:coo_cached_feat_only,gat,128,91891412,106008332,148053740
+coo_cached_feat_and_alpha,gat,128,91891412,105838196,148293284

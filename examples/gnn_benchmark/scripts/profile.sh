@@ -18,12 +18,13 @@ export ORT_RELEASE=/users/jbazinsk/onnxruntime-daceml-patched
 export DACE_default_build_folder=./.dacecache-ncompute
 export DACE_compiler_cuda_default_block_size=64,8,1
 export DACE_compiler_cuda_max_concurrent_streams=-1
-model=gcn_single_layer
+model=gat_single_layer
 backward=--backward
 
-format=csc_adapt_cached
-dataset=flickr
-hidden=256
-python main.py --mode dry --data $dataset --hidden $hidden --model $model --impl $format --torch none $backward --no-gen-code
+format=coo_cached
+dataset=pubmed
+hidden=16
+
+python main.py --mode dry --data $dataset --hidden $hidden --model $model --impl $format --torch none $backward
 
 echo "Done :)"

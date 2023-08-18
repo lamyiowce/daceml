@@ -1,0 +1,3 @@
+# HOST ault23.cscs.ch, GPU Tesla V100-PCIE-16GB
+Name,Model,Size,Num Features,Num Layers,Min,Mean,Median,Stdev,Max
+torch_dgnn_compiled,gat,64,500,2,2.440826873779297,2.4615065155029296,2.443673629760742,0.0370828063969354,2.5467900085449218

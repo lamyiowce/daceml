@@ -1,0 +1,5 @@
+Name,Model,Size,Forward,Forward with grads,Backward
+csc_adapt_cached,gcn,128,4593125780,5953641380,2626310220
+csc_adapt_cached,gcn,256,5190504852,6789576612,3580886092
+csc_adapt_cached,gcn,512,4508847796,5463072436,5012925516
+csc_adapt_cached,gcn,1024,5941671604,7850120884,8354116684

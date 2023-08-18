@@ -15,14 +15,15 @@ source /users/jbazinsk/miniconda3/bin/activate
 conda activate torch2
 module load cuda/11.8.0
 export LIBRARY_PATH=/users/jbazinsk/miniconda3/envs/torch2/lib/:$LIBRARY_PATH
+export PYTHONPATH=/users/jbazinsk/daceml:$PYTHONPATH
 
 
 do_test=
 
 model=gat
-datasets="ogbn-arxiv pubmed"
-modes="csr dgnn_compiled"
-hidden_sizes="8 16"
+datasets="pubmed"
+modes="edge_list_compiled"
+hidden_sizes="16"
 input_sizes="" # 128 is computed anyway.
 
 

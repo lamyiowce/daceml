@@ -11,7 +11,7 @@ presentation = False
 
 def main():
     # 23.07
-    # plot_gcn_schemes()
+    plot_gcn_schemes()
 
     # 18.07 Thesis
     plot_gcn_thesis()

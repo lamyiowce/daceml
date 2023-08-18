@@ -1,0 +1,7 @@
+Name,Model,Size,Forward,Forward with grads,Backward
+coo_cached:coo_cached_feat_only,gat,8,234023692,299859712,305197052
+coo_cached_feat_and_alpha,gat,8,234023692,265796692,311623052
+coo_cached:coo_cached_feat_only,gat,16,279850252,368534272,419697916
+coo_cached_feat_and_alpha,gat,16,279850252,334471252,426123916
+coo_cached:coo_cached_feat_only,gat,32,371503372,505883392,648699644
+coo_cached_feat_and_alpha,gat,32,371503372,471820372,655125644
