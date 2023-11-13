@@ -8,9 +8,8 @@ import numpy as np
 import torch
 import torch_geometric
 from torch_geometric.transforms import GCNNorm
-from torch_geometric.nn.conv.cugraph import CuGraphModule
-from torch_geometric.nn import FusedGATConv
 
+import dgl.nn.pytorch.conv
 import examples.gnn_benchmark.torch_util
 from examples.gnn_benchmark import models
 from examples.gnn_benchmark.benchmark import do_benchmark
@@ -112,6 +111,7 @@ def main():
 
     if 'cugraph' in args.torch:
         from torch_geometric.nn import CuGraphGATConv
+        from torch_geometric.nn.conv.cugraph import CuGraphModule
         assert 'gat' in args.model
         graph_inputs = CuGraphModule.to_csc(data.edge_index)
         inputs = (copy_and_set_grad(data.x, requires_grad=args.input_grad), *graph_inputs)
@@ -129,6 +129,14 @@ def main():
     elif 'csr' in args.torch:
         inputs = examples.gnn_benchmark.torch_util.make_torch_csr_args(
             data, input_grad=args.input_grad)
+    elif 'dgl' in args.torch:
+        inputs = examples.gnn_benchmark.torch_util.convert_pyg_graph_to_dgl_graph(
+            data, input_grad=args.input_grad)
+        if 'gat' in args.model:
+            model_kwargs = {'gat_layer': dgl.nn.pytorch.conv.GATConv}
+        elif 'gcn' in args.model:
+            model_kwargs = {'implementation': 'dgl'}
+
     else:
         raise ValueError(f'Unknown torch impl {args.torch}.')
 

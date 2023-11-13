@@ -1,3 +1,10 @@
+import os
+from typing import Literal
+
+os.environ["DGLBACKEND"] = "pytorch"
+import dgl
+import dgl.nn
+import dgl.data
 import torch
 from torch import nn
 from torch_geometric.nn import GCNConv, GATConv
@@ -12,19 +19,32 @@ try:
 except ImportError:
     FusedGATConv = None
 
+GCNCONV_IMPLEMENTATIONS = {
+    "pyg": GCNConv,
+    "dgl": dgl.nn.GraphConv,
+}
+
+GCNCONV_ARGS = {
+    "pyg": {"normalize": False, "add_self_loops": False},
+    "dgl": {"norm": "none", "allow_zero_in_degree": False},
+}
+
 
 class GCNSingleLayer(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes, num_layers,
                  compute_input_grad=False,
-                 bias=True, bias_init=torch.nn.init.zeros_):
+                 bias=True, bias_init=torch.nn.init.zeros_,
+                 implementation: Literal["pyg", "dgl"] = "pyg"):
         del num_classes
         del num_layers
         super().__init__()
-        self.conv = GCNConv(num_node_features,
-                            num_hidden_features,
-                            normalize=False,
-                            add_self_loops=False,
-                            bias=bias)
+
+        layer = GCNCONV_IMPLEMENTATIONS[implementation]
+        layer_args = GCNCONV_ARGS[implementation]
+        self.conv = layer(num_node_features,
+                          num_hidden_features,
+                          **layer_args,
+                          bias=bias)
         if bias:
             bias_init(self.conv.bias)
         self.conv.is_first = not compute_input_grad
@@ -38,17 +58,19 @@ class GCNSingleLayer(torch.nn.Module):
 class GCN(torch.nn.Module):
     def __init__(self, num_node_features, num_hidden_features, num_classes, num_layers,
                  compute_input_grad=False,
-                 bias=True, bias_init=torch.nn.init.zeros_):
+                 bias=True, bias_init=torch.nn.init.zeros_, implementation="pyg"):
         super().__init__()
         self.convs = torch.nn.ModuleList()
+        self.implementation = implementation
+        layer = GCNCONV_IMPLEMENTATIONS[implementation]
+        layer_args = GCNCONV_ARGS[implementation]
         for i in range(num_layers):
             in_channels = num_node_features if i == 0 else num_hidden_features
             out_channels = num_classes if i == num_layers - 1 else num_hidden_features
-            conv = GCNConv(in_channels,
-                           out_channels,
-                           normalize=False,
-                           add_self_loops=False,
-                           bias=bias)
+            conv = layer(in_channels,
+                         out_channels,
+                         **layer_args,
+                         bias=bias)
             if bias:
                 bias_init(conv.bias)
             if compute_input_grad:
@@ -61,9 +83,17 @@ class GCN(torch.nn.Module):
 
     def forward(self, x, *edge_info):
         for conv in self.convs[:-1]:
-            x = conv(x, *edge_info)  # Size: `hidden size`
+            x = self.call_layer(conv, x, *edge_info)  # Size: `hidden size`
             x = self.act(x)  # ReLU
-        x = self.convs[-1](x, *edge_info)  # Size: `num_classes`
+        x = self.call_layer(self.convs[-1], x, *edge_info)  # Size: `num_classes`
+        return x
+
+    def call_layer(self, layer, x, *edge_info):
+        if self.implementation == "dgl":
+            graph = edge_info[0]
+            x = layer(graph, x)
+        else:
+            x = layer(x, *edge_info)
         return x
 
 
@@ -78,6 +108,15 @@ class LinearModel(torch.nn.Module):
         return x
 
 
+def make_gat_args(gat_layer, heads: int):
+    gat_args = {
+        GATConv: {"add_self_loops": False, "heads": heads},
+        CuGraphGATConv: {"heads": heads},
+        dgl.nn.GATConv: {"allow_zero_in_degree": True, "num_heads": heads},
+    }
+    return gat_args[gat_layer]
+
+
 class GAT(torch.nn.Module):
     def __init__(self,
                  num_node_features,
@@ -89,39 +128,31 @@ class GAT(torch.nn.Module):
                  bias=True,
                  bias_init=torch.nn.init.zeros_):
         super().__init__()
-        if gat_layer == CuGraphGATConv:
-            additional_kwargs = {}
-        else:
-            additional_kwargs = {"add_self_loops": False}
-
         self.convs = torch.nn.ModuleList()
 
         if num_layers == 1:
             self.convs.append(gat_layer(num_node_features,
                                         num_classes,
-                                        heads=1,
                                         bias=bias,
-                                        **additional_kwargs))
+                                        **make_gat_args(gat_layer, heads=1)))
         else:
             self.convs.append(gat_layer(num_node_features,
                                         features_per_head,
-                                        heads=num_heads,
                                         bias=bias,
-                                        **additional_kwargs))
+                                        **make_gat_args(gat_layer, heads=num_heads)))
 
             for i in range(num_layers - 2):
                 conv = gat_layer(features_per_head * num_heads,
-                               features_per_head,
-                               heads=num_heads,
-                               bias=bias,
-                               **additional_kwargs)
+                                 features_per_head,
+                                 heads=num_heads,
+                                 bias=bias,
+                                 **make_gat_args(gat_layer, heads=num_heads))
                 self.convs.append(conv)
 
             self.convs.append(gat_layer(features_per_head * num_heads,
                                         num_classes,
-                                        heads=1,
                                         bias=bias,
-                                        **additional_kwargs))
+                                        **make_gat_args(gat_layer, heads=1)))
         if bias:
             for layer in self.convs:
                 bias_init(layer.bias)
@@ -129,9 +160,18 @@ class GAT(torch.nn.Module):
 
     def forward(self, x, *edge_info):
         for conv in self.convs[:-1]:
-            x = conv(x, *edge_info)  # Size: `hidden size`
+            x = self.call_layer(conv, x, *edge_info)  # Size: `hidden size`
             x = self.act(x)  # ReLU
-        x = self.convs[-1](x, *edge_info)  # Size: `num_classes`
+        x = self.call_layer(self.convs[-1], x, *edge_info)  # Size: `num_classes`
+        return x
+
+    def call_layer(self, layer, x, *edge_info):
+        if isinstance(layer, dgl.nn.GATConv):
+            graph = edge_info[0]
+            x = layer(graph, x)  # num_nodes x num_heads x features_per_head
+            x = x.flatten(start_dim=1)  # num_nodes x (num_heads * features_per_head)
+        else:
+            x = layer(x, *edge_info)
         return x
 
 
