@@ -11,10 +11,11 @@ presentation = False
 
 def main():
     # 23.07
-    plot_gcn_schemes()
+    # plot_gcn_schemes()
 
     # 18.07 Thesis
-    plot_gcn_thesis()
+    # plot_gcn_thesis('PyG')
+    # plot_gcn_thesis('DGL')
     # plot_compare_cutoffs()
 
     # 06.07 plot GAT bwd
@@ -158,51 +159,70 @@ def plot_gcn_schemes():
                 #               skip_timestamp=True)
 
 
-def plot_gcn_thesis():
+def plot_gcn_thesis(against: str):
     drop_names = ['torch_edge_list', 'dace_csc_coo_adapt_cached-0.9']
-    data_files = {
+    dace_data_files = {
         "OGB Arxiv": [
-            '25.07.07.19-pyg-gcn-ogbn-arxiv-222314.csv',
-            # '21.07.12.51-pyg-gcn-ogbn-arxiv-219071.csv',
             '24.07.21.59-gcn-ogbn-arxiv-221963.csv',
-            # '21.07.10.55-pyg-gcn-ogbn-arxiv-219003.csv',
-            # '25.07.11.49-gcn-ogbn-arxiv-222541.csv',
             '25.07.12.44-gcn-ogbn-arxiv-222570.csv',
         ],
         "Cora": [
-            # '21.07.10.53-pyg-gcn-cora-219003.csv',
             '24.07.22.27-gcn-cora-221963.csv',
-            '25.07.07.26-pyg-gcn-cora-222314.csv',
             '25.07.12.20-gcn-cora-222570.csv',
-            # '21.07.12.50-pyg-gcn-cora-219071.csv',
-            # '18.07.15.14-gcn-cora-216728.csv',
-            # '20.07.13.15-gcn-cora-218300.csv',
-            # '19.07.11.57-pyg-gcn-cora-217423.csv',
         ],
         "Citeseer": [
-            '25.07.07.32-pyg-gcn-citeseer-222314.csv',
-            '25.07.07.32-pyg-gcn-citeseer-222314.csv',
             '25.07.13.31-gcn-citeseer-222570.csv',
             '27.07.07.41-gcn-citeseer-224007.csv',
         ],
         "Pubmed": [
-            '25.07.07.28-pyg-gcn-pubmed-222314.csv',
-            '25.07.07.28-pyg-gcn-pubmed-222314.csv',
             '25.07.13.08-gcn-pubmed-222570.csv',
             '27.07.07.36-gcn-pubmed-224007.csv',
         ],
         "Flickr": [
             '25.07.07.18-gcn-flickr-222313.csv',
             '25.07.12.21-gcn-flickr-222571.csv',
+        ],
+    }
+
+    torch_data_files = {
+        "OGB Arxiv": [
+            '25.07.07.19-pyg-gcn-ogbn-arxiv-222314.csv',
+        ],
+        "Cora": [
+            '25.07.07.26-pyg-gcn-cora-222314.csv',
+        ],
+        "Citeseer": [
+            '25.07.07.32-pyg-gcn-citeseer-222314.csv',
+            '25.07.07.32-pyg-gcn-citeseer-222314.csv',
+        ],
+        "Pubmed": [
+            '25.07.07.28-pyg-gcn-pubmed-222314.csv',
+            '25.07.07.28-pyg-gcn-pubmed-222314.csv',
+        ],
+        "Flickr": [
             '25.07.07.35-pyg-gcn-flickr-222314.csv',
         ],
-        # "Reddit": [
-        #     '25.07.07.46-gcn-reddit-222313.csv',
-        #     '25.07.07.39-pyg-gcn-reddit-222314.csv',
-        #     '25.07.12.46-gcn-reddit-222571.csv',
-        #     '04.08.14.46-gcn-reddit-233538.csv',
-        # ]
     }
+
+    dgl_data_files = {
+        "OGB Arxiv": [
+            '13.11.21.07-pyg-gcn-ogbn-arxiv-296217.csv',  # DGL
+        ],
+        "Cora": [
+            '13.11.21.05-pyg-gcn-cora-296217.csv',  # DGL
+        ],
+        "Citeseer": [
+            '13.11.21.10-pyg-gcn-citeseer-296217.csv',  # DGL
+        ],
+        "Pubmed": [
+            '13.11.21.09-pyg-gcn-pubmed-296217.csv',  # DGL
+        ],
+        "Flickr": [
+            '13.11.21.12-pyg-gcn-flickr-296217.csv',  # DGL
+        ],
+    }
+
+    baseline_data_files = torch_data_files if against == 'PyG' else dgl_data_files
 
     speedup_log = open('speedup_log_gcn.txt', 'w')
 
@@ -218,11 +238,12 @@ def plot_gcn_thesis():
     summary_bwd = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}, 256: {}, 512: {}, 1024: {}}
     # summary_bwd_std = {8: {}, 16: {}, 32: {}, 64: {}, 128: {}}
     for ax, name in zip(np.reshape(axs, -1), ['Cora', 'Citeseer', 'Pubmed', 'Flickr', 'OGB Arxiv']):
-        datalist = data_files[name]
+        datalist = dace_data_files[name] + baseline_data_files[name]
         if len(datalist) > 0:
             df, bwd_df = read_many_dfs(filenames=datalist)
-            # plot_backward(df=df, bwd_df=bwd_df, ax=ax, tag='GCN ' + name, figsize=(12, 3.8), subplot_name=name,
-            #               plot_title=f"GCN, {name}", drop_names=drop_names, skip_timestamp=True)
+            plot_backward(df=df, bwd_df=bwd_df, ax=ax, tag='GCN ' + name, figsize=(12, 3.8),
+                          subplot_name=name,
+                          plot_title=f"GCN, {name}", drop_names=drop_names, skip_timestamp=True)
 
             dataset_speedups = {'fwd': [], 'bwd': [], 'formats_fwd': [], 'formats_bwd': []}
             for pass_name, data in [('fwd', df), ('bwd', bwd_df)]:
@@ -234,9 +255,11 @@ def plot_gcn_thesis():
                     dace_time = dace_df[dace_df['Size'] == size]['Median'].min()
                     dace_max_time = dace_df[dace_df['Size'] == size]['Median'].max()
 
-                    coo = dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == 'dace_coo_adapt_cached')][
+                    coo = dace_df[
+                        (dace_df['Size'] == size) & (dace_df['Name'] == 'dace_coo_adapt_cached')][
                         'Median'].max()
-                    csc = dace_df[(dace_df['Size'] == size) & (dace_df['Name'] == 'dace_csc_adapt_cached')][
+                    csc = dace_df[
+                        (dace_df['Size'] == size) & (dace_df['Name'] == 'dace_csc_adapt_cached')][
                         'Median'].min()
                     dataset_speedups[f'formats_{pass_name}'].append(dace_max_time / dace_time)
                     if size not in compare_formats_fwd:
@@ -279,11 +302,11 @@ def plot_gcn_thesis():
 
     # Compute geomean, max and min speedup.
     for pass_name, speedups in all_speedups.items():
-        print(f"ALL DATASETS {pass_name} geomean: {stats.gmean(speedups)}")
+        print(f"{against} ALL DATASETS {pass_name} geomean: {stats.gmean(speedups)}")
         speedup_log.write(f"{pass_name} geomean: {stats.gmean(speedups)}\n")
-        print(f"ALL DATASETS {pass_name} max: {max(speedups)}")
+        print(f"{against} ALL DATASETS {pass_name} max: {max(speedups)}")
         speedup_log.write(f"{pass_name} max: {max(speedups)}\n")
-        print(f"ALL DATASETS {pass_name} min: {min(speedups)}")
+        print(f"{against} ALL DATASETS {pass_name} min: {min(speedups)}")
         speedup_log.write(f"{pass_name} min: {min(speedups)}\n")
 
     dataset_to_size = {
@@ -323,7 +346,8 @@ def plot_gcn_thesis():
             df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='-')
         else:
             df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='--')
-            df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
+            df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x',
+                                               markersize=5,
                                                linewidth=1, label='Geomean')
         ax.plot([0, len(df.index)], [1, 1], color='black', linewidth=1, linestyle=':')
         ax.set_xlim(-0.1, len(df.index) - 0.9)
@@ -360,7 +384,7 @@ def plot_gcn_thesis():
     #                       plot_title=f"GCN, {name}", drop_names=drop_names,
     #                       sizes=[8, 32, 128, 512])
 
-    fig, axs = plt.subplots(ncols=2, sharey='all', figsize=(8, 3.5))
+    fig, axs = plt.subplots(ncols=2, sharey='all', figsize=(7, 4))
     for pass_name, speedups, ax in [('Forward', summary_fwd, axs[0]),
                                     ('Forward + backward', summary_bwd, axs[1])]:
         df = pd.DataFrame(speedups)
@@ -375,24 +399,26 @@ def plot_gcn_thesis():
             df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='-')
         else:
             df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='--')
-            df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
+            df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x',
+                                               markersize=5,
                                                linewidth=1, label='Geomean')
         ax.plot([0, len(df.index)], [1, 1], color='black', linewidth=1, linestyle=':')
         ax.set_xlim(-0.1, len(df.index) - 0.9)
-        ax.set_yticks(np.arange(0.5, 3.5, 0.25))
-        # plt.xticks([0, 1, 2, 3], ['None', 'Features', 'Features and\nnode attention',
-        #                           'Features, edge\nweights and mask'], rotation=0)
-        # Add Annotations COO faster, CSC faster above and below the 1.0 line
-        if 'backward' not in pass_name:
-            ax.annotate('DaCe faster', xy=(0.66, 1.2),
-                        ha='center', va='center', fontsize=8, alpha=0.7)
-            ax.annotate('PyTorch faster', xy=(0.8, 0.75),  # xycoords='axes fraction',
-                        ha='center', va='center', fontsize=8, alpha=0.7)
-        else:
-            ax.annotate('DaCe faster', xy=(0.66, 1.06),
-                        ha='center', va='center', fontsize=8, alpha=0.7)
-            ax.annotate('PyTorch faster', xy=(0.8, 0.92),  # xycoords='axes fraction',
-                        ha='center', va='center', fontsize=8, alpha=0.7)
+        if against == 'PyG':
+            ax.set_yticks(np.arange(0.5, 3.5, 0.25))
+
+        text_coords = {
+            ("Forward + backward", "PyG"): ((0.1, 1.06), (0.1, 0.75)),
+            ("Forward + backward", "DGL"): ((0.1, 1.93), (0.1, 0.6)),
+            ("Forward", "PyG"): ((0.1, 1.2), (0.1, 0.75)),
+            ("Forward", "DGL"): ((0.1, 2.25), (0.1, 0.6)),
+        }
+
+        dace_coords, other_coords = text_coords[(pass_name, against)]
+        ax.annotate('DaCe faster', xy=dace_coords,
+                    ha='left', va='center', fontsize=8, alpha=0.7)
+        ax.annotate(f'{against} faster', xy=other_coords,  # xycoords='axes fraction',
+                    ha='left', va='center', fontsize=8, alpha=0.7)
 
         ax.set_ylabel('Relative runtime')
         ax.set_xlabel('Hidden size')
@@ -405,8 +431,9 @@ def plot_gcn_thesis():
             ax.get_legend().remove()
 
     fig.tight_layout()
-    plt.savefig(PLOT_FOLDER / 'thesis' / 'gcn_summary.pdf', bbox_inches='tight')
+    plt.savefig(PLOT_FOLDER / 'thesis' / f'gcn_{against}_summary.pdf', bbox_inches='tight')
     fig.show()
+
 
 
 def plot_gat_bwd():
@@ -440,17 +467,20 @@ def plot_gat_bwd():
             '27.07.12.18-pyg-gat-ogbn-arxiv-224204.csv',
             '04.08.08.57-gat-ogbn-arxiv-233383.csv',
             '31.07.16.48-gat-ogbn-arxiv-227723.csv',
+            '13.11.21.08-pyg-gat-ogbn-arxiv-296218.csv',  # DGL
         ],
         "Cora": [
             '27.07.12.23-pyg-gat-cora-224204.csv',
             '27.07.12.52-pyg-gat-cora-224205.csv',
             '04.08.08.37-gat-cora-233383.csv',
             '31.07.15.58-gat-cora-227723.csv',
+            '13.11.21.07-pyg-gat-cora-296218.csv',  # DGL
         ],
         "Citeseer": [
             '27.07.13.00-pyg-gat-citeseer-224205.csv',
             '04.08.08.37-gat-citeseer-233384.csv',
             '31.07.15.59-gat-citeseer-227724.csv',
+            '13.11.21.13-pyg-gat-citeseer-296218.csv',  # DGL
         ],
         "Pubmed": [
             '04.08.21.28-pyg-gat-pubmed-233721.csv',
@@ -460,6 +490,7 @@ def plot_gat_bwd():
             '27.07.12.55-pyg-gat-pubmed-224205.csv',
             '04.08.08.37-gat-pubmed-233382.csv',
             '31.07.15.56-gat-pubmed-227722.csv',
+            '13.11.21.11-pyg-gat-pubmed-296218.csv',  # DGL
         ],
         "Flickr": [
             '27.07.13.46-pyg-gat-flickr-224242.csv',
@@ -467,6 +498,7 @@ def plot_gat_bwd():
             '27.07.12.33-pyg-gat-flickr-224204.csv',
             '04.08.08.58-gat-flickr-233382.csv',
             '31.07.16.47-gat-flickr-227722.csv',
+            '13.11.21.14-pyg-gat-flickr-296218.csv',  # DGL
         ],
         # "Reddit": [
         #     '27.07.13.10-pyg-gat-reddit-224205.csv',
@@ -481,9 +513,9 @@ def plot_gat_bwd():
             #               col_order=col_order,
             #               plot_title=f"GAT COMPARISON, {name}", drop_names=drop_torch_names,
             #               skip_timestamp=True, labels=labels_compare, figsize=(7, 6))
-            # plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
-            #               plot_title=f"GAT BASELINES, {name}", drop_names=drop_dace_names,
-            #               skip_timestamp=True, labels=labels_baselines, figsize=(7, 6))
+            plot_backward(df=df, bwd_df=bwd_df, tag='GAT ' + name, filter_y=sizes,
+                          plot_title=f"GAT BASELINES, {name}", drop_names=drop_dace_names,
+                          skip_timestamp=True, labels=labels_baselines, figsize=(7, 6))
 
     speedup_log = open('speedup_log_gat.txt', 'w')
 
@@ -601,7 +633,8 @@ def plot_gat_bwd():
             df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='-')
         else:
             df.plot(ax=ax, alpha=0.7, marker='o', markersize=4, linewidth=1, linestyle='--')
-            df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x', markersize=5,
+            df.apply(stats.gmean, axis=1).plot(ax=ax, alpha=0.7, color='black', marker='x',
+                                               markersize=5,
                                                linewidth=1, label='Geomean')
         ax.plot([0, len(df.index)], [1, 1], color='black', linewidth=1, linestyle=':')
         ax.set_xlim(-0.1, len(df.index) - 0.9)

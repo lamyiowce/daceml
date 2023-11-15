@@ -173,6 +173,7 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
         'torch_csr': 'Torch CSR',
         'torch_edge_list': 'Torch Edge List',
         'compiled_torch_edge_list': 'Torch Edge List (compiled)',
+        'torch_dgl': 'DGL'
     }
     default_label_map.update(label_map or {})
     labels = [default_label_map.get(name, name) for name in df.columns]

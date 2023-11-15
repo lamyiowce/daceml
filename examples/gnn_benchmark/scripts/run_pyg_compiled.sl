@@ -21,9 +21,9 @@ export PYTHONPATH=/users/jbazinsk/daceml:$PYTHONPATH
 do_test=
 
 model=gat
-datasets="pubmed"
-modes="edge_list_compiled"
-hidden_sizes="16"
+datasets="cora ogbn-arxiv pubmed citeseer flickr reddit"
+modes="dgl"
+hidden_sizes="8 16 32 64 128"
 input_sizes="" # 128 is computed anyway.
 
 
