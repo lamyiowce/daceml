@@ -215,7 +215,10 @@ def make_plot(full_df, name, plot_column, label_map=None, bwd_df=None, legend_ou
     if do_saving:
         plt.tight_layout()
         # put today's date in the filename
-        clean_name = name.replace(',', '').replace('+', '').replace('  ', ' ').replace(':', '')
+        clean_name = (
+            name.replace(',', '').replace('+', '')
+            .replace('  ', ' ').replace(':', '').replace(' ', '_')
+        )
 
         if skip_timestamp:
             path = PLOT_FOLDER / 'thesis' / f'{clean_name}.pdf'
